@@ -4,7 +4,7 @@ import ReactECharts from 'echarts-for-react';
 import { ChartType } from '../types';
 import { buildChartOption } from '../services/echartsOptionBuilder';
 import { useTheme } from '../contexts/ThemeContext';
-import { MoreHorizontal, Maximize2, GripHorizontal, Filter } from 'lucide-react';
+import { GripHorizontal, Filter } from 'lucide-react';
 
 const Visualization = ({ config, dataset, isActive, isEditMode }) => {
     const { theme } = useTheme();
@@ -155,12 +155,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode }) => {
                         </div>
                     </div>
                 </div>
-                {isEditMode && (
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="p-1.5 text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all"><Maximize2 size={14} /></button>
-                        <button className="p-1.5 text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all"><MoreHorizontal size={14} /></button>
-                    </div>
-                )}
+
             </div>
             <div className="flex-1 min-h-0 relative">
                 {renderVisual()}

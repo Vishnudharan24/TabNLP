@@ -101,6 +101,9 @@ const App = () => {
         const dataset = datasets.find(d => d.id === selectedDatasetId) || datasets[0];
         if (!dataset || !activePageId) return;
 
+        const name = prompt('Enter a name for the new visual:', 'New Visual');
+        if (name === null) return; // user cancelled
+
         const dim = dataset.columns.find(c => c.type === 'string')?.name || '';
         const measure = dataset.columns.find(c => c.type === 'number')?.name || '';
 
@@ -112,7 +115,7 @@ const App = () => {
             id: Math.random().toString(36).substr(2, 9),
             pageId: activePageId,
             datasetId: dataset.id,
-            title: 'New Visual',
+            title: name.trim() || 'New Visual',
             type: bestType,
             dimension: dim,
             measures: [measure],
