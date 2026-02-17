@@ -39,6 +39,56 @@ function getChartIcon(type) {
     return BarChart;
 }
 
+const CHART_DISPLAY_NAMES = {
+    BAR_CLUSTERED: 'Bar',
+    BAR_STACKED: 'Stacked',
+    BAR_PERCENT: '% Bar',
+    BAR_HORIZONTAL: 'H. Bar',
+    BAR_HORIZONTAL_STACKED: 'H. Stack',
+    BAR_HORIZONTAL_PERCENT: 'H. %',
+    BAR_WATERFALL: 'Waterfall',
+    BAR_RANGE: 'Range',
+    LINE_SMOOTH: 'Smooth',
+    LINE_STEP: 'Stepped',
+    LINE_STRAIGHT: 'Line',
+    LINE_DASHED: 'Dashed',
+    LINE_MULTI_AXIS: 'Multi Axis',
+    LINE_AREA_MIX: 'Area Mix',
+    AREA_SMOOTH: 'Area',
+    AREA_STEP: 'Step Area',
+    AREA_STACKED: 'Stk Area',
+    AREA_PERCENT: '% Area',
+    AREA_GRADIENT: 'Gradient',
+    AREA_REVERSE: 'Reverse',
+    PIE: 'Pie',
+    DONUT: 'Donut',
+    PIE_SEMI: 'Half Pie',
+    DONUT_SEMI: 'Half Donut',
+    ROSE: 'Rose',
+    SUNBURST: 'Sunburst',
+    RADIAL_BAR: 'Radial',
+    RADAR: 'Radar',
+    SCATTER: 'Scatter',
+    BUBBLE: 'Bubble',
+    SCATTER_LINE: 'Sct Line',
+    TREEMAP: 'Treemap',
+    HEATMAP: 'Heatmap',
+    COMBO_BAR_LINE: 'Combo',
+    COMBO_STACKED_LINE: 'Stk Combo',
+    COMBO_AREA_LINE: 'Area+Line',
+    KPI_SINGLE: 'KPI',
+    KPI_PROGRESS: 'Progress',
+    KPI_BULLET: 'Bullet',
+    TABLE: 'Table',
+    CARD_LIST: 'Cards',
+    GAUGE: 'Gauge',
+    SPARKLINE: 'Sparkline',
+};
+
+function getChartName(type) {
+    return CHART_DISPLAY_NAMES[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).slice(0, 10);
+}
+
 const ALL_CHART_TYPES = Object.values(ChartType);
 
 const OPERATORS_MAP = {
@@ -159,10 +209,11 @@ const DataPanel = ({
                                                 <button
                                                     key={rec.type}
                                                     onClick={() => onUpdateConfig({ type: rec.type })}
-                                                    title={rec.reason}
-                                                    className={`aspect-square flex flex-col items-center justify-center rounded-xl border transition-all relative ${activeChartConfig?.type === rec.type ? 'bg-gray-800 dark:bg-gray-200 border-gray-800 dark:border-gray-200 text-white dark:text-gray-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'}`}
+                                                    className={`group/tip py-2 flex flex-col items-center justify-center gap-1 rounded-xl border transition-all relative ${activeChartConfig?.type === rec.type ? 'bg-gray-800 dark:bg-gray-200 border-gray-800 dark:border-gray-200 text-white dark:text-gray-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'}`}
                                                 >
+                                                    <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-800 text-[10px] font-medium px-2 py-1 shadow-lg opacity-0 scale-90 group-hover/tip:opacity-100 group-hover/tip:scale-100 transition-all duration-150 z-50">{getChartName(rec.type)}</span>
                                                     <Icon size={16} />
+                                                    <span className="text-[7px] font-semibold leading-tight truncate w-full text-center px-0.5">{getChartName(rec.type)}</span>
                                                     {rec.score >= 85 && <span className="absolute top-0.5 right-0.5 text-amber-500 text-[8px]">★</span>}
                                                 </button>
                                             );
@@ -189,11 +240,11 @@ const DataPanel = ({
                                                 <button
                                                     key={type}
                                                     onClick={() => onUpdateConfig({ type })}
-                                                    title={type.replace(/_/g, ' ')}
-                                                    className={`aspect-square flex flex-col items-center justify-center rounded-xl border transition-all relative ${activeChartConfig?.type === type ? 'bg-gray-800 dark:bg-gray-200 border-gray-800 dark:border-gray-200 text-white dark:text-gray-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'}`}
+                                                    className={`group/tip py-2 flex flex-col items-center justify-center gap-1 rounded-xl border transition-all relative ${activeChartConfig?.type === type ? 'bg-gray-800 dark:bg-gray-200 border-gray-800 dark:border-gray-200 text-white dark:text-gray-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'}`}
                                                 >
+                                                    <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-800 text-[10px] font-medium px-2 py-1 shadow-lg opacity-0 scale-90 group-hover/tip:opacity-100 group-hover/tip:scale-100 transition-all duration-150 z-50">{getChartName(type)}</span>
                                                     <Icon size={14} />
-                                                    <span className="text-[7px] mt-0.5 truncate w-full text-center px-0.5">{type.replace(/_/g, ' ').slice(0, 8)}</span>
+                                                    <span className="text-[7px] font-semibold leading-tight truncate w-full text-center px-0.5">{getChartName(type)}</span>
                                                     {isRecommended && <span className="absolute top-0.5 right-0.5 text-amber-500 text-[8px]">★</span>}
                                                 </button>
                                             );
