@@ -164,7 +164,7 @@ const App = () => {
                                 <div className="flex flex-col">
                                     <div className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                                         <Database size={12} />
-                                        <span>Report: {pages.find(p => p.id === activePageId)?.name}</span>
+                                        <span>Report: {(datasets.find(d => d.id === selectedDatasetId) || datasets[0])?.name || 'No Data Source'}</span>
                                     </div>
                                     <h1 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{isEditMode ? 'Visual Designer' : 'Report Preview'}</h1>
                                 </div>
