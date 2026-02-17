@@ -117,10 +117,14 @@ const DataPanel = ({
     activeChartConfig,
     onUpdateConfig,
     onUpdateLayout,
+    showNewChartPrompt,
+    onConfirmNewChart,
+    onCancelNewChart,
 }) => {
     const [activePane, setActivePane] = useState('data');
     const [fieldSearch, setFieldSearch] = useState('');
     const [showAllCharts, setShowAllCharts] = useState(false);
+    const [newChartName, setNewChartName] = useState('');
 
     const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
     const filteredColumns = selectedDataset?.columns.filter(col =>
@@ -180,7 +184,36 @@ const DataPanel = ({
     };
 
     return (
-        <aside className="w-80 shrink-0 h-full flex flex-col gap-6 overflow-hidden">
+        <aside className="w-80 shrink-0 h-full flex flex-col gap-6 overflow-hidden relative">
+            {showNewChartPrompt && (
+                <div className="absolute inset-0 z-50 flex items-start justify-center pt-24 bg-black/30 dark:bg-black/50 backdrop-blur-sm rounded-2xl">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 w-64 space-y-4 animate-in">
+                        <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">New Visual</h3>
+                        <input
+                            autoFocus
+                            type="text"
+                            placeholder="Enter visual name..."
+                            value={newChartName}
+                            onChange={(e) => setNewChartName(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') { onConfirmNewChart(newChartName); setNewChartName(''); }
+                                if (e.key === 'Escape') { onCancelNewChart(); setNewChartName(''); }
+                            }}
+                            className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 placeholder-gray-400 dark:placeholder-gray-500"
+                        />
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => { onCancelNewChart(); setNewChartName(''); }}
+                                className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            >Cancel</button>
+                            <button
+                                onClick={() => { onConfirmNewChart(newChartName); setNewChartName(''); }}
+                                className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 hover:bg-gray-900 dark:hover:bg-gray-300 transition-colors"
+                            >Create</button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="glass-panel rounded-2xl shadow-sm flex flex-col h-full overflow-hidden dark:bg-gray-800 dark:border-gray-700">
 
                 <div className="flex border-b border-gray-100 dark:border-gray-700 p-2 gap-1 shrink-0">

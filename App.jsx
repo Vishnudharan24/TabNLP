@@ -37,6 +37,7 @@ const App = () => {
     const [selectedDatasetId, setSelectedDatasetId] = useState('');
     const [activeChartId, setActiveChartId] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
+    const [showNewChartPrompt, setShowNewChartPrompt] = useState(false);
 
     useEffect(() => {
         const sampleId = 'sample-hr-data';
@@ -100,14 +101,17 @@ const App = () => {
     const handleAddChart = () => {
         const dataset = datasets.find(d => d.id === selectedDatasetId) || datasets[0];
         if (!dataset || !activePageId) return;
+        setShowNewChartPrompt(true);
+    };
 
-        const name = prompt('Enter a name for the new visual:', 'New Visual');
-        if (name === null) return; // user cancelled
+    const handleConfirmNewChart = (name) => {
+        setShowNewChartPrompt(false);
+        const dataset = datasets.find(d => d.id === selectedDatasetId) || datasets[0];
+        if (!dataset || !activePageId) return;
 
         const dim = dataset.columns.find(c => c.type === 'string')?.name || '';
         const measure = dataset.columns.find(c => c.type === 'number')?.name || '';
 
-        // Auto-recommend the best chart type
         const recs = recommendCharts(dataset.columns, dim, [measure]);
         const bestType = recs.length > 0 ? recs[0].type : ChartType.BAR_CLUSTERED;
 
@@ -199,7 +203,7 @@ const App = () => {
                                     {currentPageCharts.length === 0 && <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}><BarChartIcon size={48} className="opacity-20 mb-4" /><p className="text-sm font-medium">Add visuals to start your report.</p></div>}
                                 </div>
 
-                                <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} chartsCount={charts.length} />
+                                <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
                             </div>
                         </div>
                     )}
