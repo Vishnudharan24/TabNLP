@@ -28,7 +28,7 @@ const STORAGE_KEY_PAGES = 'power_bi_v3_pages_restored';
 
 const App = () => {
     const { theme } = useTheme();
-    const [view, setView] = useState('report');
+    const [view, setView] = useState('data');
     const [isEditMode, setIsEditMode] = useState(true);
     const [datasets, setDatasets] = useState([]);
     const [pages, setPages] = useState([]);
