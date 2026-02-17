@@ -18,7 +18,6 @@ import {
     PlusCircle
 } from 'lucide-react';
 import { ChartType } from './types';
-import { MOCK_EMPLOYEES, INITIAL_CHARTS } from './constants';
 import { useTheme } from './contexts/ThemeContext';
 import { recommendCharts } from './services/chartRecommender';
 
@@ -40,24 +39,6 @@ const App = () => {
     const [showNewChartPrompt, setShowNewChartPrompt] = useState(false);
 
     useEffect(() => {
-        const sampleId = 'sample-hr-data';
-        const sampleDataset = {
-            id: sampleId,
-            name: 'Workforce Master Data',
-            columns: [
-                { name: 'name', type: 'string' },
-                { name: 'department', type: 'string' },
-                { name: 'salary', type: 'number' },
-                { name: 'rating', type: 'number' },
-                { name: 'tenure', type: 'number' },
-                { name: 'satisfaction', type: 'number' },
-                { name: 'gender', type: 'string' },
-            ],
-            data: MOCK_EMPLOYEES
-        };
-        setDatasets([sampleDataset]);
-        setSelectedDatasetId(sampleId);
-
         const savedPages = localStorage.getItem(STORAGE_KEY_PAGES);
         const savedCharts = localStorage.getItem(STORAGE_KEY_CHARTS);
 
@@ -70,8 +51,7 @@ const App = () => {
             } catch (e) { console.error(e); }
         } else {
             const firstPageId = 'page-1';
-            setPages([{ id: firstPageId, name: 'Workforce Overview' }]);
-            setCharts(INITIAL_CHARTS);
+            setPages([{ id: firstPageId, name: 'Page 1' }]);
             setActivePageId(firstPageId);
         }
     }, []);

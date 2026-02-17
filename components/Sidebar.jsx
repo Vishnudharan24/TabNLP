@@ -29,17 +29,19 @@ const Sidebar = ({ setView, currentView }) => {
     return (
         <aside className="w-20 hover:w-64 glass-panel border-r border-gray-200 dark:border-gray-700 flex flex-col h-full transition-all duration-500 ease-in-out group z-40 relative">
             <div className="flex-1 py-10 overflow-x-hidden">
-                <SidebarItem
-                    icon={PieChart}
-                    label="Report View"
-                    active={currentView === 'report'}
-                    onClick={() => setView('report')}
-                />
+                
                 <SidebarItem
                     icon={Layers}
                     label="Data Hub"
                     active={currentView === 'data'}
                     onClick={() => setView('data')}
+                />
+
+                <SidebarItem
+                    icon={PieChart}
+                    label="Report View"
+                    active={currentView === 'report'}
+                    onClick={() => setView('report')}
                 />
 
                 <div className="mx-6 my-6 h-[1px] bg-gray-200 dark:bg-gray-700 opacity-60" />
