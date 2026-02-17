@@ -44,8 +44,6 @@ const Sidebar = ({ setView, currentView }) => {
 
                 <div className="mx-6 my-6 h-[1px] bg-gray-200 dark:bg-gray-700 opacity-60" />
 
-                <SidebarItem icon={BarChart2} label="Analytics" />
-                <SidebarItem icon={Database} label="Pipelines" />
             </div>
 
             <div className="pb-10 overflow-x-hidden">
