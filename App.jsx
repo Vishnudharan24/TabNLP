@@ -1,0 +1,227 @@
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { Responsive, WidthProvider } from 'react-grid-layout';
+import Header from './components/Header';
+import Sidebar from './components/Sidebar';
+import Visualization from './components/Visualization';
+import DataSourceView from './components/DataSourceView';
+import DataPanel from './components/DataPanel';
+import {
+    Plus,
+    BarChart as BarChartIcon,
+    Database,
+    Save,
+    Trash2,
+    Eye,
+    Settings,
+    X,
+    PlusCircle
+} from 'lucide-react';
+import { ChartType } from './types';
+import { MOCK_EMPLOYEES, INITIAL_CHARTS } from './constants';
+import { useTheme } from './contexts/ThemeContext';
+import { recommendCharts } from './services/chartRecommender';
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
+const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
+const STORAGE_KEY_PAGES = 'power_bi_v3_pages_restored';
+
+const App = () => {
+    const { theme } = useTheme();
+    const [view, setView] = useState('report');
+    const [isEditMode, setIsEditMode] = useState(true);
+    const [datasets, setDatasets] = useState([]);
+    const [pages, setPages] = useState([]);
+    const [activePageId, setActivePageId] = useState('');
+    const [charts, setCharts] = useState([]);
+    const [selectedDatasetId, setSelectedDatasetId] = useState('');
+    const [activeChartId, setActiveChartId] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        const sampleId = 'sample-hr-data';
+        const sampleDataset = {
+            id: sampleId,
+            name: 'Workforce Master Data',
+            columns: [
+                { name: 'name', type: 'string' },
+                { name: 'department', type: 'string' },
+                { name: 'salary', type: 'number' },
+                { name: 'rating', type: 'number' },
+                { name: 'tenure', type: 'number' },
+                { name: 'satisfaction', type: 'number' },
+                { name: 'gender', type: 'string' },
+            ],
+            data: MOCK_EMPLOYEES
+        };
+        setDatasets([sampleDataset]);
+        setSelectedDatasetId(sampleId);
+
+        const savedPages = localStorage.getItem(STORAGE_KEY_PAGES);
+        const savedCharts = localStorage.getItem(STORAGE_KEY_CHARTS);
+
+        if (savedPages && savedCharts) {
+            try {
+                setPages(JSON.parse(savedPages));
+                setCharts(JSON.parse(savedCharts));
+                const parsedPages = JSON.parse(savedPages);
+                if (parsedPages.length > 0) setActivePageId(parsedPages[0].id);
+            } catch (e) { console.error(e); }
+        } else {
+            const firstPageId = 'page-1';
+            setPages([{ id: firstPageId, name: 'Workforce Overview' }]);
+            setCharts(INITIAL_CHARTS);
+            setActivePageId(firstPageId);
+        }
+    }, []);
+
+    const handleSaveDashboard = () => {
+        setIsSaving(true);
+        localStorage.setItem(STORAGE_KEY_CHARTS, JSON.stringify(charts));
+        localStorage.setItem(STORAGE_KEY_PAGES, JSON.stringify(pages));
+        setTimeout(() => setIsSaving(false), 800);
+    };
+
+    const handleAddPage = () => {
+        const newPage = { id: `page-${Date.now()}`, name: `Page ${pages.length + 1}` };
+        setPages([...pages, newPage]);
+        setActivePageId(newPage.id);
+    };
+
+    const handleRemovePage = (e, id) => {
+        e.stopPropagation();
+        if (pages.length <= 1) return;
+        const updatedPages = pages.filter(p => p.id !== id);
+        setPages(updatedPages);
+        setCharts(charts.filter(c => c.pageId !== id));
+        if (activePageId === id) setActivePageId(updatedPages[0].id);
+    };
+
+    const handleAddChart = () => {
+        const dataset = datasets.find(d => d.id === selectedDatasetId) || datasets[0];
+        if (!dataset || !activePageId) return;
+
+        const dim = dataset.columns.find(c => c.type === 'string')?.name || '';
+        const measure = dataset.columns.find(c => c.type === 'number')?.name || '';
+
+        // Auto-recommend the best chart type
+        const recs = recommendCharts(dataset.columns, dim, [measure]);
+        const bestType = recs.length > 0 ? recs[0].type : ChartType.BAR_CLUSTERED;
+
+        const newChart = {
+            id: Math.random().toString(36).substr(2, 9),
+            pageId: activePageId,
+            datasetId: dataset.id,
+            title: 'New Visual',
+            type: bestType,
+            dimension: dim,
+            measures: [measure],
+            aggregation: 'SUM',
+            layout: { x: 0, y: Infinity, w: 6, h: 8 },
+            filters: []
+        };
+        setCharts([...charts, newChart]);
+        setActiveChartId(newChart.id);
+        if (view !== 'report') setView('report');
+    };
+
+    const handleRemoveChart = (id) => {
+        setCharts(prev => prev.filter(c => c.id !== id));
+        if (activeChartId === id) setActiveChartId(null);
+    };
+
+    const onLayoutChange = (currentLayout) => {
+        setCharts(prev => prev.map(chart => {
+            const gridItem = currentLayout.find(item => item.i === chart.id);
+            if (gridItem && chart.pageId === activePageId) {
+                return { ...chart, layout: { x: gridItem.x, y: gridItem.y, w: gridItem.w, h: gridItem.h } };
+            }
+            return chart;
+        }));
+    };
+
+    const currentPageCharts = useMemo(() => charts.filter(c => c.pageId === activePageId), [charts, activePageId]);
+    const gridLayouts = useMemo(() => currentPageCharts.map(c => ({ i: c.id, ...c.layout })), [currentPageCharts]);
+
+    return (
+        <div className={`flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
+            <Header />
+            <div className="flex flex-1 overflow-hidden">
+                <Sidebar setView={setView} currentView={view} />
+                <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                    {view === 'data' ? (
+                        <DataSourceView datasets={datasets} onAddDataset={ds => { setDatasets(p => [...p, ds]); setSelectedDatasetId(ds.id); }} onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))} />
+                    ) : (
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                                <div className="flex flex-col">
+                                    <div className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                                        <Database size={12} />
+                                        <span>Report: {pages.find(p => p.id === activePageId)?.name}</span>
+                                    </div>
+                                    <h1 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{isEditMode ? 'Visual Designer' : 'Report Preview'}</h1>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all ${isEditMode ? (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50') : (theme === 'dark' ? 'bg-gray-200 text-gray-800 border-transparent' : 'bg-gray-800 text-white border-transparent hover:bg-gray-900 shadow-sm')}`}>
+                                        {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
+                                        <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
+                                    </button>
+                                    <button onClick={handleSaveDashboard} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${isSaving ? (theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200') : (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')}`}>
+                                        <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
+                                        <span>{isSaving ? 'Saving...' : 'Save Layout'}</span>
+                                    </button>
+                                    <button onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
+                                        <Plus size={16} />
+                                        <span>Add Visual</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 flex overflow-hidden p-6 gap-6">
+                                <div className={`flex-1 overflow-y-auto designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : `${theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent'}`}`}>
+                                    <ResponsiveGridLayout className="layout" layouts={{ lg: gridLayouts }} breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={40} draggableHandle=".drag-handle" onLayoutChange={onLayoutChange} isDraggable={isEditMode} isResizable={isEditMode} margin={[16, 16]}>
+                                        {currentPageCharts.map(config => (
+                                            <div key={config.id} onClick={() => isEditMode && setActiveChartId(config.id)}>
+                                                <div className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}>
+                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} />
+                                                    {activeChartId === config.id && isEditMode && (
+                                                        <button onClick={(e) => { e.stopPropagation(); handleRemoveChart(config.id); }} className={`absolute -top-2.5 -right-2.5 text-rose-500 p-1.5 rounded-full shadow-md border hover:bg-rose-500 hover:text-white transition-all z-20 ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </ResponsiveGridLayout>
+                                    {currentPageCharts.length === 0 && <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}><BarChartIcon size={48} className="opacity-20 mb-4" /><p className="text-sm font-medium">Add visuals to start your report.</p></div>}
+                                </div>
+
+                                <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} chartsCount={charts.length} />
+                            </div>
+                        </div>
+                    )}
+                </main>
+            </div>
+            <footer className={`h-10 border-t px-6 flex items-center justify-between shrink-0 z-40 text-xs ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                <div className="flex items-center gap-1">
+                    {pages.map((p) => (
+                        <div key={p.id} className="group relative flex items-center">
+                            <button onClick={() => { setActivePageId(p.id); setView('report'); }} className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-2 ${activePageId === p.id ? (theme === 'dark' ? 'bg-gray-700 text-gray-100' : 'bg-gray-100 text-gray-900') : (theme === 'dark' ? 'text-gray-500 hover:bg-gray-700 hover:text-gray-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700')}`}>
+                                <span>{p.name}</span>
+                                {pages.length > 1 && <span onClick={(e) => handleRemovePage(e, p.id)} className={`ml-1 hover:text-rose-500 transition-colors ${activePageId === p.id ? 'opacity-100' : 'hidden group-hover:block'}`}><X size={12} /></span>}
+                            </button>
+                        </div>
+                    ))}
+                    <button onClick={handleAddPage} className={`p-1.5 ml-1 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}><PlusCircle size={14} /></button>
+                </div>
+                <div className={`flex items-center gap-4 font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                    <span>{currentPageCharts.length} Objects</span>
+                    <div className={`h-3 w-[1px] ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>PowerAnalytics v3.0</span>
+                </div>
+            </footer>
+        </div>
+    );
+};
+
+export default App;

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PowerAnalytics Designer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --brand-primary: #374151;
+            --brand-secondary: #6b7280;
+            --brand-accent: #3b82f6;
+            --bg-main: #f9fafb;
+            --bg-card: #ffffff;
+            --bg-surface: #f3f4f6;
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --border-color: #e5e7eb;
+            --hover-bg: #f3f4f6;
+            --scrollbar-thumb: #d1d5db;
+            --scrollbar-hover: #9ca3af;
+            --canvas-dot: #d1d5db;
+            --canvas-bg: #f3f4f6;
+            --grid-placeholder-bg: #f3f4f6;
+            --grid-placeholder-border: #6b7280;
+            --resize-handle: #9ca3af;
+        }
+
+        html.dark {
+            --brand-primary: #d1d5db;
+            --brand-secondary: #9ca3af;
+            --brand-accent: #60a5fa;
+            --bg-main: #0f172a;
+            --bg-card: #1e293b;
+            --bg-surface: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border-color: #334155;
+            --hover-bg: #334155;
+            --scrollbar-thumb: #475569;
+            --scrollbar-hover: #64748b;
+            --canvas-dot: #334155;
+            --canvas-bg: #0f172a;
+            --grid-placeholder-bg: #1e293b;
+            --grid-placeholder-border: #64748b;
+            --resize-handle: #64748b;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+        }
+
+        /* Enhanced Global Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: var(--scrollbar-thumb);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: var(--scrollbar-hover);
+        }
+
+        /* Clean Panel Style */
+        .glass-panel {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+        }
+
+        /* Designer Canvas Styles */
+        .designer-canvas {
+            background-image:
+                radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+            background-size: 24px 24px;
+            background-color: var(--canvas-bg);
+            min-height: 2000px;
+        }
+
+        /* React Grid Layout Essential Styles */
+        .react-grid-layout {
+            position: relative;
+            transition: height 200ms ease;
+        }
+
+        .react-grid-item {
+            transition: all 200ms ease;
+            transition-property: left, top, transform;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        }
+
+        .react-grid-item.cssTransforms {
+            transition-property: transform;
+        }
+
+        .react-grid-item.resizing {
+            z-index: 100;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        .react-grid-item.react-draggable-dragging {
+            transition: none;
+            z-index: 100;
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+
+        .react-grid-placeholder {
+            background: var(--grid-placeholder-bg) !important;
+            border-radius: 0.5rem !important;
+            border: 2px dashed var(--grid-placeholder-border) !important;
+            opacity: 0.5 !important;
+            z-index: 2 !important;
+        }
+
+        .react-resizable-handle {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            bottom: 0;
+            right: 0;
+            cursor: se-resize;
+            z-index: 10;
+        }
+
+        .react-resizable-handle::after {
+            content: "";
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            width: 6px;
+            height: 6px;
+            border-right: 2px solid var(--resize-handle);
+            border-bottom: 2px solid var(--resize-handle);
+            transition: all 0.2s ease;
+        }
+
+        .react-resizable-handle:hover::after {
+            border-color: var(--brand-accent);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* Utility Classes */
+        .text-gradient {
+            color: var(--brand-primary);
+        }
+
+        .btn-primary {
+            background-color: var(--brand-primary);
+            color: white;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            background-color: #1f2937;
+        }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "echarts": "https://esm.sh/echarts@^5.6.0",
+    "echarts-for-react": "https://esm.sh/echarts-for-react@^3.0.6",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "react-grid-layout": "https://esm.sh/react-grid-layout@^1.5.0"
+  }
+}
+</script>
+    <link rel="stylesheet" href="/index.css">
+</head>
+
+<body class="overflow-hidden">
+    <div id="root"></div>
+    <script type="module" src="/index.jsx"></script>
+</body>
+
+</html>
