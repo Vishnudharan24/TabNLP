@@ -40,6 +40,13 @@ const Sidebar = ({ setView, currentView }) => {
                 />
 
                 <SidebarItem
+                    icon={PieChart}
+                    label="Report View"
+                    active={currentView === 'report'}
+                    onClick={() => setView('report')}
+                />
+
+                <SidebarItem
                     icon={Merge}
                     label="Merge Data"
                     active={currentView === 'merge'}
@@ -60,12 +67,7 @@ const Sidebar = ({ setView, currentView }) => {
                     onClick={() => setView('profiler')}
                 />
 
-                <SidebarItem
-                    icon={PieChart}
-                    label="Report View"
-                    active={currentView === 'report'}
-                    onClick={() => setView('report')}
-                />
+                
 
                 <div className="mx-6 my-6 h-[1px] bg-gray-200 dark:bg-gray-700 opacity-60" />
 
