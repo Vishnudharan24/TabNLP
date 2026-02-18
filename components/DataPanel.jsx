@@ -423,10 +423,10 @@ const DataPanel = ({
                         <div className="space-y-6">
                             <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Properties</h4>
                             <div className="space-y-4">
-                                <div className="space-y-2">
+                                {/* <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Visual Title</label>
                                     <input type="text" value={activeChartConfig?.title || ''} onChange={(e) => onUpdateConfig({ title: e.target.value })} className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3 text-xs font-bold text-gray-700 dark:text-gray-200" />
-                                </div>
+                                </div> */}
                                 <div className="p-5 bg-gray-50 dark:bg-gray-700 rounded-xl space-y-4">
                                     <div className="space-y-2">
                                         <div className="flex justify-between"><span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Width</span><span className="text-xs font-black text-gray-700 dark:text-gray-200">{activeChartConfig?.layout.w}</span></div>

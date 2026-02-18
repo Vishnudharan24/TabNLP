@@ -1,20 +1,71 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# PowerAnalytics Desktop
 
-# Run and deploy your AI Studio app
+A desktop-style analytics dashboard built with React, featuring interactive visualizations with ECharts and a customizable grid layout.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/1dVk19N0FYnz16QaLBZFWgYgLORtSdXB9
+- **Interactive Charts** – Built with ECharts for rich, responsive visualizations
+- **Draggable Grid Layout** – Customizable dashboard panels via React Grid Layout
+- **Modern UI** – Clean interface with Lucide React icons
 
-## Run Locally
+## Tech Stack
 
-**Prerequisites:**  Node.js
+| Category       | Technology              |
+| -------------- | ----------------------- |
+| Framework      | React 19                |
+| Build Tool     | Vite 6                  |
+| Charts         | ECharts 6               |
+| Layout         | React Grid Layout       |
+| Icons          | Lucide React            |
+| Deployment     | GitHub Pages             |
 
+## Getting Started
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Prerequisites
+
+- Node.js (v18 or later recommended)
+- npm
+
+### Installation
+
+```bash
+git clone https://github.com/Vishnudharan24/TabNLP.git
+cd TabNLP/poweranalytics-desktop
+npm install
+```
+
+### Development
+
+```bash
+npm run dev
+```
+
+The app will be available at `http://localhost:5173`.
+
+### Build
+
+```bash
+npm run build
+```
+
+### Preview Production Build
+
+```bash
+npm run preview
+```
+
+### Deploy to GitHub Pages
+
+```bash
+npm run deploy
+```
+
+This builds the project and publishes the `dist` folder to GitHub Pages.
+
+## Live Demo
+
+[https://Vishnudharan24.github.io/TabNLP](https://Vishnudharan24.github.io/TabNLP)
+
+## License
+
+This project is private.
