@@ -21,7 +21,7 @@ A desktop-style analytics dashboard built with React, featuring interactive visu
 
 ## Supported Chart Types
 
-The application ships with **28+ chart types** across 7 categories, all rendered using Apache ECharts.
+The application ships with **43 chart types** across 7 categories, all rendered using Apache ECharts.
 
 | Category | Charts |
 |---|---|
