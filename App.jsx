@@ -39,21 +39,9 @@ const App = () => {
     const [showNewChartPrompt, setShowNewChartPrompt] = useState(false);
 
     useEffect(() => {
-        const savedPages = localStorage.getItem(STORAGE_KEY_PAGES);
-        const savedCharts = localStorage.getItem(STORAGE_KEY_CHARTS);
-
-        if (savedPages && savedCharts) {
-            try {
-                setPages(JSON.parse(savedPages));
-                setCharts(JSON.parse(savedCharts));
-                const parsedPages = JSON.parse(savedPages);
-                if (parsedPages.length > 0) setActivePageId(parsedPages[0].id);
-            } catch (e) { console.error(e); }
-        } else {
-            const firstPageId = 'page-1';
-            setPages([{ id: firstPageId, name: 'Page 1' }]);
-            setActivePageId(firstPageId);
-        }
+        const firstPageId = 'page-1';
+        setPages([{ id: firstPageId, name: 'Page 1' }]);
+        setActivePageId(firstPageId);
     }, []);
 
     const handleSaveDashboard = () => {
@@ -144,11 +132,27 @@ const App = () => {
                                 <div className="flex flex-col">
                                     <div className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                                         <Database size={12} />
-                                        <span>Report: {(datasets.find(d => d.id === selectedDatasetId) || datasets[0])?.name || 'No Data Source'}</span>
+                                        <span>Report</span>
                                     </div>
                                     <h1 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{isEditMode ? 'Visual Designer' : 'Report Preview'}</h1>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    {datasets.length > 1 && (
+                                        <select
+                                            value={selectedDatasetId}
+                                            onChange={(e) => setSelectedDatasetId(e.target.value)}
+                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
+                                        >
+                                            {datasets.map(ds => (
+                                                <option key={ds.id} value={ds.id}>{ds.name}</option>
+                                            ))}
+                                        </select>
+                                    )}
+                                    {datasets.length === 1 && (
+                                        <span className={`px-3 py-2 rounded-lg text-sm font-semibold border ${theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
+                                            <Database size={14} className="inline mr-1.5 -mt-0.5" />{datasets[0].name}
+                                        </span>
+                                    )}
                                     <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all ${isEditMode ? (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50') : (theme === 'dark' ? 'bg-gray-200 text-gray-800 border-transparent' : 'bg-gray-800 text-white border-transparent hover:bg-gray-900 shadow-sm')}`}>
                                         {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
                                         <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
@@ -204,7 +208,7 @@ const App = () => {
                 <div className={`flex items-center gap-4 font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     <span>{currentPageCharts.length} Objects</span>
                     <div className={`h-3 w-[1px] ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-300'}`} />
-                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>PowerAnalytics v3.0</span>
+                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>TabNLP v1.0</span>
                 </div>
             </footer>
         </div>

@@ -14,8 +14,8 @@ const Header = () => {
                         <Layout className="text-white dark:text-gray-800 relative z-10" size={20} />
                     </div>
                     <div className="flex flex-col">
-                        <span className="font-extrabold text-lg tracking-tight leading-none text-gray-800 dark:text-gray-100">PowerAnalytics</span>
-                        <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">Workspace v3.0</span>
+                        <span className="font-extrabold text-lg tracking-tight leading-none text-gray-800 dark:text-gray-100">TabNLP</span>
+                        {/* <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1"></span> */}
                     </div>
                 </div>
 
