@@ -6,6 +6,8 @@ import Sidebar from './components/Sidebar';
 import Visualization from './components/Visualization';
 import DataSourceView from './components/DataSourceView';
 import DataPanel from './components/DataPanel';
+import DataPreview from './components/DataPreview';
+import DataMerger from './components/DataMerger';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -24,6 +26,7 @@ import { recommendCharts } from './services/chartRecommender';
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
 const STORAGE_KEY_PAGES = 'power_bi_v3_pages_restored';
+const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
 const App = () => {
     const { theme } = useTheme();
@@ -37,6 +40,10 @@ const App = () => {
     const [activeChartId, setActiveChartId] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
     const [showNewChartPrompt, setShowNewChartPrompt] = useState(false);
+    const [previewDatasetId, setPreviewDatasetId] = useState(null);
+    const [showMerger, setShowMerger] = useState(false);
+    const [companies, setCompanies] = useState([]);
+    const [activeCompanyId, setActiveCompanyId] = useState('__all__');
 
     useEffect(() => {
         const firstPageId = 'page-1';
@@ -105,6 +112,33 @@ const App = () => {
         if (activeChartId === id) setActiveChartId(null);
     };
 
+    const handleAddCompany = (name, color) => {
+        const newCompany = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: name.trim(),
+            color: color || COMPANY_COLORS[companies.length % COMPANY_COLORS.length],
+            createdAt: Date.now(),
+        };
+        setCompanies(prev => [...prev, newCompany]);
+        setActiveCompanyId(newCompany.id);
+        return newCompany;
+    };
+
+    const handleRemoveCompany = (companyId) => {
+        setCompanies(prev => prev.filter(c => c.id !== companyId));
+        // Unassign datasets from removed company
+        setDatasets(prev => prev.map(d => d.companyId === companyId ? { ...d, companyId: null } : d));
+        if (activeCompanyId === companyId) setActiveCompanyId('__all__');
+    };
+
+    const handleRenameCompany = (companyId, newName) => {
+        setCompanies(prev => prev.map(c => c.id === companyId ? { ...c, name: newName.trim() } : c));
+    };
+
+    const handleAssignDatasetCompany = (datasetId, companyId) => {
+        setDatasets(prev => prev.map(d => d.id === datasetId ? { ...d, companyId } : d));
+    };
+
     const onLayoutChange = (currentLayout) => {
         setCharts(prev => prev.map(chart => {
             const gridItem = currentLayout.find(item => item.i === chart.id);
@@ -125,7 +159,45 @@ const App = () => {
                 <Sidebar setView={setView} currentView={view} />
                 <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
                     {view === 'data' ? (
-                        <DataSourceView datasets={datasets} onAddDataset={ds => { setDatasets(p => [...p, ds]); setSelectedDatasetId(ds.id); }} onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))} />
+                        <DataSourceView
+                            datasets={datasets}
+                            companies={companies}
+                            activeCompanyId={activeCompanyId}
+                            onSetActiveCompany={setActiveCompanyId}
+                            onAddCompany={handleAddCompany}
+                            onRemoveCompany={handleRemoveCompany}
+                            onRenameCompany={handleRenameCompany}
+                            onAssignDatasetCompany={handleAssignDatasetCompany}
+                            onAddDataset={ds => { setDatasets(p => [...p, ds]); setSelectedDatasetId(ds.id); }}
+                            onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))}
+                            onPreviewDataset={id => setPreviewDatasetId(id)}
+                            onOpenMerge={() => setShowMerger(true)}
+                        />
+                    ) : view === 'merge' ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-10">
+                            {datasets.length >= 2 ? (
+                                <div className="text-center space-y-6">
+                                    <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}><path d="m8 6 4-4 4 4"/><path d="M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22"/><path d="m20 22-5-5"/></svg>
+                                    </div>
+                                    <div>
+                                        <h2 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Merge Datasets</h2>
+                                        <p className={`mt-2 max-w-md mx-auto ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Combine multiple data sources using joins or unions to create powerful cross-dataset visualizations.</p>
+                                    </div>
+                                    <button onClick={() => setShowMerger(true)} className={`inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shadow-sm ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
+                                        Open Merge Builder
+                                    </button>
+                                    <div className={`pt-4 text-xs font-semibold ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
+                                        {datasets.length} datasets available · {datasets.filter(d => d._meta?.merged).length} merged
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center space-y-4">
+                                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Upload at least 2 datasets to start merging.</p>
+                                    <button onClick={() => setView('data')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${theme === 'dark' ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700'}`}>Go to Data Hub</button>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <div className="flex-1 flex flex-col overflow-hidden">
                             <div className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
@@ -193,6 +265,31 @@ const App = () => {
                     )}
                 </main>
             </div>
+
+            {/* DataPreview Modal */}
+            {previewDatasetId && (
+                <DataPreview
+                    dataset={datasets.find(d => d.id === previewDatasetId)}
+                    onClose={() => setPreviewDatasetId(null)}
+                    onUpdateDataset={(updated) => {
+                        setDatasets(p => p.map(d => d.id === updated.id ? updated : d));
+                    }}
+                />
+            )}
+
+            {/* DataMerger Modal */}
+            {showMerger && datasets.length >= 2 && (
+                <DataMerger
+                    datasets={datasets}
+                    onClose={() => setShowMerger(false)}
+                    onMergeComplete={(mergedDs) => {
+                        setDatasets(p => [...p, mergedDs]);
+                        setSelectedDatasetId(mergedDs.id);
+                        setShowMerger(false);
+                    }}
+                />
+            )}
+
             <footer className={`h-10 border-t px-6 flex items-center justify-between shrink-0 z-40 text-xs ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center gap-1">
                     {pages.map((p) => (

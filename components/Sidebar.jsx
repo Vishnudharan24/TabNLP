@@ -5,7 +5,8 @@ import {
     Layers,
     Database,
     BarChart2,
-    Layout
+    Layout,
+    Merge
 } from 'lucide-react';
 
 const SidebarItem = ({
@@ -35,6 +36,13 @@ const Sidebar = ({ setView, currentView }) => {
                     label="Data Hub"
                     active={currentView === 'data'}
                     onClick={() => setView('data')}
+                />
+
+                <SidebarItem
+                    icon={Merge}
+                    label="Merge Data"
+                    active={currentView === 'merge'}
+                    onClick={() => setView('merge')}
                 />
 
                 <SidebarItem
