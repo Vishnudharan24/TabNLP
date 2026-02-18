@@ -6,7 +6,8 @@ import {
     Database,
     BarChart2,
     Layout,
-    Merge
+    Merge,
+    GitBranch
 } from 'lucide-react';
 
 const SidebarItem = ({
@@ -43,6 +44,20 @@ const Sidebar = ({ setView, currentView }) => {
                     label="Merge Data"
                     active={currentView === 'merge'}
                     onClick={() => setView('merge')}
+                />
+
+                <SidebarItem
+                    icon={GitBranch}
+                    label="Relationships"
+                    active={currentView === 'relationships'}
+                    onClick={() => setView('relationships')}
+                />
+
+                <SidebarItem
+                    icon={BarChart2}
+                    label="Profiler"
+                    active={currentView === 'profiler'}
+                    onClick={() => setView('profiler')}
                 />
 
                 <SidebarItem

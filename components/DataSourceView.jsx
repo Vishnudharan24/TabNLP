@@ -1,7 +1,7 @@
 
 import React, { useRef, useState, useMemo } from 'react';
 import {
-    Upload, FileText, Trash2, Database, Table, CheckCircle2, Eye, Merge,
+    Upload, FileText, Trash2, Database, Table, CheckCircle2, Eye, Merge, BarChart2,
     Building2, Plus, X, Edit3, Check, ChevronDown, Tag, Search, FolderOpen
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
@@ -21,6 +21,7 @@ const DataSourceView = ({
     onRemoveDataset,
     onPreviewDataset,
     onOpenMerge,
+    onProfileDataset,
 }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
@@ -337,6 +338,9 @@ const DataSourceView = ({
                                         <div className="flex items-center gap-1">
                                             <button onClick={() => onPreviewDataset && onPreviewDataset(ds.id)} className={`p-2.5 rounded-xl transition-all ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-900/20' : 'text-gray-300 hover:text-blue-500 hover:bg-blue-50'}`} title="Preview Data">
                                                 <Eye size={20} />
+                                            </button>
+                                            <button onClick={() => onProfileDataset && onProfileDataset(ds.id)} className={`p-2.5 rounded-xl transition-all ${isDark ? 'text-gray-500 hover:text-violet-400 hover:bg-violet-900/20' : 'text-gray-300 hover:text-violet-500 hover:bg-violet-50'}`} title="Profile Data">
+                                                <BarChart2 size={20} />
                                             </button>
                                             <button onClick={() => onRemoveDataset(ds.id)} className={`p-2.5 rounded-xl transition-all ${isDark ? 'text-gray-500 hover:text-rose-400 hover:bg-rose-900/20' : 'text-gray-300 hover:text-rose-500 hover:bg-rose-50'}`} title="Remove Source">
                                                 <Trash2 size={20} />

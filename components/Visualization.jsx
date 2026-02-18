@@ -1,15 +1,58 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
 import ReactECharts from 'echarts-for-react';
+import * as echarts from 'echarts';
 import { ChartType } from '../types';
 import { buildChartOption } from '../services/echartsOptionBuilder';
 import { useTheme } from '../contexts/ThemeContext';
-import { GripHorizontal, Filter } from 'lucide-react';
+import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
-const Visualization = ({ config, dataset, isActive, isEditMode }) => {
+const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId }) => {
     const { theme } = useTheme();
+    const [drillPath, setDrillPath] = useState([]);
+    const chartRef = useRef(null);
 
     if (!dataset) return null;
+
+    // Apply global filters (cross-dataset filtering)
+    const applyGlobalFilters = (data) => {
+        if (!globalFilters || globalFilters.length === 0) return data;
+        return data.filter(row => {
+            return globalFilters.every(gf => {
+                if (!(gf.column in row)) return true;
+                const val = row[gf.column];
+                if (gf.type === 'include' && gf.values && gf.values.length > 0) {
+                    return gf.values.includes(String(val));
+                }
+                if (gf.type === 'range') {
+                    const num = Number(val);
+                    if (isNaN(num)) return false;
+                    return num >= gf.rangeMin && num <= gf.rangeMax;
+                }
+                return true;
+            });
+        });
+    };
+
+    // Apply drill-down path filters
+    const applyDrillFilters = (data) => {
+        if (drillPath.length === 0) return data;
+        return drillPath.reduce((filtered, drill) => {
+            return filtered.filter(row => String(row[drill.dimensionCol]) === drill.value);
+        }, data);
+    };
+
+    // Get effective dimension considering drill-down
+    const getEffectiveDimension = () => {
+        if (drillPath.length === 0) return config.dimension;
+        const usedDims = [config.dimension, ...drillPath.map(d => d.dimensionCol)];
+        const stringCols = dataset.columns.filter(c =>
+            (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
+        );
+        return stringCols.length > 0 ? stringCols[0].name : config.dimension;
+    };
+
+    const effectiveDimension = getEffectiveDimension();
 
     const applyFilters = (data) => {
         if (!config.filters || config.filters.length === 0) return data;
@@ -37,10 +80,13 @@ const Visualization = ({ config, dataset, isActive, isEditMode }) => {
     };
 
     const processData = () => {
-        const { dimension, measures, aggregation, type } = config;
+        const { measures, aggregation, type } = config;
+        const dimension = effectiveDimension;
         if (!dimension || !measures || measures.length === 0) return [];
 
-        const filteredData = applyFilters(dataset.data);
+        let filteredData = applyGlobalFilters(dataset.data);
+        filteredData = applyFilters(filteredData);
+        filteredData = applyDrillFilters(filteredData);
         const groups = {};
 
         filteredData.forEach(row => {
@@ -77,6 +123,38 @@ const Visualization = ({ config, dataset, isActive, isEditMode }) => {
 
     const chartData = processData();
     const isDark = theme === 'dark';
+
+    // Can we drill further?
+    const canDrill = useMemo(() => {
+        const usedDims = [config.dimension, ...drillPath.map(d => d.dimensionCol)];
+        return dataset.columns.some(c =>
+            (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
+        );
+    }, [config.dimension, drillPath, dataset.columns]);
+
+    const handleDrillDown = useCallback((params) => {
+        if (!canDrill || !params.name) return;
+        setDrillPath(prev => [...prev, { dimensionCol: effectiveDimension, value: params.name }]);
+    }, [canDrill, effectiveDimension]);
+
+    const handleDrillUp = (index) => {
+        setDrillPath(prev => prev.slice(0, index));
+    };
+
+    // Cross-chart brushing: register chart in group
+    const handleChartReady = useCallback((instance) => {
+        chartRef.current = instance;
+        if (groupId) {
+            instance.group = groupId;
+            echarts.connect(groupId);
+        }
+    }, [groupId]);
+
+    // Chart click events for drill-down
+    const onEvents = useMemo(() => {
+        if (!canDrill) return {};
+        return { click: handleDrillDown };
+    }, [canDrill, handleDrillDown]);
 
     const renderVisual = () => {
         if (chartData.length === 0) return (
@@ -129,7 +207,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode }) => {
         }
 
         // All other types — render via ECharts
-        const option = buildChartOption(type, chartData, config, theme);
+        const option = buildChartOption(type, chartData, { ...config, dimension: effectiveDimension }, theme);
 
         return (
             <ReactECharts
@@ -138,6 +216,8 @@ const Visualization = ({ config, dataset, isActive, isEditMode }) => {
                 opts={{ renderer: 'canvas' }}
                 notMerge={true}
                 lazyUpdate={true}
+                onChartReady={handleChartReady}
+                onEvents={onEvents}
             />
         );
     };
@@ -152,11 +232,37 @@ const Visualization = ({ config, dataset, isActive, isEditMode }) => {
                         <div className="flex items-center gap-2 mt-1">
                             <p className="text-[8px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest truncate">{config.type.replace(/_/g, ' ')}</p>
                             {config.filters.length > 0 && <Filter size={8} className="text-blue-500" />}
+                            {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
                         </div>
                     </div>
                 </div>
 
             </div>
+
+            {/* Drill-down breadcrumb */}
+            {drillPath.length > 0 && (
+                <div className={`flex items-center gap-1 px-1 py-1 mb-1 rounded-lg text-[9px] font-bold shrink-0 overflow-x-auto ${isDark ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                    <button onClick={() => handleDrillUp(0)}
+                        className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded transition-colors ${isDark ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
+                        <Home size={9} /> All
+                    </button>
+                    {drillPath.map((drill, i) => (
+                        <React.Fragment key={i}>
+                            <ChevronRight size={8} className={isDark ? 'text-gray-600' : 'text-gray-300'} />
+                            <button onClick={() => handleDrillUp(i + 1)}
+                                className={`px-1.5 py-0.5 rounded truncate max-w-[80px] transition-colors ${i === drillPath.length - 1
+                                    ? (isDark ? 'text-blue-400 bg-blue-900/30' : 'text-blue-600 bg-blue-50')
+                                    : (isDark ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200')}`}>
+                                {drill.value}
+                            </button>
+                        </React.Fragment>
+                    ))}
+                    {canDrill && (
+                        <span className={`ml-auto text-[8px] italic ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>click to drill</span>
+                    )}
+                </div>
+            )}
+
             <div className="flex-1 min-h-0 relative">
                 {renderVisual()}
             </div>

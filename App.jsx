@@ -8,6 +8,9 @@ import DataSourceView from './components/DataSourceView';
 import DataPanel from './components/DataPanel';
 import DataPreview from './components/DataPreview';
 import DataMerger from './components/DataMerger';
+import DataProfiler from './components/DataProfiler';
+import GlobalFilterBar from './components/GlobalFilterBar';
+import RelationshipDiagram from './components/RelationshipDiagram';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -44,6 +47,8 @@ const App = () => {
     const [showMerger, setShowMerger] = useState(false);
     const [companies, setCompanies] = useState([]);
     const [activeCompanyId, setActiveCompanyId] = useState('__all__');
+    const [globalFilters, setGlobalFilters] = useState([]);
+    const [profilerDatasetId, setProfilerDatasetId] = useState(null);
 
     useEffect(() => {
         const firstPageId = 'page-1';
@@ -139,6 +144,23 @@ const App = () => {
         setDatasets(prev => prev.map(d => d.id === datasetId ? { ...d, companyId } : d));
     };
 
+    // Global filter handlers
+    const handleAddGlobalFilter = (filter) => {
+        setGlobalFilters(prev => [...prev, filter]);
+    };
+    const handleUpdateGlobalFilter = (id, updates) => {
+        setGlobalFilters(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
+    };
+    const handleRemoveGlobalFilter = (id) => {
+        setGlobalFilters(prev => prev.filter(f => f.id !== id));
+    };
+    const handleClearGlobalFilters = () => {
+        setGlobalFilters([]);
+    };
+
+    // Chart group ID for cross-chart brushing (per page)
+    const chartGroupId = `page-${activePageId}`;
+
     const onLayoutChange = (currentLayout) => {
         setCharts(prev => prev.map(chart => {
             const gridItem = currentLayout.find(item => item.i === chart.id);
@@ -172,7 +194,37 @@ const App = () => {
                             onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))}
                             onPreviewDataset={id => setPreviewDatasetId(id)}
                             onOpenMerge={() => setShowMerger(true)}
+                            onProfileDataset={id => setProfilerDatasetId(id)}
                         />
+                    ) : view === 'relationships' ? (
+                        <RelationshipDiagram datasets={datasets} companies={companies} />
+                    ) : view === 'profiler' ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-10">
+                            {datasets.length > 0 ? (
+                                <div className="text-center space-y-6">
+                                    <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                                    </div>
+                                    <div>
+                                        <h2 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Data Profiler</h2>
+                                        <p className={`mt-2 max-w-md mx-auto ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Select a dataset to analyze its columns, distributions, outliers, and correlations.</p>
+                                    </div>
+                                    <div className="flex flex-wrap justify-center gap-3">
+                                        {datasets.map(ds => (
+                                            <button key={ds.id} onClick={() => setProfilerDatasetId(ds.id)}
+                                                className={`px-5 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm border ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}>
+                                                {ds.name} <span className={`ml-2 text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-400'}`}>{ds.columns.length} cols · {ds.data.length} rows</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center space-y-4">
+                                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Upload a dataset to start profiling.</p>
+                                    <button onClick={() => setView('data')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${theme === 'dark' ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700'}`}>Go to Data Hub</button>
+                                </div>
+                            )}
+                        </div>
                     ) : view === 'merge' ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-10">
                             {datasets.length >= 2 ? (
@@ -240,13 +292,23 @@ const App = () => {
                                 </div>
                             </div>
 
+                            {/* Global Filter Bar */}
+                            <GlobalFilterBar
+                                datasets={datasets}
+                                globalFilters={globalFilters}
+                                onAddFilter={handleAddGlobalFilter}
+                                onUpdateFilter={handleUpdateGlobalFilter}
+                                onRemoveFilter={handleRemoveGlobalFilter}
+                                onClearAll={handleClearGlobalFilters}
+                            />
+
                             <div className="flex-1 flex overflow-hidden p-6 gap-6">
                                 <div className={`flex-1 overflow-y-auto designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : `${theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent'}`}`}>
                                     <ResponsiveGridLayout className="layout" layouts={{ lg: gridLayouts }} breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={40} draggableHandle=".drag-handle" onLayoutChange={onLayoutChange} isDraggable={isEditMode} isResizable={isEditMode} margin={[16, 16]}>
                                         {currentPageCharts.map(config => (
                                             <div key={config.id} onClick={() => isEditMode && setActiveChartId(config.id)}>
                                                 <div className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}>
-                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} />
+                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} />
                                                     {activeChartId === config.id && isEditMode && (
                                                         <button onClick={(e) => { e.stopPropagation(); handleRemoveChart(config.id); }} className={`absolute -top-2.5 -right-2.5 text-rose-500 p-1.5 rounded-full shadow-md border hover:bg-rose-500 hover:text-white transition-all z-20 ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
                                                             <Trash2 size={14} />
@@ -274,6 +336,14 @@ const App = () => {
                     onUpdateDataset={(updated) => {
                         setDatasets(p => p.map(d => d.id === updated.id ? updated : d));
                     }}
+                />
+            )}
+
+            {/* DataProfiler Modal */}
+            {profilerDatasetId && (
+                <DataProfiler
+                    dataset={datasets.find(d => d.id === profilerDatasetId)}
+                    onClose={() => setProfilerDatasetId(null)}
                 />
             )}
 
