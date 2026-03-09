@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from typing import Optional
 from pathlib import Path
 from services.data_services.ingestion_service import run_ingestion
-from db.db_store import upsert_source_config
+from db.db_store import upsert_source_config, ensure_indexes
 
 app = FastAPI()
 
@@ -13,10 +13,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 TEST_EXCEL_FILE = DATA_DIR / "Employee_Master_Data_260220261036.xlsx"
 
+
+@app.on_event("startup")
+async def startup_event():
+    await ensure_indexes()
+
 @app.post("/ingest")
-def ingest(source_id: Optional[str] = None, url: Optional[str] = None):
+async def ingest(source_id: Optional[str] = None, url: Optional[str] = None):
     try:
-        result = run_ingestion(source_id=source_id, url=url)
+        result = await run_ingestion(source_id=source_id, url=url)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -29,7 +34,7 @@ def ingest(source_id: Optional[str] = None, url: Optional[str] = None):
 
 #The below endpoints are added for testiing
 @app.get("/test/excel")
-def get_test_excel_file():
+async def get_test_excel_file():
     if not TEST_EXCEL_FILE.exists():
         raise HTTPException(status_code=404, detail="Test Excel file not found")
 
@@ -41,10 +46,10 @@ def get_test_excel_file():
 
 
 @app.post("/test/source-config/excel")
-def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test"):
+async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test"):
     try:
         api_endpoint = f"{str(request.base_url).rstrip('/')}/test/excel"
-        result = upsert_source_config(
+        result = await upsert_source_config(
             source_id=source_id,
             name="Local Test Excel Source",
             api_endpoint=api_endpoint,
@@ -61,9 +66,9 @@ def add_test_excel_source_config(request: Request, source_id: str = "local_excel
 
 
 @app.post("/test/ingest/excel")
-def ingest_test_excel(source_id: str = "local_excel_test"):
+async def ingest_test_excel(source_id: str = "local_excel_test"):
     try:
-        return run_ingestion(source_id=source_id)
+        return await run_ingestion(source_id=source_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

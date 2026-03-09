@@ -1,7 +1,8 @@
-import requests
+import httpx
 
-def fetch_data(url: str):
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    
+async def fetch_data(url: str):
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+
     return response.content, response.headers
