@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pandas
+openpyxl
+python-dotenv
+motor
+pymongo
+httpx
+paramiko

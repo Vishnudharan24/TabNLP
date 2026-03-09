@@ -39,6 +39,11 @@ async def ensure_indexes():
         [("source_key", 1), ("ingested_at", -1)],
         name="source_key_ingested_at_idx",
     )
+    await source_config_collection.create_index(
+        [("source_id", 1)],
+        unique=True,
+        name="source_config_source_id_unique",
+    )
 
     _indexes_initialized = True
 
@@ -103,15 +108,31 @@ async def get_source_config(source_key: str):
     return await source_config_collection.find_one({"$or": query_options})
 
 
-async def upsert_source_config(source_id: str, name: str, api_endpoint: str):
+async def upsert_source_config(
+    source_id: str,
+    name: str,
+    api_endpoint: str = None,
+    source_type: str = "api",
+    sftp: dict = None,
+    url: str = None,
+):
+    set_document = {
+        "source_id": source_id,
+        "name": name,
+        "source_type": source_type,
+    }
+
+    if api_endpoint:
+        set_document["api_endpoint"] = api_endpoint
+    if url:
+        set_document["url"] = url
+    if sftp:
+        set_document["sftp"] = sftp
+
     result = await source_config_collection.update_one(
         {"source_id": source_id},
         {
-            "$set": {
-                "source_id": source_id,
-                "name": name,
-                "api_endpoint": api_endpoint,
-            }
+            "$set": set_document
         },
         upsert=True,
     )

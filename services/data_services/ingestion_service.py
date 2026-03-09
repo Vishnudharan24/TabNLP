@@ -7,6 +7,9 @@ from db.db_store import store_dataset, get_source_config
 
 
 async def run_ingestion(source_id=None, url=None):
+    source_config = None
+    source_type = "api"
+    source_descriptor = url
 
     if not url:
         if not source_id:
@@ -17,16 +20,23 @@ async def run_ingestion(source_id=None, url=None):
         if not source_config:
             raise ValueError(f"Source config not found for: {source_id}")
 
-        url = source_config.get("api_endpoint") or source_config.get("url")
+        source_type = source_config.get("source_type", "api")
+        source_descriptor = source_config.get("api_endpoint") or source_config.get("url")
+        if source_type == "sftp":
+            sftp_config = source_config.get("sftp") or source_config
+            source_descriptor = sftp_config.get("remote_path")
 
-        if not url:
-            raise ValueError("Source config is missing api_endpoint/url")
+        raw_data, headers = await fetch_data(source_config=source_config)
 
-    raw_data, headers = await fetch_data(url)
+    else:
+        raw_data, headers = await fetch_data(url=url, source_config={"source_type": "api"})
+
+    if not raw_data:
+        raise ValueError("No data fetched from source")
 
     df = await asyncio.to_thread(parse_data, raw_data, headers.get("content-type", ""))
 
-    metadata = generate_metadata(url, df)
+    metadata = generate_metadata(source_descriptor, df, source_type=source_type, source_details=source_config)
     if source_id:
         metadata["source_id"] = source_id
 
