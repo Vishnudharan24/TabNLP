@@ -1,4 +1,5 @@
 import os
+import math
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
@@ -7,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Literal
 from pathlib import Path
+from bson import ObjectId
 from services.data_services.ingestion_service import run_ingestion
 from db.db_store import (
     upsert_source_config,
@@ -75,16 +77,41 @@ def _serialize_source_config(source_config: dict):
         return None
 
     serialized = {key: value for key, value in source_config.items() if key != "_id"}
-    return serialized
+    return _to_json_safe(serialized)
+
+
+def _to_json_safe(value):
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+
+    if isinstance(value, ObjectId):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {k: _to_json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, list):
+        return [_to_json_safe(item) for item in value]
+
+    if isinstance(value, tuple):
+        return tuple(_to_json_safe(item) for item in value)
+
+    return value
 
 
 def _serialize_dataset(document: dict):
     if not document:
         return None
 
-    serialized = {key: value for key, value in document.items() if key != "_id"}
+    serialized = {
+        key: value
+        for key, value in document.items()
+        if key not in {"_id", "metadata"}
+    }
     serialized["document_id"] = str(document.get("_id"))
-    return serialized
+    return _to_json_safe(serialized)
 
 
 def _validate_source_config(payload: dict):
