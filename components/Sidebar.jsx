@@ -3,11 +3,11 @@ import React from 'react';
 import {
     PieChart,
     Layers,
-    Database,
     BarChart2,
     Layout,
     Merge,
-    GitBranch
+    GitBranch,
+    Server
 } from 'lucide-react';
 
 const SidebarItem = ({
@@ -37,6 +37,13 @@ const Sidebar = ({ setView, currentView }) => {
                     label="Data Hub"
                     active={currentView === 'data'}
                     onClick={() => setView('data')}
+                />
+
+                <SidebarItem
+                    icon={Server}
+                    label="Source Config"
+                    active={currentView === 'source-config'}
+                    onClick={() => setView('source-config')}
                 />
 
                 <SidebarItem

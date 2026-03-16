@@ -11,6 +11,7 @@ import DataMerger from './components/DataMerger';
 import DataProfiler from './components/DataProfiler';
 import GlobalFilterBar from './components/GlobalFilterBar';
 import RelationshipDiagram from './components/RelationshipDiagram';
+import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -196,6 +197,8 @@ const App = () => {
                             onOpenMerge={() => setShowMerger(true)}
                             onProfileDataset={id => setProfilerDatasetId(id)}
                         />
+                    ) : view === 'source-config' ? (
+                        <SourceConfigIngestionPage />
                     ) : view === 'relationships' ? (
                         <RelationshipDiagram datasets={datasets} companies={companies} />
                     ) : view === 'profiler' ? (
