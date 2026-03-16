@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+from bson import ObjectId
 
 from pymongo import ReturnDocument
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -126,6 +127,25 @@ async def unset_source_config_fields(source_id: str, fields: list[str]):
         "matched_count": result.matched_count,
         "modified_count": result.modified_count,
     }
+
+
+async def list_latest_datasets(limit: int = 100):
+    cursor = collection.find({"is_latest": True}).sort("ingested_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def get_latest_dataset_by_source(source_id: str):
+    return await collection.find_one(
+        {"source_key": source_id, "is_latest": True},
+        sort=[("ingested_at", -1)],
+    )
+
+
+async def get_dataset_by_id(document_id: str):
+    if not ObjectId.is_valid(document_id):
+        return None
+
+    return await collection.find_one({"_id": ObjectId(document_id)})
 
 
 async def upsert_source_config(

@@ -14,6 +14,9 @@ from db.db_store import (
     get_source_config,
     list_source_configs,
     unset_source_config_fields,
+    list_latest_datasets,
+    get_latest_dataset_by_source,
+    get_dataset_by_id,
 )
 
 app = FastAPI()
@@ -72,6 +75,15 @@ def _serialize_source_config(source_config: dict):
         return None
 
     serialized = {key: value for key, value in source_config.items() if key != "_id"}
+    return serialized
+
+
+def _serialize_dataset(document: dict):
+    if not document:
+        return None
+
+    serialized = {key: value for key, value in document.items() if key != "_id"}
+    serialized["document_id"] = str(document.get("_id"))
     return serialized
 
 
@@ -220,6 +232,53 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update source config: {str(e)}")
+
+
+@app.get("/datasets/latest")
+async def get_latest_datasets(limit: int = 100):
+    try:
+        documents = await list_latest_datasets(limit=limit)
+        return {
+            "status": "success",
+            "count": len(documents),
+            "items": [_serialize_dataset(document) for document in documents],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list datasets: {str(e)}")
+
+
+@app.get("/datasets/latest/{source_id}")
+async def get_latest_dataset_for_source(source_id: str):
+    try:
+        document = await get_latest_dataset_by_source(source_id)
+        if not document:
+            raise HTTPException(status_code=404, detail=f"No latest dataset found for source: {source_id}")
+
+        return {
+            "status": "success",
+            "item": _serialize_dataset(document),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch latest dataset: {str(e)}")
+
+
+@app.get("/datasets/{document_id}")
+async def get_dataset_document(document_id: str):
+    try:
+        document = await get_dataset_by_id(document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {document_id}")
+
+        return {
+            "status": "success",
+            "item": _serialize_dataset(document),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch dataset: {str(e)}")
 
 
 
