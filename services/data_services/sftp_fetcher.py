@@ -4,8 +4,6 @@ import os
 import paramiko
 
 
-_SENSITIVE_KEYS = {"password", "passphrase", "private_key", "token", "secret"}
-
 
 def _load_private_key(private_key_path: str, passphrase: str = None):
     expanded_key_path = os.path.abspath(os.path.expanduser(private_key_path))

@@ -108,6 +108,26 @@ async def get_source_config(source_key: str):
     return await source_config_collection.find_one({"$or": query_options})
 
 
+async def list_source_configs(limit: int = 200):
+    cursor = source_config_collection.find({}).sort("source_id", 1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def unset_source_config_fields(source_id: str, fields: list[str]):
+    if not fields:
+        return {"matched_count": 0, "modified_count": 0}
+
+    result = await source_config_collection.update_one(
+        {"source_id": source_id},
+        {"$unset": {field: "" for field in fields}},
+    )
+
+    return {
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+    }
+
+
 async def upsert_source_config(
     source_id: str,
     name: str,
