@@ -56,6 +56,18 @@ export const backendApi = {
         return request(`/ingest/source/${encodeURIComponent(sourceId)}`, { method: 'POST' }, baseUrl);
     },
 
+    listLatestDatasets(limit = 100, baseUrl) {
+        return request(`/datasets/latest?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl);
+    },
+
+    getLatestDatasetBySourceId(sourceId, baseUrl) {
+        return request(`/datasets/latest/${encodeURIComponent(sourceId)}`, { method: 'GET' }, baseUrl);
+    },
+
+    getDatasetByDocumentId(documentId, baseUrl) {
+        return request(`/datasets/${encodeURIComponent(documentId)}`, { method: 'GET' }, baseUrl);
+    },
+
     getTestExcel(baseUrl) {
         return request('/test/excel', { method: 'GET' }, baseUrl);
     },

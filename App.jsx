@@ -26,11 +26,54 @@ import {
 import { ChartType } from './types';
 import { useTheme } from './contexts/ThemeContext';
 import { recommendCharts } from './services/chartRecommender';
+import { backendApi } from './services/backendApi';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
 const STORAGE_KEY_PAGES = 'power_bi_v3_pages_restored';
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+
+const inferColumnType = (values = []) => {
+    const sample = values.filter(v => v !== null && v !== undefined && v !== '').slice(0, 50);
+    if (sample.length === 0) return 'string';
+
+    const allNumbers = sample.every(v => typeof v === 'number' || (!Number.isNaN(Number(v)) && `${v}`.trim() !== ''));
+    if (allNumbers) return 'number';
+
+    const allDates = sample.every(v => !Number.isNaN(Date.parse(v)));
+    if (allDates) return 'date';
+
+    return 'string';
+};
+
+const mapBackendDatasetToAppDataset = (item) => {
+    const rows = Array.isArray(item?.data) ? item.data : [];
+    const metadataColumns = item?.metadata?.columns || [];
+    const detectedColumns = metadataColumns.length > 0
+        ? metadataColumns
+        : (rows[0] ? Object.keys(rows[0]) : []);
+
+    const columns = detectedColumns.map((name) => ({
+        name,
+        type: inferColumnType(rows.map(r => r?.[name])),
+    }));
+
+    return {
+        id: item?.source_key || item?.source_id || item?.document_id,
+        name: item?.source_id || item?.metadata?.source || `dataset-${item?.version ?? 'latest'}`,
+        columns,
+        data: rows,
+        companyId: null,
+        _meta: {
+            documentId: item?.document_id,
+            version: item?.version,
+            sourceId: item?.source_id,
+            sourceKey: item?.source_key,
+            ingestedAt: item?.ingested_at,
+            backend: true,
+        },
+    };
+};
 
 const App = () => {
     const { theme } = useTheme();
@@ -175,6 +218,28 @@ const App = () => {
     const currentPageCharts = useMemo(() => charts.filter(c => c.pageId === activePageId), [charts, activePageId]);
     const gridLayouts = useMemo(() => currentPageCharts.map(c => ({ i: c.id, ...c.layout })), [currentPageCharts]);
 
+    const handleBackendIngestionSuccess = async (ingestionResult) => {
+        const sourceId = ingestionResult?.source_id;
+        if (!sourceId) return;
+
+        try {
+            const latest = await backendApi.getLatestDatasetBySourceId(sourceId);
+            const item = latest?.item;
+            if (!item) return;
+
+            const mapped = mapBackendDatasetToAppDataset(item);
+
+            setDatasets(prev => {
+                const withoutSameId = prev.filter(d => d.id !== mapped.id);
+                return [...withoutSameId, mapped];
+            });
+            setSelectedDatasetId(mapped.id);
+            setView('data');
+        } catch (error) {
+            console.error('Failed to load latest ingested dataset:', error);
+        }
+    };
+
     return (
         <div className={`flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
             <Header />
@@ -198,7 +263,7 @@ const App = () => {
                             onProfileDataset={id => setProfilerDatasetId(id)}
                         />
                     ) : view === 'source-config' ? (
-                        <SourceConfigIngestionPage />
+                        <SourceConfigIngestionPage onIngestionSuccess={handleBackendIngestionSuccess} />
                     ) : view === 'relationships' ? (
                         <RelationshipDiagram datasets={datasets} companies={companies} />
                     ) : view === 'profiler' ? (
