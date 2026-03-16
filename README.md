@@ -1,4 +1,4 @@
-# PowerAnalytics Desktop
+# ChillView
 
 A desktop-style analytics dashboard built with React, featuring interactive visualizations with ECharts and a customizable grid layout.
 
