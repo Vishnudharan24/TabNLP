@@ -16,6 +16,7 @@ from db.db_store import (
     get_source_config,
     list_source_configs,
     unset_source_config_fields,
+    list_datasets,
     list_latest_datasets,
     get_latest_dataset_by_source,
     get_dataset_by_id,
@@ -272,6 +273,19 @@ async def get_latest_datasets(limit: int = 100):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list datasets: {str(e)}")
+
+
+@app.get("/datasets")
+async def get_all_datasets(limit: int = 1000):
+    try:
+        documents = await list_datasets(limit=limit)
+        return {
+            "status": "success",
+            "count": len(documents),
+            "items": [_serialize_dataset(document) for document in documents],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list all datasets: {str(e)}")
 
 
 @app.get("/datasets/latest/{source_id}")

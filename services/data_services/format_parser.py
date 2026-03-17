@@ -11,7 +11,7 @@ def _normalize_excel_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # Keep all columns (including fully empty ones) and only drop fully empty rows.
+    # Keep all columns (including Unnamed:* ones) and only drop fully empty rows.
     df = df.dropna(axis=0, how="all").reset_index(drop=True)
     return df
 

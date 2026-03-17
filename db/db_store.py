@@ -134,6 +134,11 @@ async def list_latest_datasets(limit: int = 100):
     return await cursor.to_list(length=limit)
 
 
+async def list_datasets(limit: int = 1000):
+    cursor = collection.find({}).sort([("ingested_at", -1)]).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
 async def get_latest_dataset_by_source(source_id: str):
     return await collection.find_one(
         {"source_key": source_id, "is_latest": True},
