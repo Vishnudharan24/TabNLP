@@ -2,15 +2,22 @@ import os
 import math
 import mimetypes
 import logging
+import base64
+import hashlib
+import hmac
+import json
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
+from fastapi import Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Literal
 from pathlib import Path
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from services.data_services.ingestion_service import run_ingestion
 from db.db_store import (
     upsert_source_config,
@@ -22,6 +29,10 @@ from db.db_store import (
     list_latest_datasets,
     get_latest_dataset_by_source,
     get_dataset_by_id,
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    update_user_last_login,
 )
 
 app = FastAPI()
@@ -47,6 +58,8 @@ TEST_EXCEL_FILE = Path("/home/vishnudharan/odyssey/TabNLP/poweranalytics-desktop
 DEFAULT_SFTP_USERNAME = "sftp_user"
 DEFAULT_SFTP_PRIVATE_KEY_PATH = str(Path.home() / ".ssh" / "id_rsa")
 DEFAULT_SFTP_REMOTE_PATH = str(Path.home() / "odyssey" / "TabNLP" / "data" / "Employee_Master_Data_260220261036.xlsx")
+AUTH_SECRET = os.getenv("AUTH_SECRET", "change-this-auth-secret-in-production")
+AUTH_TOKEN_DAYS = int(os.getenv("AUTH_TOKEN_DAYS", "7"))
 
 
 class SFTPConfig(BaseModel):
@@ -74,6 +87,17 @@ class SourceConfigPatchRequest(BaseModel):
     api_endpoint: Optional[str] = None
     url: Optional[str] = None
     sftp: Optional[SFTPConfig] = None
+
+
+class SignUpRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 def _serialize_source_config(source_config: dict):
@@ -133,10 +157,168 @@ def _validate_source_config(payload: dict):
         raise ValueError("source_type must be either 'api' or 'sftp'")
 
 
+def _normalize_email(email: str):
+    return (email or "").strip().lower()
+
+
+def _hash_password(password: str, salt: Optional[str] = None):
+    if not salt:
+        salt = base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000)
+    return f"{salt}${base64.urlsafe_b64encode(digest).decode().rstrip('=')}"
+
+
+def _verify_password(password: str, stored_hash: str):
+    try:
+        salt = stored_hash.split("$", 1)[0]
+    except Exception:
+        return False
+
+    expected = _hash_password(password, salt=salt)
+    return hmac.compare_digest(expected, stored_hash)
+
+
+def _base64url_encode(data: bytes):
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def _base64url_decode(data: str):
+    padded = data + "=" * ((4 - len(data) % 4) % 4)
+    return base64.urlsafe_b64decode(padded.encode())
+
+
+def _create_access_token(user_id: str, email: str):
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=AUTH_TOKEN_DAYS)).timestamp()),
+    }
+    payload_b64 = _base64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signature = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    signature_b64 = _base64url_encode(signature)
+    return f"{payload_b64}.{signature_b64}"
+
+
+def _decode_access_token(token: str):
+    try:
+        payload_b64, signature_b64 = token.split(".", 1)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    expected_sig = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    expected_sig_b64 = _base64url_encode(expected_sig)
+    if not hmac.compare_digest(expected_sig_b64, signature_b64):
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    try:
+        payload = json.loads(_base64url_decode(payload_b64).decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    exp = payload.get("exp")
+    if not exp or int(exp) < int(datetime.now(timezone.utc).timestamp()):
+        raise HTTPException(status_code=401, detail="Authentication token expired")
+
+    return payload
+
+
+def _user_public(user_doc: dict):
+    if not user_doc:
+        return None
+    return {
+        "id": str(user_doc.get("_id")),
+        "name": user_doc.get("name"),
+        "email": user_doc.get("email"),
+        "created_at": user_doc.get("created_at"),
+        "last_login_at": user_doc.get("last_login_at"),
+    }
+
+
 def _raise_internal_error(public_message: str, exc: Exception):
     _ = exc
     logger.exception(public_message)
     raise HTTPException(status_code=500, detail=public_message)
+
+
+@app.post("/auth/signup")
+async def auth_signup(payload: SignUpRequest):
+    try:
+        name = (payload.name or "").strip()
+        email = _normalize_email(payload.email)
+        password = payload.password or ""
+
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="Name must be at least 2 characters")
+        if "@" not in email:
+            raise HTTPException(status_code=400, detail="A valid email is required")
+        if len(password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+        password_hash = _hash_password(password)
+        user_doc = await create_user(name=name, email=email, password_hash=password_hash)
+        token = _create_access_token(str(user_doc.get("_id")), email)
+
+        return {
+            "status": "success",
+            "token": token,
+            "user": _to_json_safe(_user_public(user_doc)),
+        }
+    except HTTPException:
+        raise
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    except Exception as e:
+        _raise_internal_error("Signup failed", e)
+
+
+@app.post("/auth/login")
+async def auth_login(payload: LoginRequest):
+    try:
+        email = _normalize_email(payload.email)
+        password = payload.password or ""
+
+        user_doc = await get_user_by_email(email)
+        if not user_doc or not _verify_password(password, user_doc.get("password_hash", "")):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        await update_user_last_login(str(user_doc.get("_id")))
+        refreshed_user = await get_user_by_id(str(user_doc.get("_id")))
+        token = _create_access_token(str(user_doc.get("_id")), email)
+
+        return {
+            "status": "success",
+            "token": token,
+            "user": _to_json_safe(_user_public(refreshed_user or user_doc)),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Login failed", e)
+
+
+@app.get("/auth/me")
+async def auth_me(authorization: Optional[str] = Header(default=None)):
+    try:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="Missing authentication token")
+
+        token = authorization.split(" ", 1)[1].strip()
+        payload = _decode_access_token(token)
+        user_id = payload.get("sub")
+        user_doc = await get_user_by_id(user_id)
+        if not user_doc:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return {
+            "status": "success",
+            "user": _to_json_safe(_user_public(user_doc)),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Authentication check failed", e)
 
 
 @app.on_event("startup")

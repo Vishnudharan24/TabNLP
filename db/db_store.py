@@ -18,6 +18,7 @@ db = client[MONGODB_DB_NAME]
 collection = db["datasets"]
 source_config_collection = db["source_config"]
 version_counters_collection = db["dataset_version_counters"]
+users_collection = db["users"]
 
 _indexes_initialized = False
 
@@ -44,6 +45,11 @@ async def ensure_indexes():
         [("source_id", 1)],
         unique=True,
         name="source_config_source_id_unique",
+    )
+    await users_collection.create_index(
+        [("email", 1)],
+        unique=True,
+        name="users_email_unique",
     )
 
     _indexes_initialized = True
@@ -186,4 +192,41 @@ async def upsert_source_config(
         "matched_count": result.matched_count,
         "modified_count": result.modified_count,
         "upserted_id": str(result.upserted_id) if result.upserted_id else None,
+    }
+
+
+async def create_user(name: str, email: str, password_hash: str):
+    document = {
+        "name": name,
+        "email": email,
+        "password_hash": password_hash,
+        "created_at": datetime.now(timezone.utc),
+        "last_login_at": None,
+    }
+    result = await users_collection.insert_one(document)
+    document["_id"] = result.inserted_id
+    return document
+
+
+async def get_user_by_email(email: str):
+    return await users_collection.find_one({"email": email})
+
+
+async def get_user_by_id(user_id: str):
+    if not ObjectId.is_valid(user_id):
+        return None
+    return await users_collection.find_one({"_id": ObjectId(user_id)})
+
+
+async def update_user_last_login(user_id: str):
+    if not ObjectId.is_valid(user_id):
+        return {"matched_count": 0, "modified_count": 0}
+
+    result = await users_collection.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"last_login_at": datetime.now(timezone.utc)}},
+    )
+    return {
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
     }
