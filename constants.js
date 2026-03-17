@@ -47,8 +47,8 @@ export const CHART_COLORS = [
 ];
 
 export const CHART_COLORS_DARK = [
-    '#2563EB', '#1D4ED8', '#3B82F6', '#60A5FA', '#1E293B',
-    '#334155', '#475569', '#22C55E', '#16A34A', '#86EFAC',
+    '#60A5FA', '#34D399', '#F87171', '#FBBF24', '#A78BFA',
+    '#22D3EE', '#F472B6', '#2DD4BF', '#FB923C', '#818CF8',
 ];
 
 export const CHART_COLORS_NEUTRAL = [

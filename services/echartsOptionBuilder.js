@@ -86,6 +86,18 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         animationEasingUpdate: 'cubicInOut',
     };
 
+    const lineUi = {
+        text: isDark ? '#E2E8F0' : '#111827',
+        subtext: isDark ? '#94A3B8' : '#111827',
+        tooltipBg: isDark ? '#0F172A' : '#FFFFFF',
+        tooltipBorder: isDark ? '#334155' : '#E5E7EB',
+        markerBorder: isDark ? '#0F172A' : '#FFFFFF',
+        axisPointer: isDark ? '#60A5FA' : '#93C5FD',
+        splitLine: isDark ? 'rgba(148,163,184,0.16)' : '#E5E7EB',
+        lineShadow: isDark ? 'rgba(96,165,250,0.35)' : 'rgba(59,130,246,0.28)',
+        emphasisShadow: isDark ? 'rgba(96,165,250,0.45)' : 'rgba(37,99,235,0.35)',
+    };
+
     const formatMetric = (value) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
     const getLineInsights = (values = []) => {
         if (!Array.isArray(values) || values.length === 0) {
@@ -157,13 +169,13 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         ],
                     }
                     : '#93C5FD',
-                shadowColor: 'rgba(59,130,246,0.28)',
+                shadowColor: lineUi.lineShadow,
                 shadowBlur: 10,
                 shadowOffsetY: 3,
             },
             itemStyle: {
                 color: '#3B82F6',
-                borderColor: '#FFFFFF',
+                borderColor: lineUi.markerBorder,
                 borderWidth: 2,
             },
             areaStyle: {
@@ -185,16 +197,16 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 scale: true,
                 itemStyle: {
                     color: '#2563EB',
-                    borderColor: '#FFFFFF',
+                    borderColor: lineUi.markerBorder,
                     borderWidth: 3,
                     shadowBlur: 14,
-                    shadowColor: 'rgba(37,99,235,0.35)',
+                    shadowColor: lineUi.emphasisShadow,
                 },
             },
             markPoint: isPrimarySeries && insights ? {
                 symbolSize: 44,
-                label: { color: '#111827', fontWeight: 700, fontSize: 12 },
-                itemStyle: { color: '#FFFFFF', borderColor: '#3B82F6', borderWidth: 2 },
+                label: { color: lineUi.text, fontWeight: 700, fontSize: 12 },
+                itemStyle: { color: lineUi.tooltipBg, borderColor: '#3B82F6', borderWidth: 2 },
                 data: [
                     ...(insights.maxIndex >= 0 ? [{ name: 'Max', type: 'max' }] : []),
                     ...(insights.minIndex >= 0 ? [{ name: 'Min', type: 'min' }] : []),
@@ -202,12 +214,12 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             } : undefined,
             markLine: isPrimarySeries && insights && insights.dropIndex >= 0 ? {
                 symbol: 'none',
-                lineStyle: { type: 'dashed', color: '#111827', opacity: 0.35, width: 1.5 },
+                lineStyle: { type: 'dashed', color: lineUi.text, opacity: 0.35, width: 1.5 },
                 label: {
                     show: true,
                     formatter: 'Drop starts here',
-                    color: '#111827',
-                    backgroundColor: '#FFFFFF',
+                    color: lineUi.text,
+                    backgroundColor: lineUi.tooltipBg,
                     padding: [4, 8],
                     borderRadius: 8,
                 },
@@ -326,13 +338,13 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     left: 16,
                     top: 8,
                     textStyle: {
-                        color: '#111827',
+                        color: lineUi.text,
                         fontSize: 16,
                         fontWeight: 700,
                         fontFamily: 'Plus Jakarta Sans, sans-serif',
                     },
                     subtextStyle: {
-                        color: '#111827',
+                        color: lineUi.subtext,
                         fontSize: 12,
                         fontWeight: 500,
                         opacity: 0.75,
@@ -341,12 +353,12 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 },
                 tooltip: {
                     ...tooltipStyle,
-                    backgroundColor: '#FFFFFF',
-                    borderColor: '#E5E7EB',
-                    textStyle: { color: '#111827', fontSize: 12, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+                    backgroundColor: lineUi.tooltipBg,
+                    borderColor: lineUi.tooltipBorder,
+                    textStyle: { color: lineUi.text, fontSize: 12, fontFamily: 'Plus Jakarta Sans, sans-serif' },
                     axisPointer: {
                         type: 'line',
-                        lineStyle: { color: '#93C5FD', width: 1.5 },
+                        lineStyle: { color: lineUi.axisPointer, width: 1.5 },
                     },
                     formatter: (params) => {
                         const p = params?.[0];
@@ -358,8 +370,8 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                             : '';
 
                         return `
-                            <div style="font-weight:700;margin-bottom:6px;color:#111827">${p.axisValue}</div>
-                            <div style="display:flex;align-items:center;gap:8px;color:#111827">
+                            <div style="font-weight:700;margin-bottom:6px;color:${lineUi.text}">${p.axisValue}</div>
+                            <div style="display:flex;align-items:center;gap:8px;color:${lineUi.text}">
                                 <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#3B82F6"></span>
                                 <span style="font-weight:600">${p.seriesName}:</span>
                                 <span>${formatMetric(value)}${deltaText}</span>
@@ -371,12 +383,12 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 grid: { ...gridStyle, top: 88, left: 56, right: 24, bottom: 56 },
                 xAxis: {
                     ...xAxisCategory,
-                    axisLabel: { ...xAxisCategory.axisLabel, color: '#111827', fontSize: 12 },
+                    axisLabel: { ...xAxisCategory.axisLabel, color: lineUi.text, fontSize: 12 },
                 },
                 yAxis: {
                     ...yAxisValue,
-                    axisLabel: { ...yAxisValue.axisLabel, color: '#111827', fontSize: 12 },
-                    splitLine: { lineStyle: { color: '#E5E7EB', type: 'solid', opacity: 0.9 } },
+                    axisLabel: { ...yAxisValue.axisLabel, color: lineUi.text, fontSize: 12 },
+                    splitLine: { lineStyle: { color: lineUi.splitLine, type: 'solid', opacity: 0.9 } },
                 },
                 series: measures.map((m, i) => buildPremiumLineSeries({
                     measure: m,

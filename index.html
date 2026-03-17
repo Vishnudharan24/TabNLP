@@ -13,49 +13,135 @@
         rel="stylesheet">
     <style>
         :root {
-            --brand-primary: #2563EB;
+            --brand-primary: #3B82F6;
             --brand-secondary: #1E293B;
             --brand-accent: #22C55E;
+
             --bg-main: #F8FAFC;
-            --bg-card: #ffffff;
-            --bg-surface: #EFF6FF;
+            --bg-card: #FFFFFF;
+            --bg-surface: #FFFFFF;
+            --bg-elevated: #FFFFFF;
+            --bg-hover: #F1F5F9;
+            --bg-active: #E2E8F0;
+
             --text-primary: #0F172A;
             --text-secondary: #334155;
-            --border-color: #DBEAFE;
-            --hover-bg: #EFF6FF;
-            --scrollbar-thumb: #93C5FD;
-            --scrollbar-hover: #60A5FA;
-            --canvas-dot: #BFDBFE;
+            --text-muted: #64748B;
+            --text-disabled: #94A3B8;
+
+            --border-color: #E2E8F0;
+            --border-strong: #CBD5E1;
+            --divider: #E5E7EB;
+
+            --scrollbar-thumb: #CBD5E1;
+            --scrollbar-hover: #94A3B8;
+
+            --canvas-dot: #CBD5E1;
             --canvas-bg: #F8FAFC;
             --grid-placeholder-bg: #DBEAFE;
-            --grid-placeholder-border: #2563EB;
-            --resize-handle: #2563EB;
+            --grid-placeholder-border: #3B82F6;
+            --resize-handle: #64748B;
+
+            --shadow-panel: 0 6px 24px rgba(2, 6, 23, 0.08);
+            --shadow-elevated: 0 14px 40px rgba(2, 6, 23, 0.12);
+
+            --control-text: #0F172A;
+            --control-disabled-bg: #E2E8F0;
+            --control-disabled-text: #475569;
+            --focus-ring: rgba(59, 130, 246, 0.42);
         }
 
         html.dark {
-            --brand-primary: #2563EB;
+            --brand-primary: #3B82F6;
             --brand-secondary: #1E293B;
             --brand-accent: #22C55E;
-            --bg-main: #F8FAFC;
-            --bg-card: #FFFFFF;
-            --bg-surface: #EFF6FF;
-            --text-primary: #0F172A;
-            --text-secondary: #334155;
-            --border-color: #DBEAFE;
-            --hover-bg: #EFF6FF;
-            --scrollbar-thumb: #93C5FD;
-            --scrollbar-hover: #60A5FA;
-            --canvas-dot: #BFDBFE;
-            --canvas-bg: #F8FAFC;
-            --grid-placeholder-bg: #DBEAFE;
-            --grid-placeholder-border: #2563EB;
-            --resize-handle: #2563EB;
+
+            --bg-main: #0F172A;
+            --bg-card: #111827;
+            --bg-surface: #111827;
+            --bg-elevated: #1E293B;
+            --bg-hover: #243244;
+            --bg-active: #2B3B52;
+
+            --text-primary: #E2E8F0;
+            --text-secondary: #94A3B8;
+            --text-muted: #64748B;
+            --text-disabled: #475569;
+
+            --border-color: #253449;
+            --border-strong: #334155;
+            --divider: #2A3A50;
+
+            --scrollbar-thumb: #334155;
+            --scrollbar-hover: #475569;
+
+            --canvas-dot: #1E293B;
+            --canvas-bg: #0F172A;
+            --grid-placeholder-bg: #1E293B;
+            --grid-placeholder-border: #3B82F6;
+            --resize-handle: #64748B;
+
+            --shadow-panel: 0 6px 24px rgba(2, 6, 23, 0.35);
+            --shadow-elevated: 0 16px 44px rgba(2, 6, 23, 0.48);
+
+            --control-text: #E2E8F0;
+            --control-disabled-bg: #1F2937;
+            --control-disabled-text: #64748B;
+            --focus-ring: rgba(96, 165, 250, 0.46);
         }
 
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
             background-color: var(--bg-main);
             color: var(--text-primary);
+        }
+
+        body,
+        #root,
+        .glass-panel,
+        .react-grid-item,
+        .report-toolbar-controls>button,
+        .report-toolbar-controls>select,
+        input,
+        select,
+        button {
+            transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+        }
+
+        /* WCAG-focused interactive state defaults */
+        .app-type-system button,
+        .app-type-system select,
+        .app-type-system input,
+        .app-type-system textarea,
+        .app-type-system [role="button"] {
+            color: var(--control-text);
+        }
+
+        .app-type-system button:focus-visible,
+        .app-type-system select:focus-visible,
+        .app-type-system input:focus-visible,
+        .app-type-system textarea:focus-visible,
+        .app-type-system [role="button"]:focus-visible {
+            outline: 2px solid var(--brand-primary);
+            outline-offset: 2px;
+            box-shadow: 0 0 0 3px var(--focus-ring);
+        }
+
+        .app-type-system button:disabled,
+        .app-type-system select:disabled,
+        .app-type-system input:disabled,
+        .app-type-system textarea:disabled,
+        .app-type-system [role="button"][aria-disabled="true"] {
+            background-color: var(--control-disabled-bg) !important;
+            color: var(--control-disabled-text) !important;
+            border-color: var(--border-strong) !important;
+            opacity: 1 !important;
+            cursor: not-allowed;
+        }
+
+        .app-type-system .disabled\:opacity-50:disabled,
+        .app-type-system .disabled\:opacity-60:disabled {
+            opacity: 1 !important;
         }
 
         /* App-wide typography normalization: 12 / 14 / 16 */
@@ -171,6 +257,7 @@
         .glass-panel {
             background-color: var(--bg-card);
             border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-panel);
         }
 
         /* Designer Canvas Styles */
@@ -194,10 +281,10 @@
         .react-grid-item {
             transition: all 200ms ease;
             transition-property: left, top, transform;
-            background: var(--bg-card);
+            background: var(--bg-surface);
             border: 1px solid var(--border-color);
             border-radius: 0.9rem;
-            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.03), 0 6px 12px -8px rgb(0 0 0 / 0.22);
+            box-shadow: var(--shadow-panel);
         }
 
         .react-grid-item.cssTransforms {
@@ -206,13 +293,13 @@
 
         .react-grid-item.resizing {
             z-index: 100;
-            box-shadow: 0 12px 26px -14px rgb(0 0 0 / 0.35);
+            box-shadow: var(--shadow-elevated);
         }
 
         .react-grid-item.react-draggable-dragging {
             transition: none;
             z-index: 100;
-            box-shadow: 0 20px 36px -18px rgb(0 0 0 / 0.45);
+            box-shadow: var(--shadow-elevated);
         }
 
         .react-grid-placeholder {
@@ -273,34 +360,48 @@
             background-color: #1d4ed8;
         }
 
-        /* Palette enforcement for commonly used utility classes */
+        /* Variable-driven utility remap (keeps existing Tailwind class usage, adds premium dark layering) */
         .bg-gray-50,
-        .bg-gray-100 {
-            background-color: #F8FAFC !important;
+        .bg-gray-100,
+        .dark .dark\:bg-gray-900 {
+            background-color: var(--bg-main) !important;
         }
 
-        .bg-white {
-            background-color: #FFFFFF !important;
+        .bg-white,
+        .dark .dark\:bg-gray-800 {
+            background-color: var(--bg-surface) !important;
         }
 
-        .bg-gray-200 {
-            background-color: #DBEAFE !important;
-            color: #0F172A !important;
+        .bg-gray-200,
+        .dark .dark\:bg-gray-700 {
+            background-color: var(--bg-active) !important;
+            color: var(--text-primary) !important;
         }
 
         .bg-gray-700,
         .bg-gray-800,
         .bg-gray-900 {
-            background-color: #1E293B !important;
+            background-color: var(--bg-elevated) !important;
         }
 
         .text-gray-900,
         .text-gray-800,
         .text-gray-700,
+        .dark .dark\:text-gray-100,
+        .dark .dark\:text-gray-200,
+        .dark .dark\:text-gray-300 {
+            color: var(--text-primary) !important;
+        }
+
         .text-gray-600,
         .text-gray-500,
-        .text-gray-400 {
-            color: #0F172A !important;
+        .text-gray-400,
+        .dark .dark\:text-gray-400,
+        .dark .dark\:text-gray-500,
+        .dark .dark\:text-gray-600,
+        .dark .dark\:text-gray-700,
+        .dark .dark\:text-gray-800 {
+            color: var(--text-secondary) !important;
         }
 
         .text-white {
@@ -310,71 +411,54 @@
         .border-gray-200,
         .border-gray-300,
         .border-gray-600,
-        .border-gray-700 {
-            border-color: #DBEAFE !important;
+        .border-gray-700,
+        .dark .dark\:border-gray-700,
+        .dark .dark\:border-gray-600,
+        .dark .dark\:border-gray-500 {
+            border-color: var(--border-color) !important;
         }
 
         .bg-blue-50,
         .bg-blue-100 {
-            background-color: #EFF6FF !important;
+            background-color: color-mix(in srgb, var(--brand-primary) 14%, transparent) !important;
         }
 
         .text-blue-500,
         .text-blue-600,
         .text-blue-700,
         .text-blue-800 {
-            color: #2563EB !important;
+            color: var(--brand-primary) !important;
         }
 
         .border-blue-100,
         .border-blue-200,
         .border-blue-700,
         .border-blue-800 {
-            border-color: #BFDBFE !important;
+            border-color: color-mix(in srgb, var(--brand-primary) 35%, var(--border-color)) !important;
         }
 
         .bg-emerald-50,
         .bg-emerald-100 {
-            background-color: #ECFDF5 !important;
+            background-color: color-mix(in srgb, var(--brand-accent) 14%, transparent) !important;
         }
 
         .text-emerald-500,
         .text-emerald-600,
         .text-emerald-700,
         .text-emerald-800 {
-            color: #22C55E !important;
+            color: var(--brand-accent) !important;
         }
 
         .border-emerald-100,
         .border-emerald-200,
         .border-emerald-700,
         .border-emerald-800 {
-            border-color: #BBF7D0 !important;
+            border-color: color-mix(in srgb, var(--brand-accent) 35%, var(--border-color)) !important;
         }
 
-        .dark .dark\:bg-gray-900,
-        .dark .dark\:bg-gray-800,
-        .dark .dark\:bg-gray-700,
-        .dark .dark\:bg-gray-200,
-        .dark .dark\:bg-gray-100 {
-            background-color: #FFFFFF !important;
-        }
-
-        .dark .dark\:text-gray-100,
-        .dark .dark\:text-gray-200,
-        .dark .dark\:text-gray-300,
-        .dark .dark\:text-gray-400,
-        .dark .dark\:text-gray-500,
-        .dark .dark\:text-gray-600,
-        .dark .dark\:text-gray-700,
-        .dark .dark\:text-gray-800 {
-            color: #0F172A !important;
-        }
-
-        .dark .dark\:border-gray-700,
-        .dark .dark\:border-gray-600,
-        .dark .dark\:border-gray-500 {
-            border-color: #DBEAFE !important;
+        .react-grid-item:has(.ring-2),
+        .react-grid-item:focus-within {
+            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2), 0 0 0 6px rgba(59, 130, 246, 0.12), var(--shadow-panel);
         }
     </style>
     <script type="importmap">
