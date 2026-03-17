@@ -7,7 +7,8 @@ import {
     Layout,
     Merge,
     GitBranch,
-    Server
+    Server,
+    Users
 } from 'lucide-react';
 
 const SidebarItem = ({
@@ -72,6 +73,13 @@ const Sidebar = ({ setView, currentView }) => {
                     label="Profiler"
                     active={currentView === 'profiler'}
                     onClick={() => setView('profiler')}
+                />
+
+                <SidebarItem
+                    icon={Users}
+                    label="HR Analytics"
+                    active={currentView === 'hr-analytics'}
+                    onClick={() => setView('hr-analytics')}
                 />
 
                 
