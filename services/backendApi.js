@@ -60,6 +60,10 @@ export const backendApi = {
         return request(`/datasets/latest?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl);
     },
 
+    listDatasets(limit = 1000, baseUrl) {
+        return request(`/datasets?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl);
+    },
+
     getLatestDatasetBySourceId(sourceId, baseUrl) {
         return request(`/datasets/latest/${encodeURIComponent(sourceId)}`, { method: 'GET' }, baseUrl);
     },

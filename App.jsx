@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider } from 'react-grid-layout';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -31,7 +31,44 @@ import { backendApi } from './services/backendApi';
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
 const STORAGE_KEY_PAGES = 'power_bi_v3_pages_restored';
+const STORAGE_KEY_DATASETS = 'power_bi_v3_datasets_restored';
+const STORAGE_KEY_COMPANIES = 'power_bi_v3_companies_restored';
+const STORAGE_KEY_GLOBAL_FILTERS = 'power_bi_v3_global_filters_restored';
+const STORAGE_KEY_ACTIVE_PAGE = 'power_bi_v3_active_page_restored';
+const STORAGE_KEY_SELECTED_DATASET = 'power_bi_v3_selected_dataset_restored';
+const STORAGE_KEY_ACTIVE_COMPANY = 'power_bi_v3_active_company_restored';
+const STORAGE_KEY_VIEW = 'power_bi_v3_view_restored';
+const STORAGE_KEY_BACKEND_SOURCE_IDS = 'power_bi_v3_backend_source_ids_restored';
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+
+const readStorageJson = (key, fallback) => {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
+    }
+};
+
+const writeStorageJson = (key, value) => {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+    } catch (error) {
+        console.warn(`Failed to persist ${key}:`, error);
+        return false;
+    }
+};
+
+const extractBackendSourceIds = (datasets = []) => (
+    Array.from(new Set(
+        datasets
+            .filter(ds => ds?._meta?.backend)
+            .map(ds => ds?._meta?.sourceId || ds?._meta?.sourceKey)
+            .filter(Boolean)
+    ))
+);
 
 const inferColumnType = (values = []) => {
     const sample = values.filter(v => v !== null && v !== undefined && v !== '').slice(0, 50);
@@ -48,10 +85,7 @@ const inferColumnType = (values = []) => {
 
 const mapBackendDatasetToAppDataset = (item) => {
     const rows = Array.isArray(item?.data) ? item.data : [];
-    const metadataColumns = item?.metadata?.columns || [];
-    const detectedColumns = metadataColumns.length > 0
-        ? metadataColumns
-        : (rows[0] ? Object.keys(rows[0]) : []);
+    const detectedColumns = rows[0] ? Object.keys(rows[0]) : [];
 
     const columns = detectedColumns.map((name) => ({
         name,
@@ -59,8 +93,8 @@ const mapBackendDatasetToAppDataset = (item) => {
     }));
 
     return {
-        id: item?.source_key || item?.source_id || item?.document_id,
-        name: item?.source_id || item?.metadata?.source || `dataset-${item?.version ?? 'latest'}`,
+        id: item?.document_id || `${item?.source_key || item?.source_id || 'dataset'}::${item?.version ?? 'latest'}`,
+        name: `${item?.source_id || item?.source_key || 'dataset'} (v${item?.version ?? 'latest'})`,
         columns,
         data: rows,
         companyId: null,
@@ -77,6 +111,7 @@ const mapBackendDatasetToAppDataset = (item) => {
 
 const App = () => {
     const { theme } = useTheme();
+    const hasHydratedRef = useRef(false);
     const [view, setView] = useState('data');
     const [isEditMode, setIsEditMode] = useState(true);
     const [datasets, setDatasets] = useState([]);
@@ -95,15 +130,142 @@ const App = () => {
     const [profilerDatasetId, setProfilerDatasetId] = useState(null);
 
     useEffect(() => {
-        const firstPageId = 'page-1';
-        setPages([{ id: firstPageId, name: 'Page 1' }]);
-        setActivePageId(firstPageId);
+        const restoredDatasets = readStorageJson(STORAGE_KEY_DATASETS, []);
+        const restoredBackendSourceIds = readStorageJson(STORAGE_KEY_BACKEND_SOURCE_IDS, []);
+        const restoredCompanies = readStorageJson(STORAGE_KEY_COMPANIES, []);
+        const restoredCharts = readStorageJson(STORAGE_KEY_CHARTS, []);
+        const restoredPages = readStorageJson(STORAGE_KEY_PAGES, []);
+        const restoredGlobalFilters = readStorageJson(STORAGE_KEY_GLOBAL_FILTERS, []);
+        const restoredActivePage = readStorageJson(STORAGE_KEY_ACTIVE_PAGE, null);
+        const restoredSelectedDataset = readStorageJson(STORAGE_KEY_SELECTED_DATASET, null);
+        const restoredActiveCompany = readStorageJson(STORAGE_KEY_ACTIVE_COMPANY, '__all__');
+        const restoredView = readStorageJson(STORAGE_KEY_VIEW, 'data');
+
+        setDatasets(Array.isArray(restoredDatasets) ? restoredDatasets : []);
+        setCompanies(Array.isArray(restoredCompanies) ? restoredCompanies : []);
+        setCharts(Array.isArray(restoredCharts) ? restoredCharts : []);
+        setGlobalFilters(Array.isArray(restoredGlobalFilters) ? restoredGlobalFilters : []);
+        setView(restoredView || 'data');
+        setActiveCompanyId(restoredActiveCompany || '__all__');
+
+        if (Array.isArray(restoredPages) && restoredPages.length > 0) {
+            setPages(restoredPages);
+            const hasRestoredActivePage = restoredActivePage && restoredPages.some(p => p.id === restoredActivePage);
+            setActivePageId(hasRestoredActivePage ? restoredActivePage : restoredPages[0].id);
+        } else {
+            const firstPageId = 'page-1';
+            setPages([{ id: firstPageId, name: 'Page 1' }]);
+            setActivePageId(firstPageId);
+        }
+
+        if (restoredSelectedDataset && Array.isArray(restoredDatasets) && restoredDatasets.some(d => d.id === restoredSelectedDataset)) {
+            setSelectedDatasetId(restoredSelectedDataset);
+        } else if (Array.isArray(restoredDatasets) && restoredDatasets.length > 0) {
+            setSelectedDatasetId(restoredDatasets[0].id);
+        }
+
+        hasHydratedRef.current = true;
+
+        (async () => {
+            try {
+                const response = await backendApi.listDatasets(1000);
+                const loaded = Array.isArray(response?.items)
+                    ? response.items.map(mapBackendDatasetToAppDataset)
+                    : [];
+
+                if (loaded.length > 0) {
+                    setDatasets(prev => {
+                        const nonBackendDatasets = prev.filter(ds => !ds?._meta?.backend);
+                        const existingById = new Map(prev.map(ds => [ds.id, ds]));
+
+                        const backendDatasets = loaded.map(ds => {
+                            const existing = existingById.get(ds.id);
+                            return {
+                                ...ds,
+                                companyId: existing?.companyId ?? ds.companyId,
+                            };
+                        });
+
+                        return [...nonBackendDatasets, ...backendDatasets];
+                    });
+
+                    return;
+                }
+            } catch (error) {
+                console.error('Failed to load datasets from backend:', error);
+            }
+
+            if (Array.isArray(restoredBackendSourceIds) && restoredBackendSourceIds.length > 0) {
+                const results = await Promise.allSettled(
+                    restoredBackendSourceIds.map(sourceId => backendApi.getLatestDatasetBySourceId(sourceId))
+                );
+
+                const loaded = results
+                    .filter(r => r.status === 'fulfilled' && r.value?.item)
+                    .map(r => mapBackendDatasetToAppDataset(r.value.item));
+
+                if (loaded.length === 0) return;
+
+                setDatasets(prev => {
+                    const map = new Map();
+                    [...prev, ...loaded].forEach(ds => map.set(ds.id, ds));
+                    return Array.from(map.values());
+                });
+            }
+        })();
     }, []);
+
+    useEffect(() => {
+        if (!hasHydratedRef.current) return;
+
+        const datasetSaved = writeStorageJson(STORAGE_KEY_DATASETS, datasets);
+        if (!datasetSaved) {
+            const fallbackDatasets = datasets.map(ds => ds?._meta?.backend
+                ? { ...ds, data: [] }
+                : ds
+            );
+            writeStorageJson(STORAGE_KEY_DATASETS, fallbackDatasets);
+        }
+
+        writeStorageJson(STORAGE_KEY_BACKEND_SOURCE_IDS, extractBackendSourceIds(datasets));
+        writeStorageJson(STORAGE_KEY_COMPANIES, companies);
+        writeStorageJson(STORAGE_KEY_CHARTS, charts);
+        writeStorageJson(STORAGE_KEY_PAGES, pages);
+        writeStorageJson(STORAGE_KEY_GLOBAL_FILTERS, globalFilters);
+        writeStorageJson(STORAGE_KEY_ACTIVE_PAGE, activePageId);
+        writeStorageJson(STORAGE_KEY_SELECTED_DATASET, selectedDatasetId);
+        writeStorageJson(STORAGE_KEY_ACTIVE_COMPANY, activeCompanyId);
+        writeStorageJson(STORAGE_KEY_VIEW, view);
+    }, [
+        datasets,
+        companies,
+        charts,
+        pages,
+        globalFilters,
+        activePageId,
+        selectedDatasetId,
+        activeCompanyId,
+        view,
+    ]);
+
+    useEffect(() => {
+        if (selectedDatasetId) return;
+        if (datasets.length === 0) return;
+        setSelectedDatasetId(datasets[0].id);
+    }, [datasets, selectedDatasetId]);
 
     const handleSaveDashboard = () => {
         setIsSaving(true);
-        localStorage.setItem(STORAGE_KEY_CHARTS, JSON.stringify(charts));
-        localStorage.setItem(STORAGE_KEY_PAGES, JSON.stringify(pages));
+        writeStorageJson(STORAGE_KEY_DATASETS, datasets);
+        writeStorageJson(STORAGE_KEY_BACKEND_SOURCE_IDS, extractBackendSourceIds(datasets));
+        writeStorageJson(STORAGE_KEY_COMPANIES, companies);
+        writeStorageJson(STORAGE_KEY_CHARTS, charts);
+        writeStorageJson(STORAGE_KEY_PAGES, pages);
+        writeStorageJson(STORAGE_KEY_GLOBAL_FILTERS, globalFilters);
+        writeStorageJson(STORAGE_KEY_ACTIVE_PAGE, activePageId);
+        writeStorageJson(STORAGE_KEY_SELECTED_DATASET, selectedDatasetId);
+        writeStorageJson(STORAGE_KEY_ACTIVE_COMPANY, activeCompanyId);
+        writeStorageJson(STORAGE_KEY_VIEW, view);
         setTimeout(() => setIsSaving(false), 800);
     };
 
