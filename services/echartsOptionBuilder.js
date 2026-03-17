@@ -1,5 +1,10 @@
 import { ChartType } from '../types';
-import { CHART_COLORS, CHART_COLORS_DARK } from '../constants';
+import {
+    CHART_COLORS,
+    CHART_COLORS_DARK,
+    CHART_COLORS_NEUTRAL,
+    CHART_COLORS_DARK_NEUTRAL,
+} from '../constants';
 
 /**
  * Builds an Apache ECharts option object based on visual type, data, and theme.
@@ -9,14 +14,18 @@ import { CHART_COLORS, CHART_COLORS_DARK } from '../constants';
  * @param {'light' | 'dark'} theme
  * @returns {Object} ECharts option
  */
-export function buildChartOption(visualType, processedData, config, theme = 'light') {
+export function buildChartOption(visualType, processedData, config, theme = 'light', clarityMode = 'standard', paletteMode = 'vibrant') {
     const isDark = theme === 'dark';
-    const colors = isDark ? CHART_COLORS_DARK : CHART_COLORS;
+    const isClearMode = clarityMode === 'clear';
+    const useNeutralPalette = paletteMode === 'neutral';
+    const colors = useNeutralPalette
+        ? (isDark ? CHART_COLORS_DARK_NEUTRAL : CHART_COLORS_NEUTRAL)
+        : (isDark ? CHART_COLORS_DARK : CHART_COLORS);
     const textColor = isDark ? '#e2e8f0' : '#334155';
-    const subTextColor = isDark ? '#94a3b8' : '#94a3b8';
+    const subTextColor = isDark ? (isClearMode ? '#cbd5e1' : '#94a3b8') : (isClearMode ? '#64748b' : '#94a3b8');
     const bgColor = 'transparent';
     const borderColor = isDark ? '#334155' : '#e2e8f0';
-    const gridBorderColor = isDark ? '#1e293b' : '#f1f5f9';
+    const gridBorderColor = isDark ? (isClearMode ? '#334155' : '#1e293b') : (isClearMode ? '#e2e8f0' : '#f1f5f9');
 
     const { measures = [], dimension = '' } = config;
     const categories = processedData.map(d => d.name);
@@ -26,23 +35,29 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         trigger: 'axis',
         backgroundColor: isDark ? '#1e293b' : '#ffffff',
         borderColor: isDark ? '#334155' : '#e2e8f0',
-        textStyle: { color: textColor, fontSize: 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+        textStyle: { color: textColor, fontSize: isClearMode ? 12 : 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
         borderWidth: 1,
         padding: [12, 16],
         extraCssText: 'border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);',
     };
     const legendStyle = {
-        textStyle: { color: subTextColor, fontSize: 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+        textStyle: { color: subTextColor, fontSize: isClearMode ? 12 : 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
         bottom: 0,
-        itemGap: 16,
+        itemGap: isClearMode ? 18 : 16,
         icon: 'roundRect',
-        itemWidth: 12,
-        itemHeight: 8,
+        itemWidth: isClearMode ? 14 : 12,
+        itemHeight: isClearMode ? 9 : 8,
     };
-    const gridStyle = { left: 48, right: 24, top: 24, bottom: 48, containLabel: false };
-    const axisLabelStyle = { color: subTextColor, fontSize: 10, fontFamily: 'Plus Jakarta Sans, sans-serif' };
+    const gridStyle = { left: 56, right: 24, top: 28, bottom: 54, containLabel: true };
+    const axisLabelStyle = { color: subTextColor, fontSize: isClearMode ? 12 : 11, fontFamily: 'Plus Jakarta Sans, sans-serif' };
     const axisLineStyle = { lineStyle: { color: gridBorderColor } };
-    const splitLineStyle = { lineStyle: { color: gridBorderColor, type: 'dashed' } };
+    const splitLineStyle = {
+        lineStyle: {
+            color: gridBorderColor,
+            type: 'solid',
+            opacity: isClearMode ? 0.8 : 0.5,
+        },
+    };
 
     const xAxisCategory = {
         type: 'category',
@@ -65,8 +80,142 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         textStyle: baseTextStyle,
         color: colors,
         animation: true,
-        animationDuration: 600,
+        animationDuration: isClearMode ? 420 : 600,
         animationEasing: 'cubicOut',
+        animationDurationUpdate: 650,
+        animationEasingUpdate: 'cubicInOut',
+    };
+
+    const formatMetric = (value) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const getLineInsights = (values = []) => {
+        if (!Array.isArray(values) || values.length === 0) {
+            return {
+                maxIndex: -1,
+                minIndex: -1,
+                dropIndex: -1,
+                subtitle: 'No trend data available',
+            };
+        }
+
+        let maxValue = -Infinity;
+        let minValue = Infinity;
+        let maxIndex = -1;
+        let minIndex = -1;
+        let dropIndex = -1;
+
+        values.forEach((v, i) => {
+            const value = Number(v || 0);
+            if (value > maxValue) {
+                maxValue = value;
+                maxIndex = i;
+            }
+            if (value < minValue) {
+                minValue = value;
+                minIndex = i;
+            }
+            if (i > 0 && dropIndex === -1 && value < Number(values[i - 1] || 0)) {
+                dropIndex = i;
+            }
+        });
+
+        const maxLabel = maxIndex >= 0 ? `${categories[maxIndex]} (${formatMetric(maxValue)})` : 'n/a';
+        const minLabel = minIndex >= 0 ? `${categories[minIndex]} (${formatMetric(minValue)})` : 'n/a';
+
+        return {
+            maxIndex,
+            minIndex,
+            dropIndex,
+            subtitle: `Peak: ${maxLabel}  •  Low: ${minLabel}`,
+        };
+    };
+
+    const buildPremiumLineSeries = ({ measure, values, smooth = true, step = false, index = 0 }) => {
+        const isPrimarySeries = index === 0;
+        const insights = isPrimarySeries ? getLineInsights(values) : null;
+
+        return {
+            name: measure,
+            type: 'line',
+            smooth,
+            step: step ? 'middle' : undefined,
+            data: values,
+            symbol: 'circle',
+            symbolSize: 7,
+            showSymbol: true,
+            lineStyle: {
+                width: 3.5,
+                color: isPrimarySeries
+                    ? {
+                        type: 'linear',
+                        x: 0,
+                        y: 0,
+                        x2: 1,
+                        y2: 0,
+                        colorStops: [
+                            { offset: 0, color: '#3B82F6' },
+                            { offset: 1, color: '#60A5FA' },
+                        ],
+                    }
+                    : '#93C5FD',
+                shadowColor: 'rgba(59,130,246,0.28)',
+                shadowBlur: 10,
+                shadowOffsetY: 3,
+            },
+            itemStyle: {
+                color: '#3B82F6',
+                borderColor: '#FFFFFF',
+                borderWidth: 2,
+            },
+            areaStyle: {
+                opacity: isPrimarySeries ? 0.18 : 0.08,
+                color: {
+                    type: 'linear',
+                    x: 0,
+                    y: 0,
+                    x2: 0,
+                    y2: 1,
+                    colorStops: [
+                        { offset: 0, color: 'rgba(59,130,246,0.28)' },
+                        { offset: 1, color: 'rgba(59,130,246,0.02)' },
+                    ],
+                },
+            },
+            emphasis: {
+                focus: 'series',
+                scale: true,
+                itemStyle: {
+                    color: '#2563EB',
+                    borderColor: '#FFFFFF',
+                    borderWidth: 3,
+                    shadowBlur: 14,
+                    shadowColor: 'rgba(37,99,235,0.35)',
+                },
+            },
+            markPoint: isPrimarySeries && insights ? {
+                symbolSize: 44,
+                label: { color: '#111827', fontWeight: 700, fontSize: 12 },
+                itemStyle: { color: '#FFFFFF', borderColor: '#3B82F6', borderWidth: 2 },
+                data: [
+                    ...(insights.maxIndex >= 0 ? [{ name: 'Max', type: 'max' }] : []),
+                    ...(insights.minIndex >= 0 ? [{ name: 'Min', type: 'min' }] : []),
+                ],
+            } : undefined,
+            markLine: isPrimarySeries && insights && insights.dropIndex >= 0 ? {
+                symbol: 'none',
+                lineStyle: { type: 'dashed', color: '#111827', opacity: 0.35, width: 1.5 },
+                label: {
+                    show: true,
+                    formatter: 'Drop starts here',
+                    color: '#111827',
+                    backgroundColor: '#FFFFFF',
+                    padding: [4, 8],
+                    borderRadius: 8,
+                },
+                data: [{ xAxis: categories[insights.dropIndex] }],
+            } : undefined,
+            animationDuration: 1100,
+            animationEasing: 'cubicOut',
+        };
     };
 
     switch (visualType) {
@@ -161,60 +310,83 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
 
         // ═══════════════════ LINE CHARTS ═══════════════════
         case ChartType.LINE_SMOOTH:
-            return {
-                ...base,
-                tooltip: tooltipStyle,
-                legend: measures.length > 1 ? legendStyle : undefined,
-                grid: gridStyle,
-                xAxis: xAxisCategory,
-                yAxis: yAxisValue,
-                series: measures.map((m, i) => ({
-                    name: m,
-                    type: 'line',
-                    smooth: true,
-                    data: processedData.map(d => d[m]),
-                    symbol: 'circle',
-                    symbolSize: 6,
-                    lineStyle: { width: 3 },
-                })),
-            };
-
         case ChartType.LINE_STRAIGHT:
-            return {
-                ...base,
-                tooltip: tooltipStyle,
-                legend: measures.length > 1 ? legendStyle : undefined,
-                grid: gridStyle,
-                xAxis: xAxisCategory,
-                yAxis: yAxisValue,
-                series: measures.map((m) => ({
-                    name: m,
-                    type: 'line',
-                    smooth: false,
-                    data: processedData.map(d => d[m]),
-                    symbol: 'circle',
-                    symbolSize: 6,
-                    lineStyle: { width: 2 },
-                })),
-            };
+        case ChartType.LINE_STEP: {
+            const primaryMeasure = measures[0] || '';
+            const primaryValues = processedData.map(d => d[primaryMeasure]);
+            const insights = getLineInsights(primaryValues);
+            const smooth = visualType !== ChartType.LINE_STRAIGHT;
+            const step = visualType === ChartType.LINE_STEP;
 
-        case ChartType.LINE_STEP:
             return {
                 ...base,
-                tooltip: tooltipStyle,
+                title: {
+                    text: config?.title || (primaryMeasure ? `${primaryMeasure} Trend` : 'Trend Overview'),
+                    subtext: insights.subtitle,
+                    left: 16,
+                    top: 8,
+                    textStyle: {
+                        color: '#111827',
+                        fontSize: 16,
+                        fontWeight: 700,
+                        fontFamily: 'Plus Jakarta Sans, sans-serif',
+                    },
+                    subtextStyle: {
+                        color: '#111827',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        opacity: 0.75,
+                        fontFamily: 'Plus Jakarta Sans, sans-serif',
+                    },
+                },
+                tooltip: {
+                    ...tooltipStyle,
+                    backgroundColor: '#FFFFFF',
+                    borderColor: '#E5E7EB',
+                    textStyle: { color: '#111827', fontSize: 12, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+                    axisPointer: {
+                        type: 'line',
+                        lineStyle: { color: '#93C5FD', width: 1.5 },
+                    },
+                    formatter: (params) => {
+                        const p = params?.[0];
+                        if (!p) return '';
+                        const value = Number(p.value || 0);
+                        const delta = p.dataIndex > 0 ? Number(processedData[p.dataIndex - 1]?.[p.seriesName] || 0) : null;
+                        const deltaText = p.dataIndex > 0 && delta !== null && !Number.isNaN(delta)
+                            ? ` (${value >= delta ? '+' : ''}${formatMetric(value - delta)} vs prev)`
+                            : '';
+
+                        return `
+                            <div style="font-weight:700;margin-bottom:6px;color:#111827">${p.axisValue}</div>
+                            <div style="display:flex;align-items:center;gap:8px;color:#111827">
+                                <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#3B82F6"></span>
+                                <span style="font-weight:600">${p.seriesName}:</span>
+                                <span>${formatMetric(value)}${deltaText}</span>
+                            </div>
+                        `;
+                    },
+                },
                 legend: measures.length > 1 ? legendStyle : undefined,
-                grid: gridStyle,
-                xAxis: xAxisCategory,
-                yAxis: yAxisValue,
-                series: measures.map((m) => ({
-                    name: m,
-                    type: 'line',
-                    step: 'middle',
-                    data: processedData.map(d => d[m]),
-                    symbol: 'circle',
-                    symbolSize: 5,
+                grid: { ...gridStyle, top: 88, left: 56, right: 24, bottom: 56 },
+                xAxis: {
+                    ...xAxisCategory,
+                    axisLabel: { ...xAxisCategory.axisLabel, color: '#111827', fontSize: 12 },
+                },
+                yAxis: {
+                    ...yAxisValue,
+                    axisLabel: { ...yAxisValue.axisLabel, color: '#111827', fontSize: 12 },
+                    splitLine: { lineStyle: { color: '#E5E7EB', type: 'solid', opacity: 0.9 } },
+                },
+                series: measures.map((m, i) => buildPremiumLineSeries({
+                    measure: m,
+                    values: processedData.map(d => d[m]),
+                    smooth,
+                    step,
+                    index: i,
                 })),
             };
+        }
 
         // ═══════════════════ AREA CHARTS ═══════════════════
         case ChartType.AREA_SMOOTH:

@@ -7,7 +7,7 @@ import { buildChartOption } from '../services/echartsOptionBuilder';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
-const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange }) => {
+const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant' }) => {
     const { theme } = useTheme();
     const [drillPath, setDrillPath] = useState([]);
     const chartRef = useRef(null);
@@ -169,7 +169,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     const renderVisual = () => {
         if (chartData.length === 0) return (
-            <div className="h-full flex items-center justify-center text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest p-12 text-center">
+            <div className="h-full flex items-center justify-center text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide p-12 text-center">
                 No results match the current filters
             </div>
         );
@@ -179,12 +179,12 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         // Table type — keep HTML renderer
         if (type === ChartType.TABLE) {
             return (
-                <div className="h-full overflow-auto text-[11px] font-medium text-gray-600 dark:text-gray-300">
+                <div className="h-full overflow-auto text-xs font-medium text-gray-600 dark:text-gray-300">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="border-b border-gray-200 dark:border-gray-700">
-                                <th className="py-3 px-4 uppercase tracking-widest font-black text-gray-400 dark:text-gray-500 text-[9px] sticky top-0 bg-white dark:bg-gray-800">{config.dimension}</th>
-                                {measures.map(m => <th key={m} className="py-3 px-4 uppercase tracking-widest font-black text-gray-400 dark:text-gray-500 text-[9px] sticky top-0 bg-white dark:bg-gray-800">{m}</th>)}
+                                <th className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{config.dimension}</th>
+                                {measures.map(m => <th key={m} className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{m}</th>)}
                             </tr>
                         </thead>
                         <tbody>
@@ -206,7 +206,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             return (
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden">
                     <div className="absolute inset-0 opacity-5 bg-gray-500 dark:bg-gray-300"></div>
-                    <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-[0.25em] mb-3 relative z-10">{config.title || measures[0]}</p>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wider mb-3 relative z-10">{config.title || measures[0]}</p>
                     <h2 className="text-6xl font-black text-gray-900 dark:text-gray-100 tracking-tight leading-none mb-5 relative z-10 animate-fade-in">
                         {primaryValue > 1000 ? (primaryValue / 1000).toFixed(1) + 'k' : primaryValue.toLocaleString()}
                     </h2>
@@ -218,7 +218,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         }
 
         // All other types — render via ECharts
-        const option = buildChartOption(type, chartData, { ...config, dimension: effectiveDimension }, theme);
+        const option = buildChartOption(type, chartData, { ...config, dimension: effectiveDimension }, theme, chartClarityMode, chartPaletteMode);
 
         return (
             <ReactECharts
@@ -234,14 +234,14 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     };
 
     return (
-        <div className={`h-full w-full rounded-xl border flex flex-col group overflow-hidden transition-all duration-300 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} ${isEditMode ? 'p-4 shadow-md' : 'p-5 shadow-lg border-transparent'} ${isActive ? 'ring-2 ring-gray-500 dark:ring-gray-400 shadow-xl scale-[1.01]' : 'hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-lg'}`}>
+        <div className={`h-full w-full rounded-2xl border flex flex-col group overflow-hidden transition-all duration-300 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} ${isEditMode ? 'p-4 shadow-sm' : 'p-5 shadow-md border-transparent'} ${isActive ? 'ring-2 ring-gray-500 dark:ring-gray-400 shadow-lg scale-[1.005]' : 'hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-md'}`}>
             <div className="flex justify-between items-start mb-3 shrink-0">
                 <div className="flex items-start gap-3 overflow-hidden">
                     {isEditMode && <div className="drag-handle mt-0.5 cursor-move p-1 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-300 transition-colors shrink-0"><GripHorizontal size={14} /></div>}
                     <div className="overflow-hidden">
-                        <h3 className="text-[11px] font-black text-gray-800 dark:text-gray-200 tracking-tight uppercase leading-none truncate">{config.title || "Analytics Card"}</h3>
+                        <h3 className="text-[13px] font-bold text-gray-800 dark:text-gray-200 tracking-tight leading-none truncate">{config.title || "Analytics Card"}</h3>
                         <div className="flex items-center gap-2 mt-1">
-                            <p className="text-[8px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest truncate">{config.type.replace(/_/g, ' ')}</p>
+                            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{config.type.replace(/_/g, ' ')}</p>
                             {config.filters.length > 0 && <Filter size={8} className="text-blue-500" />}
                             {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
                         </div>
@@ -252,7 +252,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
             {/* Drill-down breadcrumb */}
             {drillPath.length > 0 && (
-                <div className={`flex items-center gap-1 px-1 py-1 mb-1 rounded-lg text-[9px] font-bold shrink-0 overflow-x-auto ${isDark ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`flex items-center gap-1 px-1 py-1 mb-1 rounded-lg text-[11px] font-semibold shrink-0 overflow-x-auto ${isDark ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
                     <button onClick={() => handleDrillUp(0)}
                         className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded transition-colors ${isDark ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
                         <Home size={9} /> All
@@ -269,7 +269,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                         </React.Fragment>
                     ))}
                     {canDrill && (
-                        <span className={`ml-auto text-[8px] italic ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>click to drill</span>
+                        <span className={`ml-auto text-[10px] italic ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>click to drill</span>
                     )}
                 </div>
             )}

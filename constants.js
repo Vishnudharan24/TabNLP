@@ -42,11 +42,21 @@ export const INITIAL_CHARTS = [
 ];
 
 export const CHART_COLORS = [
-    '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-    '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#6366f1',
+    '#2563EB', '#1D4ED8', '#3B82F6', '#60A5FA', '#1E293B',
+    '#334155', '#475569', '#22C55E', '#16A34A', '#86EFAC',
 ];
 
 export const CHART_COLORS_DARK = [
-    '#60a5fa', '#34d399', '#fbbf24', '#f87171', '#a78bfa',
-    '#22d3ee', '#f472b6', '#2dd4bf', '#fb923c', '#818cf8',
+    '#2563EB', '#1D4ED8', '#3B82F6', '#60A5FA', '#1E293B',
+    '#334155', '#475569', '#22C55E', '#16A34A', '#86EFAC',
+];
+
+export const CHART_COLORS_NEUTRAL = [
+    '#334155', '#475569', '#64748b', '#94a3b8', '#0f766e',
+    '#0369a1', '#52525b', '#0f172a', '#4b5563', '#1f2937',
+];
+
+export const CHART_COLORS_DARK_NEUTRAL = [
+    '#cbd5e1', '#94a3b8', '#64748b', '#475569', '#99f6e4',
+    '#bae6fd', '#d4d4d8', '#e2e8f0', '#c7d2fe', '#f1f5f9',
 ];

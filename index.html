@@ -13,49 +13,113 @@
         rel="stylesheet">
     <style>
         :root {
-            --brand-primary: #374151;
-            --brand-secondary: #6b7280;
-            --brand-accent: #3b82f6;
-            --bg-main: #f9fafb;
+            --brand-primary: #2563EB;
+            --brand-secondary: #1E293B;
+            --brand-accent: #22C55E;
+            --bg-main: #F8FAFC;
             --bg-card: #ffffff;
-            --bg-surface: #f3f4f6;
-            --text-primary: #111827;
-            --text-secondary: #6b7280;
-            --border-color: #e5e7eb;
-            --hover-bg: #f3f4f6;
-            --scrollbar-thumb: #d1d5db;
-            --scrollbar-hover: #9ca3af;
-            --canvas-dot: #d1d5db;
-            --canvas-bg: #f3f4f6;
-            --grid-placeholder-bg: #f3f4f6;
-            --grid-placeholder-border: #6b7280;
-            --resize-handle: #9ca3af;
+            --bg-surface: #EFF6FF;
+            --text-primary: #0F172A;
+            --text-secondary: #334155;
+            --border-color: #DBEAFE;
+            --hover-bg: #EFF6FF;
+            --scrollbar-thumb: #93C5FD;
+            --scrollbar-hover: #60A5FA;
+            --canvas-dot: #BFDBFE;
+            --canvas-bg: #F8FAFC;
+            --grid-placeholder-bg: #DBEAFE;
+            --grid-placeholder-border: #2563EB;
+            --resize-handle: #2563EB;
         }
 
         html.dark {
-            --brand-primary: #d1d5db;
-            --brand-secondary: #9ca3af;
-            --brand-accent: #60a5fa;
-            --bg-main: #0f172a;
-            --bg-card: #1e293b;
-            --bg-surface: #334155;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --border-color: #334155;
-            --hover-bg: #334155;
-            --scrollbar-thumb: #475569;
-            --scrollbar-hover: #64748b;
-            --canvas-dot: #334155;
-            --canvas-bg: #0f172a;
-            --grid-placeholder-bg: #1e293b;
-            --grid-placeholder-border: #64748b;
-            --resize-handle: #64748b;
+            --brand-primary: #2563EB;
+            --brand-secondary: #1E293B;
+            --brand-accent: #22C55E;
+            --bg-main: #F8FAFC;
+            --bg-card: #FFFFFF;
+            --bg-surface: #EFF6FF;
+            --text-primary: #0F172A;
+            --text-secondary: #334155;
+            --border-color: #DBEAFE;
+            --hover-bg: #EFF6FF;
+            --scrollbar-thumb: #93C5FD;
+            --scrollbar-hover: #60A5FA;
+            --canvas-dot: #BFDBFE;
+            --canvas-bg: #F8FAFC;
+            --grid-placeholder-bg: #DBEAFE;
+            --grid-placeholder-border: #2563EB;
+            --resize-handle: #2563EB;
         }
 
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
             background-color: var(--bg-main);
             color: var(--text-primary);
+        }
+
+        /* App-wide typography normalization: 12 / 14 / 16 */
+        .app-type-system {
+            font-size: 14px;
+            line-height: 1.45;
+        }
+
+        .app-type-system h1,
+        .app-type-system h2,
+        .app-type-system h3,
+        .app-type-system h4,
+        .app-type-system .type-lg,
+        .app-type-system [class*="text-lg"] {
+            font-size: 16px !important;
+            line-height: 1.35;
+        }
+
+        .app-type-system .type-sm,
+        .app-type-system [class*="text-xs"],
+        .app-type-system [class*="text-[7px]"],
+        .app-type-system [class*="text-[8px]"],
+        .app-type-system [class*="text-[9px]"],
+        .app-type-system [class*="text-[10px]"],
+        .app-type-system [class*="text-[11px]"],
+        .app-type-system [class*="text-[12px]"] {
+            font-size: 12px !important;
+            line-height: 1.35;
+        }
+
+        .app-type-system [class*="text-sm"],
+        .app-type-system [class*="text-base"],
+        .app-type-system [class*="text-[13px]"],
+        .app-type-system [class*="text-[14px]"],
+        .app-type-system [class*="text-[15px]"] {
+            font-size: 14px !important;
+            line-height: 1.45;
+        }
+
+        /* Unified report toolbar controls */
+        .report-toolbar-controls > button,
+        .report-toolbar-controls > select {
+            height: 40px;
+            min-height: 40px;
+            border-radius: 12px;
+            padding-left: 14px;
+            padding-right: 14px;
+            font-size: 14px !important;
+            line-height: 1;
+        }
+
+        .report-toolbar-controls {
+            gap: 10px;
+        }
+
+        /* Side panel controls rhythm */
+        .side-panel-normalized button,
+        .side-panel-normalized select,
+        .side-panel-normalized input {
+            border-radius: 10px;
+        }
+
+        .side-panel-normalized .glass-panel > div:first-child button {
+            min-height: 40px;
         }
 
         /* Enhanced Global Scrollbar */
@@ -132,8 +196,8 @@
             transition-property: left, top, transform;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 0.5rem;
-            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            border-radius: 0.9rem;
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.03), 0 6px 12px -8px rgb(0 0 0 / 0.22);
         }
 
         .react-grid-item.cssTransforms {
@@ -142,13 +206,13 @@
 
         .react-grid-item.resizing {
             z-index: 100;
-            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            box-shadow: 0 12px 26px -14px rgb(0 0 0 / 0.35);
         }
 
         .react-grid-item.react-draggable-dragging {
             transition: none;
             z-index: 100;
-            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+            box-shadow: 0 20px 36px -18px rgb(0 0 0 / 0.45);
         }
 
         .react-grid-placeholder {
@@ -206,7 +270,111 @@
             transition: all 0.2s;
         }
         .btn-primary:hover {
-            background-color: #1f2937;
+            background-color: #1d4ed8;
+        }
+
+        /* Palette enforcement for commonly used utility classes */
+        .bg-gray-50,
+        .bg-gray-100 {
+            background-color: #F8FAFC !important;
+        }
+
+        .bg-white {
+            background-color: #FFFFFF !important;
+        }
+
+        .bg-gray-200 {
+            background-color: #DBEAFE !important;
+            color: #0F172A !important;
+        }
+
+        .bg-gray-700,
+        .bg-gray-800,
+        .bg-gray-900 {
+            background-color: #1E293B !important;
+        }
+
+        .text-gray-900,
+        .text-gray-800,
+        .text-gray-700,
+        .text-gray-600,
+        .text-gray-500,
+        .text-gray-400 {
+            color: #0F172A !important;
+        }
+
+        .text-white {
+            color: #FFFFFF !important;
+        }
+
+        .border-gray-200,
+        .border-gray-300,
+        .border-gray-600,
+        .border-gray-700 {
+            border-color: #DBEAFE !important;
+        }
+
+        .bg-blue-50,
+        .bg-blue-100 {
+            background-color: #EFF6FF !important;
+        }
+
+        .text-blue-500,
+        .text-blue-600,
+        .text-blue-700,
+        .text-blue-800 {
+            color: #2563EB !important;
+        }
+
+        .border-blue-100,
+        .border-blue-200,
+        .border-blue-700,
+        .border-blue-800 {
+            border-color: #BFDBFE !important;
+        }
+
+        .bg-emerald-50,
+        .bg-emerald-100 {
+            background-color: #ECFDF5 !important;
+        }
+
+        .text-emerald-500,
+        .text-emerald-600,
+        .text-emerald-700,
+        .text-emerald-800 {
+            color: #22C55E !important;
+        }
+
+        .border-emerald-100,
+        .border-emerald-200,
+        .border-emerald-700,
+        .border-emerald-800 {
+            border-color: #BBF7D0 !important;
+        }
+
+        .dark .dark\:bg-gray-900,
+        .dark .dark\:bg-gray-800,
+        .dark .dark\:bg-gray-700,
+        .dark .dark\:bg-gray-200,
+        .dark .dark\:bg-gray-100 {
+            background-color: #FFFFFF !important;
+        }
+
+        .dark .dark\:text-gray-100,
+        .dark .dark\:text-gray-200,
+        .dark .dark\:text-gray-300,
+        .dark .dark\:text-gray-400,
+        .dark .dark\:text-gray-500,
+        .dark .dark\:text-gray-600,
+        .dark .dark\:text-gray-700,
+        .dark .dark\:text-gray-800 {
+            color: #0F172A !important;
+        }
+
+        .dark .dark\:border-gray-700,
+        .dark .dark\:border-gray-600,
+        .dark .dark\:border-gray-500 {
+            border-color: #DBEAFE !important;
         }
     </style>
     <script type="importmap">

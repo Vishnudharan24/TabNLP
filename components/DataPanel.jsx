@@ -193,7 +193,7 @@ const DataPanel = ({
     };
 
     return (
-        <aside className="w-80 shrink-0 h-full flex flex-col gap-6 overflow-hidden relative">
+        <aside className="side-panel-normalized w-80 shrink-0 h-full flex flex-col gap-6 overflow-hidden relative">
             {showNewChartPrompt && (
                 <div className="absolute inset-0 z-50 flex items-start justify-center pt-24 bg-black/30 dark:bg-black/50 backdrop-blur-sm rounded-2xl">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 w-64 space-y-4 animate-in">

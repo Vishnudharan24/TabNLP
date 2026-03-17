@@ -117,6 +117,13 @@ const inferColumnType = (values = []) => {
     return 'string';
 };
 
+const getDatasetFileNameFromMetadata = (dataset) => (
+    dataset?._meta?.metadata?.file_name
+    || dataset?._meta?.metadata?.filename
+    || dataset?._meta?.fileName
+    || null
+);
+
 const mapBackendDatasetToAppDataset = (item) => {
     const rows = Array.isArray(item?.data) ? item.data : [];
     const detectedColumns = rows[0] ? Object.keys(rows[0]) : [];
@@ -166,6 +173,8 @@ const App = () => {
     const [isExportingPdf, setIsExportingPdf] = useState(false);
     const [isExportingPpt, setIsExportingPpt] = useState(false);
     const [exportScope, setExportScope] = useState('active');
+    const [chartClarityMode, setChartClarityMode] = useState('standard');
+    const [chartPaletteMode, setChartPaletteMode] = useState('vibrant');
     const [showNewChartPrompt, setShowNewChartPrompt] = useState(false);
     const [previewDatasetId, setPreviewDatasetId] = useState(null);
     const [showMerger, setShowMerger] = useState(false);
@@ -350,6 +359,10 @@ const App = () => {
         if (datasets.length === 0) return;
         setSelectedDatasetId(datasets[0].id);
     }, [datasets, selectedDatasetId]);
+    const selectedDataset = useMemo(
+        () => datasets.find(d => d.id === selectedDatasetId) || datasets[0] || null,
+        [datasets, selectedDatasetId]
+    );
 
     useEffect(() => {
         activePageIdRef.current = activePageId;
@@ -806,7 +819,7 @@ const App = () => {
     };
 
     return (
-        <div className={`flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
+        <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
             <Header />
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar setView={setView} currentView={view} />
@@ -893,7 +906,7 @@ const App = () => {
                                     </div>
                                     <h1 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{isEditMode ? 'Visual Designer' : 'Report Preview'}</h1>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="report-toolbar-controls flex items-center gap-2">
                                     {datasets.length > 1 && (
                                         <select
                                             value={selectedDatasetId}
@@ -901,7 +914,9 @@ const App = () => {
                                             className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
                                         >
                                             {datasets.map(ds => (
-                                                <option key={ds.id} value={ds.id}>{ds.name}</option>
+                                                <option key={ds.id} value={ds.id}>
+                                                    {`${ds.name}${getDatasetFileNameFromMetadata(ds) ? ` • ${getDatasetFileNameFromMetadata(ds)}` : ''}`}
+                                                </option>
                                             ))}
                                         </select>
                                     )}
@@ -909,6 +924,16 @@ const App = () => {
                                         <span className={`px-3 py-2 rounded-lg text-sm font-semibold border ${theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>
                                             <Database size={14} className="inline mr-1.5 -mt-0.5" />{datasets[0].name}
                                         </span>
+                                    )}
+                                    {selectedDataset && (
+                                        <div className={`px-3 py-2 rounded-lg border max-w-[330px] ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-gray-200' : 'bg-white border-gray-300 text-gray-700'}`}>
+                                            <p className="font-semibold truncate">
+                                                {getDatasetFileNameFromMetadata(selectedDataset) || 'File name not available in metadata'}
+                                            </p>
+                                            <p className={`truncate ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
+                                                {`rows: ${selectedDataset?._meta?.metadata?.row_count ?? selectedDataset?.data?.length ?? 0} · cols: ${selectedDataset?.columns?.length ?? 0} · source: ${selectedDataset?._meta?.metadata?.source_type || selectedDataset?._meta?.sourceKey || 'unknown'}`}
+                                            </p>
+                                        </div>
                                     )}
                                     <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all ${isEditMode ? (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50') : (theme === 'dark' ? 'bg-gray-200 text-gray-800 border-transparent' : 'bg-gray-800 text-white border-transparent hover:bg-gray-900 shadow-sm')}`}>
                                         {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
@@ -922,6 +947,22 @@ const App = () => {
                                         <Share2 size={16} className={isSharing ? 'animate-pulse' : ''} />
                                         <span>{isSharing ? 'Creating Link...' : 'Share Link'}</span>
                                     </button>
+                                    <select
+                                        value={chartClarityMode}
+                                        onChange={(e) => setChartClarityMode(e.target.value)}
+                                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
+                                    >
+                                        <option value="standard">Charts: Standard</option>
+                                        <option value="clear">Charts: Clear</option>
+                                    </select>
+                                    <select
+                                        value={chartPaletteMode}
+                                        onChange={(e) => setChartPaletteMode(e.target.value)}
+                                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
+                                    >
+                                        <option value="vibrant">Palette: Vibrant</option>
+                                        <option value="neutral">Palette: Neutral</option>
+                                    </select>
                                     <select
                                         value={exportScope}
                                         onChange={(e) => setExportScope(e.target.value)}
@@ -979,7 +1020,7 @@ const App = () => {
                                                     data-export-title={config.title || 'Visual'}
                                                     className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}
                                                 >
-                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} />
+                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} chartClarityMode={chartClarityMode} chartPaletteMode={chartPaletteMode} />
                                                     {activeChartId === config.id && isEditMode && (
                                                         <button onClick={(e) => { e.stopPropagation(); handleRemoveChart(config.id); }} className={`absolute -top-2.5 -right-2.5 text-rose-500 p-1.5 rounded-full shadow-md border hover:bg-rose-500 hover:text-white transition-all z-20 ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
                                                             <Trash2 size={14} />
