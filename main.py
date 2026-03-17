@@ -1,6 +1,7 @@
 import os
 import math
 import mimetypes
+import logging
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
@@ -24,6 +25,7 @@ from db.db_store import (
 )
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 FRONTEND_ORIGINS = os.getenv(
     "FRONTEND_ORIGINS",
@@ -131,6 +133,12 @@ def _validate_source_config(payload: dict):
         raise ValueError("source_type must be either 'api' or 'sftp'")
 
 
+def _raise_internal_error(public_message: str, exc: Exception):
+    _ = exc
+    logger.exception(public_message)
+    raise HTTPException(status_code=500, detail=public_message)
+
+
 @app.on_event("startup")
 async def startup_event():
     await ensure_indexes()
@@ -143,7 +151,7 @@ async def ingest(source_id: Optional[str] = None, url: Optional[str] = None):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_internal_error("Ingestion failed", e)
 
 
 @app.post("/ingest/source/{source_id}")
@@ -153,7 +161,7 @@ async def ingest_by_source_config(source_id: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_internal_error("Ingestion failed", e)
 
 
 @app.post("/source-config")
@@ -186,7 +194,7 @@ async def create_or_update_source_config(payload: SourceConfigUpsertRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save source config: {str(e)}")
+        _raise_internal_error("Failed to save source config", e)
 
 
 @app.get("/source-config")
@@ -199,7 +207,7 @@ async def get_all_source_configs(limit: int = 200):
             "items": [_serialize_source_config(config) for config in configs],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list source configs: {str(e)}")
+        _raise_internal_error("Failed to list source configs", e)
 
 
 @app.get("/source-config/{source_id}")
@@ -216,7 +224,7 @@ async def get_source_config_by_id(source_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch source config: {str(e)}")
+        _raise_internal_error("Failed to fetch source config", e)
 
 
 @app.patch("/source-config/{source_id}")
@@ -260,7 +268,7 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update source config: {str(e)}")
+        _raise_internal_error("Failed to update source config", e)
 
 
 @app.get("/datasets/latest")
@@ -273,7 +281,7 @@ async def get_latest_datasets(limit: int = 100):
             "items": [_serialize_dataset(document) for document in documents],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list datasets: {str(e)}")
+        _raise_internal_error("Failed to list datasets", e)
 
 
 @app.get("/datasets")
@@ -286,7 +294,7 @@ async def get_all_datasets(limit: int = 1000):
             "items": [_serialize_dataset(document) for document in documents],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list all datasets: {str(e)}")
+        _raise_internal_error("Failed to list all datasets", e)
 
 
 @app.get("/datasets/latest/{source_id}")
@@ -303,7 +311,7 @@ async def get_latest_dataset_for_source(source_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch latest dataset: {str(e)}")
+        _raise_internal_error("Failed to fetch latest dataset", e)
 
 
 @app.get("/datasets/{document_id}")
@@ -320,7 +328,7 @@ async def get_dataset_document(document_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch dataset: {str(e)}")
+        _raise_internal_error("Failed to fetch dataset", e)
 
 
 #The below endpoints are added for testiing
@@ -356,7 +364,7 @@ async def add_test_excel_source_config(request: Request, source_id: str = "local
             "db_result": result,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save source config: {str(e)}")
+        _raise_internal_error("Failed to save source config", e)
 
 
 @app.post("/test/source-config/sftp")
@@ -398,7 +406,7 @@ async def add_test_sftp_source_config(
             "db_result": result,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save SFTP source config: {str(e)}")
+        _raise_internal_error("Failed to save SFTP source config", e)
 
 
 @app.post("/test/ingest/excel")
@@ -408,7 +416,7 @@ async def ingest_test_excel(source_id: str = "local_excel_test"):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_internal_error("Ingestion failed", e)
 
 
 @app.post("/test/ingest/sftp")
@@ -418,4 +426,4 @@ async def ingest_test_sftp(source_id: str = "local_sftp_test"):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_internal_error("Ingestion failed", e)
