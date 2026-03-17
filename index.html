@@ -44,11 +44,6 @@
 
             --shadow-panel: 0 6px 24px rgba(2, 6, 23, 0.08);
             --shadow-elevated: 0 14px 40px rgba(2, 6, 23, 0.12);
-
-            --control-text: #0F172A;
-            --control-disabled-bg: #E2E8F0;
-            --control-disabled-text: #475569;
-            --focus-ring: rgba(59, 130, 246, 0.42);
         }
 
         html.dark {
@@ -83,11 +78,6 @@
 
             --shadow-panel: 0 6px 24px rgba(2, 6, 23, 0.35);
             --shadow-elevated: 0 16px 44px rgba(2, 6, 23, 0.48);
-
-            --control-text: #E2E8F0;
-            --control-disabled-bg: #1F2937;
-            --control-disabled-text: #64748B;
-            --focus-ring: rgba(96, 165, 250, 0.46);
         }
 
         body {
@@ -106,42 +96,6 @@
         select,
         button {
             transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
-        }
-
-        /* WCAG-focused interactive state defaults */
-        .app-type-system button,
-        .app-type-system select,
-        .app-type-system input,
-        .app-type-system textarea,
-        .app-type-system [role="button"] {
-            color: var(--control-text);
-        }
-
-        .app-type-system button:focus-visible,
-        .app-type-system select:focus-visible,
-        .app-type-system input:focus-visible,
-        .app-type-system textarea:focus-visible,
-        .app-type-system [role="button"]:focus-visible {
-            outline: 2px solid var(--brand-primary);
-            outline-offset: 2px;
-            box-shadow: 0 0 0 3px var(--focus-ring);
-        }
-
-        .app-type-system button:disabled,
-        .app-type-system select:disabled,
-        .app-type-system input:disabled,
-        .app-type-system textarea:disabled,
-        .app-type-system [role="button"][aria-disabled="true"] {
-            background-color: var(--control-disabled-bg) !important;
-            color: var(--control-disabled-text) !important;
-            border-color: var(--border-strong) !important;
-            opacity: 1 !important;
-            cursor: not-allowed;
-        }
-
-        .app-type-system .disabled\:opacity-50:disabled,
-        .app-type-system .disabled\:opacity-60:disabled {
-            opacity: 1 !important;
         }
 
         /* App-wide typography normalization: 12 / 14 / 16 */
@@ -381,7 +335,7 @@
         .bg-gray-700,
         .bg-gray-800,
         .bg-gray-900 {
-            background-color: var(--bg-elevated) !important;
+            background-color: var(--brand-secondary) !important;
         }
 
         .text-gray-900,

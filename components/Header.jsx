@@ -1,7 +1,8 @@
 
 import React from 'react';
-import { Bell, HelpCircle, Layout, Search, Settings, Sun, Moon } from 'lucide-react';
+import { Bell, HelpCircle, Search, Settings, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import appLogo from '../ChillView_logo.jpg';
 
 const Header = () => {
     const { theme, toggleTheme } = useTheme();
@@ -10,13 +11,11 @@ const Header = () => {
         <header className="h-16 glass-panel border-b px-8 flex items-center justify-between sticky top-0 z-50 animate-fade-in dark:border-gray-700">
             <div className="flex items-center gap-8 flex-1">
                 <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-2xl flex items-center justify-center shadow-md transition-all hover:scale-110 active:scale-95 relative overflow-hidden bg-gray-800 dark:bg-gray-200">
-                        <Layout className="text-white dark:text-gray-800 relative z-10" size={20} />
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="font-extrabold text-lg tracking-tight leading-none text-gray-800 dark:text-gray-100">ChillView</span>
-                        {/* <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1"></span> */}
-                    </div>
+                    <img
+                        src={appLogo}
+                        alt="ChillView"
+                        className="h-10 w-auto object-contain rounded-xl shadow-sm"
+                    />
                 </div>
 
                 <div className="max-w-md w-full relative">

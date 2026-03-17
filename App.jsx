@@ -1074,20 +1074,24 @@ const App = () => {
 
             <footer className={`h-10 border-t px-6 flex items-center justify-between shrink-0 z-40 text-xs ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center gap-1">
-                    {pages.map((p) => (
-                        <div key={p.id} className="group relative flex items-center">
-                            <button onClick={() => { setActivePageId(p.id); setView('report'); }} className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-2 ${activePageId === p.id ? (theme === 'dark' ? 'bg-gray-700 text-gray-100' : 'bg-gray-100 text-gray-900') : (theme === 'dark' ? 'text-gray-500 hover:bg-gray-700 hover:text-gray-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700')}`}>
-                                <span>{p.name}</span>
-                                {pages.length > 1 && <span onClick={(e) => handleRemovePage(e, p.id)} className={`ml-1 hover:text-rose-500 transition-colors ${activePageId === p.id ? 'opacity-100' : 'hidden group-hover:block'}`}><X size={12} /></span>}
-                            </button>
-                        </div>
-                    ))}
-                    <button onClick={handleAddPage} className={`p-1.5 ml-1 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}><PlusCircle size={14} /></button>
+                    {view === 'report' && (
+                        <>
+                            {pages.map((p) => (
+                                <div key={p.id} className="group relative flex items-center">
+                                    <button onClick={() => { setActivePageId(p.id); setView('report'); }} className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-2 ${activePageId === p.id ? (theme === 'dark' ? 'bg-gray-700 text-gray-100' : 'bg-gray-100 text-gray-900') : (theme === 'dark' ? 'text-gray-500 hover:bg-gray-700 hover:text-gray-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700')}`}>
+                                        <span>{p.name}</span>
+                                        {pages.length > 1 && <span onClick={(e) => handleRemovePage(e, p.id)} className={`ml-1 hover:text-rose-500 transition-colors ${activePageId === p.id ? 'opacity-100' : 'hidden group-hover:block'}`}><X size={12} /></span>}
+                                    </button>
+                                </div>
+                            ))}
+                            <button onClick={handleAddPage} className={`p-1.5 ml-1 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}><PlusCircle size={14} /></button>
+                        </>
+                    )}
                 </div>
                 <div className={`flex items-center gap-4 font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     <span>{currentPageCharts.length} Objects</span>
                     <div className={`h-3 w-[1px] ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-300'}`} />
-                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>TabNLP v1.0</span>
+                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>ChillView v1.0</span>
                 </div>
             </footer>
         </div>
