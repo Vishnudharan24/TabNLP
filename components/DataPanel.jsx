@@ -140,7 +140,16 @@ const DataPanel = ({
         );
     }, [selectedDataset, activeChartConfig?.dimension, activeChartConfig?.measures]);
 
-    const recommendedTypes = useMemo(() => new Set(recommendations.map(r => r.type)), [recommendations]);
+    const prioritizedRecommendations = useMemo(() => {
+        const starred = recommendations.filter(rec => rec.score >= 85);
+        const others = recommendations.filter(rec => rec.score < 85);
+        return [...starred, ...others];
+    }, [recommendations]);
+
+    const starredTypes = useMemo(
+        () => new Set(recommendations.filter(r => r.score >= 85).map(r => r.type)),
+        [recommendations]
+    );
 
     const addFilter = () => {
         if (!activeChartConfig || !selectedDataset) return;
@@ -236,7 +245,7 @@ const DataPanel = ({
                                         <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Recommended</h4>
                                     </div>
                                     <div className="grid grid-cols-4 gap-2">
-                                        {recommendations.map(rec => {
+                                        {prioritizedRecommendations.map(rec => {
                                             const Icon = getChartIcon(rec.type);
                                             return (
                                                 <button
@@ -268,7 +277,7 @@ const DataPanel = ({
                                     <div className="grid grid-cols-4 gap-2">
                                         {ALL_CHART_TYPES.map(type => {
                                             const Icon = getChartIcon(type);
-                                            const isRecommended = recommendedTypes.has(type);
+                                            const isStarred = starredTypes.has(type);
                                             return (
                                                 <button
                                                     key={type}
@@ -278,7 +287,7 @@ const DataPanel = ({
                                                     <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-800 text-[10px] font-medium px-2 py-1 shadow-lg opacity-0 scale-90 group-hover/tip:opacity-100 group-hover/tip:scale-100 transition-all duration-150 z-50">{getChartName(type)}</span>
                                                     <Icon size={14} />
                                                     <span className="text-[7px] font-semibold leading-tight truncate w-full text-center px-0.5">{getChartName(type)}</span>
-                                                    {isRecommended && <span className="absolute top-0.5 right-0.5 text-amber-500 text-[8px]">★</span>}
+                                                    {isStarred && <span className="absolute top-0.5 right-0.5 text-amber-500 text-[8px]">★</span>}
                                                 </button>
                                             );
                                         })}
