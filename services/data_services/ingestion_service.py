@@ -34,9 +34,20 @@ async def run_ingestion(source_id=None, url=None):
     if not raw_data:
         raise ValueError("No data fetched from source")
 
-    df = await asyncio.to_thread(parse_data, raw_data, headers.get("content-type", ""))
+    df = await asyncio.to_thread(
+        parse_data,
+        raw_data,
+        headers.get("content-type", ""),
+        source_descriptor or "",
+    )
 
-    metadata = generate_metadata(source_descriptor, df, source_type=source_type, source_details=source_config)
+    metadata = generate_metadata(
+        source_descriptor,
+        df,
+        source_type=source_type,
+        source_details=source_config,
+        response_headers=headers,
+    )
     if source_id:
         metadata["source_id"] = source_id
 

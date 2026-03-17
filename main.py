@@ -1,5 +1,6 @@
 import os
 import math
+import mimetypes
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
@@ -40,7 +41,7 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-TEST_EXCEL_FILE = Path("/home/vishnudharan/odyssey/TabNLP/poweranalytics-desktop/data/Employee_Master_Data_260220261036.xlsx")
+TEST_EXCEL_FILE = Path("/home/vishnudharan/odyssey/TabNLP/poweranalytics-desktop/data/sales_data.csv")
 DEFAULT_SFTP_USERNAME = "sftp_user"
 DEFAULT_SFTP_PRIVATE_KEY_PATH = str(Path.home() / ".ssh" / "id_rsa")
 DEFAULT_SFTP_REMOTE_PATH = str(Path.home() / "odyssey" / "TabNLP" / "data" / "Employee_Master_Data_260220261036.xlsx")
@@ -109,7 +110,7 @@ def _serialize_dataset(document: dict):
     serialized = {
         key: value
         for key, value in document.items()
-        if key not in {"_id", "metadata"}
+        if key != "_id"
     }
     serialized["document_id"] = str(document.get("_id"))
     return _to_json_safe(serialized)
@@ -322,18 +323,17 @@ async def get_dataset_document(document_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch dataset: {str(e)}")
 
 
-
-
-
 #The below endpoints are added for testiing
-@app.get("/test/excel")
+@app.get("/test/file")
 async def get_test_excel_file():
     if not TEST_EXCEL_FILE.exists():
-        raise HTTPException(status_code=404, detail="Test Excel file not found")
+        raise HTTPException(status_code=404, detail="Test source file not found")
+
+    media_type = mimetypes.guess_type(str(TEST_EXCEL_FILE))[0] or "application/octet-stream"
 
     return FileResponse(
         path=TEST_EXCEL_FILE,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=media_type,
         filename=TEST_EXCEL_FILE.name,
     )
 
@@ -341,7 +341,7 @@ async def get_test_excel_file():
 @app.post("/test/source-config/excel")
 async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test"):
     try:
-        api_endpoint = f"{str(request.base_url).rstrip('/')}/test/excel"
+        api_endpoint = f"{str(request.base_url).rstrip('/')}/test/file"
         result = await upsert_source_config(
             source_id=source_id,
             name="Local Test Excel Source",
