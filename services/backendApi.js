@@ -72,6 +72,10 @@ export const backendApi = {
         return request(`/datasets/${encodeURIComponent(documentId)}`, { method: 'GET' }, baseUrl);
     },
 
+    getHrAnalytics(payload, baseUrl) {
+        return request('/analytics/hr', { method: 'POST', body: JSON.stringify(payload || {}) }, baseUrl);
+    },
+
     getTestExcel(baseUrl) {
         return request('/test/excel', { method: 'GET' }, baseUrl);
     },
