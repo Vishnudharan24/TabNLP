@@ -1,6 +1,9 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider } from 'react-grid-layout';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import PptxGenJS from 'pptxgenjs';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import Visualization from './components/Visualization';
@@ -17,6 +20,9 @@ import {
     BarChart as BarChartIcon,
     Database,
     Save,
+    Share2,
+    FileText,
+    Presentation,
     Trash2,
     Eye,
     Settings,
@@ -39,6 +45,8 @@ const STORAGE_KEY_SELECTED_DATASET = 'power_bi_v3_selected_dataset_restored';
 const STORAGE_KEY_ACTIVE_COMPANY = 'power_bi_v3_active_company_restored';
 const STORAGE_KEY_VIEW = 'power_bi_v3_view_restored';
 const STORAGE_KEY_BACKEND_SOURCE_IDS = 'power_bi_v3_backend_source_ids_restored';
+const SHARE_QUERY_PARAM = 'reportShare';
+const SHARE_SCHEMA_VERSION = 1;
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
 const readStorageJson = (key, fallback) => {
@@ -59,6 +67,32 @@ const writeStorageJson = (key, value) => {
         console.warn(`Failed to persist ${key}:`, error);
         return false;
     }
+};
+
+const encodeShareToken = (payload) => {
+    const json = JSON.stringify(payload);
+    const bytes = new TextEncoder().encode(json);
+    let binary = '';
+    bytes.forEach((b) => {
+        binary += String.fromCharCode(b);
+    });
+
+    return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '');
+};
+
+const decodeShareToken = (token) => {
+    const normalized = token
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    return JSON.parse(json);
 };
 
 const extractBackendSourceIds = (datasets = []) => (
@@ -114,6 +148,10 @@ const mapBackendDatasetToAppDataset = (item) => {
 const App = () => {
     const { theme } = useTheme();
     const hasHydratedRef = useRef(false);
+    const reportCanvasRef = useRef(null);
+    const chartInstancesRef = useRef(new Map());
+    const exportCacheRef = useRef({ key: '', createdAt: 0, items: [] });
+    const activePageIdRef = useRef('');
     const [view, setView] = useState('data');
     const [isEditMode, setIsEditMode] = useState(true);
     const [datasets, setDatasets] = useState([]);
@@ -123,6 +161,11 @@ const App = () => {
     const [selectedDatasetId, setSelectedDatasetId] = useState('');
     const [activeChartId, setActiveChartId] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
+    const [isSharing, setIsSharing] = useState(false);
+    const [isPreparingExport, setIsPreparingExport] = useState(false);
+    const [isExportingPdf, setIsExportingPdf] = useState(false);
+    const [isExportingPpt, setIsExportingPpt] = useState(false);
+    const [exportScope, setExportScope] = useState('active');
     const [showNewChartPrompt, setShowNewChartPrompt] = useState(false);
     const [previewDatasetId, setPreviewDatasetId] = useState(null);
     const [showMerger, setShowMerger] = useState(false);
@@ -132,6 +175,58 @@ const App = () => {
     const [profilerDatasetId, setProfilerDatasetId] = useState(null);
 
     useEffect(() => {
+        const readSharedPayloadFromUrl = () => {
+            try {
+                const url = new URL(window.location.href);
+                const sharedToken = url.searchParams.get(SHARE_QUERY_PARAM);
+                if (!sharedToken) return null;
+                const payload = decodeShareToken(sharedToken);
+                if (!payload || payload.schemaVersion !== SHARE_SCHEMA_VERSION) return null;
+                return payload;
+            } catch {
+                return null;
+            }
+        };
+
+        const applySharedPayload = (payload) => {
+            const sharedDatasets = Array.isArray(payload?.datasets) ? payload.datasets : [];
+            const sharedPages = Array.isArray(payload?.pages) && payload.pages.length > 0
+                ? payload.pages
+                : [{ id: 'page-1', name: 'Page 1' }];
+            const sharedCharts = Array.isArray(payload?.charts) ? payload.charts : [];
+            const sharedGlobalFilters = Array.isArray(payload?.globalFilters) ? payload.globalFilters : [];
+
+            setDatasets(sharedDatasets);
+            setCompanies(Array.isArray(payload?.companies) ? payload.companies : []);
+            setCharts(sharedCharts);
+            setPages(sharedPages);
+            setGlobalFilters(sharedGlobalFilters);
+            setView('report');
+
+            const fallbackPageId = sharedPages[0]?.id || 'page-1';
+            const restoredPageId = payload?.activePageId;
+            const hasSharedPage = restoredPageId && sharedPages.some(p => p.id === restoredPageId);
+            setActivePageId(hasSharedPage ? restoredPageId : fallbackPageId);
+
+            const restoredDatasetId = payload?.selectedDatasetId;
+            const hasSharedDataset = restoredDatasetId && sharedDatasets.some(d => d.id === restoredDatasetId);
+            if (hasSharedDataset) {
+                setSelectedDatasetId(restoredDatasetId);
+            } else if (sharedDatasets[0]?.id) {
+                setSelectedDatasetId(sharedDatasets[0].id);
+            }
+
+            setActiveCompanyId('__all__');
+            return true;
+        };
+
+        const sharedPayload = readSharedPayloadFromUrl();
+        if (sharedPayload) {
+            const sharedApplied = applySharedPayload(sharedPayload);
+            hasHydratedRef.current = true;
+            if (sharedApplied) return;
+        }
+
         const restoredDatasets = readStorageJson(STORAGE_KEY_DATASETS, []);
         const restoredBackendSourceIds = readStorageJson(STORAGE_KEY_BACKEND_SOURCE_IDS, []);
         const restoredCompanies = readStorageJson(STORAGE_KEY_COMPANIES, []);
@@ -256,6 +351,10 @@ const App = () => {
         setSelectedDatasetId(datasets[0].id);
     }, [datasets, selectedDatasetId]);
 
+    useEffect(() => {
+        activePageIdRef.current = activePageId;
+    }, [activePageId]);
+
     const handleSaveDashboard = () => {
         setIsSaving(true);
         writeStorageJson(STORAGE_KEY_DATASETS, datasets);
@@ -269,6 +368,304 @@ const App = () => {
         writeStorageJson(STORAGE_KEY_ACTIVE_COMPANY, activeCompanyId);
         writeStorageJson(STORAGE_KEY_VIEW, view);
         setTimeout(() => setIsSaving(false), 800);
+    };
+
+    const handleShareDashboard = async () => {
+        if (isSharing) return;
+
+        const shareDatasets = datasets.filter(ds => charts.some(chart => chart.datasetId === ds.id) || ds.id === selectedDatasetId);
+        if (shareDatasets.length === 0 || charts.length === 0) {
+            window.alert('Add at least one visual before creating a share link.');
+            return;
+        }
+
+        setIsSharing(true);
+        try {
+            const payload = {
+                schemaVersion: SHARE_SCHEMA_VERSION,
+                createdAt: new Date().toISOString(),
+                view: 'report',
+                pages,
+                charts,
+                datasets: shareDatasets,
+                companies,
+                globalFilters,
+                activePageId,
+                selectedDatasetId,
+            };
+
+            const token = encodeShareToken(payload);
+            const shareUrl = new URL(window.location.href);
+            shareUrl.searchParams.set(SHARE_QUERY_PARAM, token);
+            shareUrl.searchParams.delete('reportShareCopied');
+            const finalUrl = shareUrl.toString();
+
+            if (finalUrl.length > 180000) {
+                window.alert('This dashboard is too large to share via URL. Reduce dataset size or use backend sharing.');
+                return;
+            }
+
+            if (navigator?.clipboard?.writeText) {
+                await navigator.clipboard.writeText(finalUrl);
+                window.alert('Share link copied to clipboard.');
+                return;
+            }
+
+            window.prompt('Copy your dashboard share link:', finalUrl);
+        } catch (error) {
+            console.error('Failed to create share link:', error);
+            window.alert('Unable to generate a share link right now. Please try again.');
+        } finally {
+            setIsSharing(false);
+        }
+    };
+
+    const getCurrentVisualElementsForExport = () => {
+        const container = reportCanvasRef.current;
+        if (!container) return [];
+        const nodes = container.querySelectorAll('[data-export-visual="true"]');
+        return Array.from(nodes).map((node) => ({
+            element: node,
+            chartId: node.getAttribute('data-export-chart-id') || '',
+            title: node.getAttribute('data-export-title') || 'Visual',
+        }));
+    };
+
+    const waitForRenderStabilization = async () => {
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        await new Promise(resolve => setTimeout(resolve, 80));
+    };
+
+    const buildFileSafeName = (baseName, extension) => {
+        const cleaned = (baseName || 'report')
+            .toLowerCase()
+            .replace(/[^a-z0-9-_]+/g, '-')
+            .replace(/-{2,}/g, '-')
+            .replace(/^-+|-+$/g, '');
+        return `${cleaned || 'report'}.${extension}`;
+    };
+
+    const captureVisualAsCanvas = async (element) => {
+        return html2canvas(element, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: theme === 'dark' ? '#111827' : '#ffffff',
+        });
+    };
+
+    const getVisualImageData = async (target) => {
+        const instance = chartInstancesRef.current.get(target.chartId);
+        if (instance && typeof instance.getDataURL === 'function') {
+            const imageData = instance.getDataURL({
+                type: 'png',
+                pixelRatio: 3,
+                backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
+                excludeComponents: ['toolbox'],
+            });
+            const width = instance.getWidth ? instance.getWidth() : target.element.clientWidth;
+            const height = instance.getHeight ? instance.getHeight() : target.element.clientHeight;
+            return { imageData, width, height };
+        }
+
+        const canvas = await captureVisualAsCanvas(target.element);
+        return {
+            imageData: canvas.toDataURL('image/png'),
+            width: canvas.width,
+            height: canvas.height,
+        };
+    };
+
+    const handleChartInstanceChange = (chartId, instance) => {
+        if (!chartId) return;
+        if (!instance) {
+            chartInstancesRef.current.delete(chartId);
+            return;
+        }
+        chartInstancesRef.current.set(chartId, instance);
+    };
+
+    const runWithConcurrency = async (items, limit, worker) => {
+        const results = new Array(items.length);
+        let currentIndex = 0;
+
+        const runNext = async () => {
+            while (true) {
+                const index = currentIndex;
+                currentIndex += 1;
+                if (index >= items.length) return;
+                results[index] = await worker(items[index], index);
+            }
+        };
+
+        const workers = Array.from({ length: Math.min(limit, items.length) }, () => runNext());
+        await Promise.all(workers);
+        return results;
+    };
+
+    const buildExportCacheKey = (scope) => {
+        const scopePageIds = scope === 'all' ? pages.map(p => p.id).join('|') : activePageIdRef.current;
+        const scopeChartIds = charts
+            .filter(c => scope === 'all' || c.pageId === activePageIdRef.current)
+            .map(c => `${c.id}:${c.pageId}:${c.title || ''}`)
+            .join('|');
+        return `${scope}:${scopePageIds}:${scopeChartIds}:${theme}`;
+    };
+
+    const prepareExportImages = async (scope) => {
+        const cacheKey = buildExportCacheKey(scope);
+        const isCacheFresh = Date.now() - exportCacheRef.current.createdAt < 20000;
+        if (isCacheFresh && exportCacheRef.current.key === cacheKey && exportCacheRef.current.items.length > 0) {
+            return exportCacheRef.current.items;
+        }
+
+        const originalPageId = activePageIdRef.current;
+        const pageIds = scope === 'all' ? pages.map(p => p.id) : [originalPageId];
+        const captured = [];
+
+        for (const pageId of pageIds) {
+            if (activePageIdRef.current !== pageId) {
+                setActivePageId(pageId);
+                await waitForRenderStabilization();
+            }
+
+            const pageName = pages.find(p => p.id === pageId)?.name || 'Report';
+            const targets = getCurrentVisualElementsForExport();
+            if (targets.length === 0) continue;
+
+            const pageCaptures = await runWithConcurrency(targets, 3, async (target, index) => {
+                const image = await getVisualImageData(target);
+                return {
+                    ...image,
+                    chartId: target.chartId,
+                    title: target.title || `Visual ${index + 1}`,
+                    pageId,
+                    pageName,
+                };
+            });
+
+            captured.push(...pageCaptures);
+        }
+
+        if (activePageIdRef.current !== originalPageId) {
+            setActivePageId(originalPageId);
+            await waitForRenderStabilization();
+        }
+
+        exportCacheRef.current = { key: cacheKey, createdAt: Date.now(), items: captured };
+        return captured;
+    };
+
+    const handleExportPdf = async () => {
+        if (isExportingPdf || isExportingPpt || isPreparingExport) return;
+
+        setIsPreparingExport(true);
+        setIsExportingPdf(true);
+        try {
+            const exportImages = await prepareExportImages(exportScope);
+            if (exportImages.length === 0) return;
+
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 24;
+
+            for (let i = 0; i < exportImages.length; i += 1) {
+                const target = exportImages[i];
+                const title = exportScope === 'all' ? `${target.pageName} • ${target.title}` : target.title;
+                const { imageData, width, height } = target;
+
+                if (i > 0) doc.addPage();
+
+                doc.setFontSize(14);
+                doc.text(title, margin, margin + 4);
+
+                const maxWidth = pageWidth - margin * 2;
+                const maxHeight = pageHeight - margin * 2 - 24;
+                const widthRatio = maxWidth / width;
+                const heightRatio = maxHeight / height;
+                const ratio = Math.min(widthRatio, heightRatio);
+
+                const imgWidth = width * ratio;
+                const imgHeight = height * ratio;
+                const x = (pageWidth - imgWidth) / 2;
+                const y = margin + 24 + (maxHeight - imgHeight) / 2;
+
+                doc.addImage(imageData, 'PNG', x, y, imgWidth, imgHeight);
+            }
+
+            const fileBase = exportScope === 'all'
+                ? 'all-pages-visuals'
+                : `${pages.find(p => p.id === activePageIdRef.current)?.name || 'report'}-visuals`;
+            doc.save(buildFileSafeName(fileBase, 'pdf'));
+        } catch (error) {
+            console.error('Failed to export PDF:', error);
+            window.alert('Unable to export PDF right now. Please try again.');
+        } finally {
+            setIsPreparingExport(false);
+            setIsExportingPdf(false);
+        }
+    };
+
+    const handleExportPpt = async () => {
+        if (isExportingPpt || isExportingPdf || isPreparingExport) return;
+
+        setIsPreparingExport(true);
+        setIsExportingPpt(true);
+        try {
+            const exportImages = await prepareExportImages(exportScope);
+            if (exportImages.length === 0) return;
+
+            const pptx = new PptxGenJS();
+            pptx.layout = 'LAYOUT_WIDE';
+            pptx.author = 'TabNLP';
+            pptx.subject = 'Report visuals';
+            pptx.title = exportScope === 'all'
+                ? 'All pages visuals'
+                : `${pages.find(p => p.id === activePageIdRef.current)?.name || 'Report'} visuals`;
+
+            for (let i = 0; i < exportImages.length; i += 1) {
+                const target = exportImages[i];
+                const title = exportScope === 'all' ? `${target.pageName} • ${target.title}` : target.title;
+                const { imageData } = target;
+
+                const slide = pptx.addSlide();
+                slide.addText(title, {
+                    x: 0.4,
+                    y: 0.2,
+                    w: 12.5,
+                    h: 0.4,
+                    fontSize: 16,
+                    bold: true,
+                    color: theme === 'dark' ? 'FFFFFF' : '1F2937',
+                });
+
+                slide.addImage({
+                    data: imageData,
+                    x: 0.4,
+                    y: 0.8,
+                    w: 12.5,
+                    h: 6.0,
+                    sizing: {
+                        type: 'contain',
+                        x: 0.4,
+                        y: 0.8,
+                        w: 12.5,
+                        h: 6.0,
+                    },
+                });
+            }
+
+            const fileBase = exportScope === 'all'
+                ? 'all-pages-visuals'
+                : `${pages.find(p => p.id === activePageIdRef.current)?.name || 'report'}-visuals`;
+            await pptx.writeFile({ fileName: buildFileSafeName(fileBase, 'pptx') });
+        } catch (error) {
+            console.error('Failed to export PPT:', error);
+            window.alert('Unable to export PPT right now. Please try again.');
+        } finally {
+            setIsPreparingExport(false);
+            setIsExportingPpt(false);
+        }
     };
 
     const handleAddPage = () => {
@@ -381,6 +778,10 @@ const App = () => {
 
     const currentPageCharts = useMemo(() => charts.filter(c => c.pageId === activePageId), [charts, activePageId]);
     const gridLayouts = useMemo(() => currentPageCharts.map(c => ({ i: c.id, ...c.layout })), [currentPageCharts]);
+    const exportableVisualCount = useMemo(() => {
+        if (exportScope === 'all') return charts.length;
+        return currentPageCharts.length;
+    }, [exportScope, charts.length, currentPageCharts.length]);
 
     const handleBackendIngestionSuccess = async (ingestionResult) => {
         const sourceId = ingestionResult?.source_id;
@@ -513,9 +914,42 @@ const App = () => {
                                         {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
                                         <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
                                     </button>
-                                    <button onClick={handleSaveDashboard} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${isSaving ? (theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200') : (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')}`}>
+                                    <button
+                                        onClick={handleShareDashboard}
+                                        disabled={isSharing || charts.length === 0}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                    >
+                                        <Share2 size={16} className={isSharing ? 'animate-pulse' : ''} />
+                                        <span>{isSharing ? 'Creating Link...' : 'Share Link'}</span>
+                                    </button>
+                                    <select
+                                        value={exportScope}
+                                        onChange={(e) => setExportScope(e.target.value)}
+                                        disabled={isPreparingExport || isExportingPdf || isExportingPpt}
+                                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
+                                    >
+                                        <option value="active">Export: Active Page</option>
+                                        <option value="all">Export: All Pages</option>
+                                    </select>
+                                    {/* <button onClick={handleSaveDashboard} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${isSaving ? (theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200') : (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')}`}>
                                         <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
                                         <span>{isSaving ? 'Saving...' : 'Save Layout'}</span>
+                                    </button> */}
+                                    <button
+                                        onClick={handleExportPdf}
+                                        disabled={exportableVisualCount === 0 || isExportingPdf || isExportingPpt || isPreparingExport}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                    >
+                                        <FileText size={16} className={isExportingPdf ? 'animate-pulse' : ''} />
+                                        <span>{isPreparingExport || isExportingPdf ? 'Exporting PDF...' : 'Export PDF'}</span>
+                                    </button>
+                                    <button
+                                        onClick={handleExportPpt}
+                                        disabled={exportableVisualCount === 0 || isExportingPpt || isExportingPdf || isPreparingExport}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                    >
+                                        <Presentation size={16} className={isExportingPpt ? 'animate-pulse' : ''} />
+                                        <span>{isPreparingExport || isExportingPpt ? 'Exporting PPT...' : 'Export PPT'}</span>
                                     </button>
                                     <button onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
                                         <Plus size={16} />
@@ -535,12 +969,17 @@ const App = () => {
                             />
 
                             <div className="flex-1 flex overflow-hidden p-6 gap-6">
-                                <div className={`flex-1 overflow-y-auto designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : `${theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent'}`}`}>
+                                <div ref={reportCanvasRef} className={`flex-1 overflow-y-scroll overflow-x-hidden report-canvas-scrollbar designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : (theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent')}`}>
                                     <ResponsiveGridLayout className="layout" layouts={{ lg: gridLayouts }} breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={40} draggableHandle=".drag-handle" onLayoutChange={onLayoutChange} isDraggable={isEditMode} isResizable={isEditMode} margin={[16, 16]}>
                                         {currentPageCharts.map(config => (
                                             <div key={config.id} onClick={() => isEditMode && setActiveChartId(config.id)}>
-                                                <div className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}>
-                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} />
+                                                <div
+                                                    data-export-visual="true"
+                                                    data-export-chart-id={config.id}
+                                                    data-export-title={config.title || 'Visual'}
+                                                    className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}
+                                                >
+                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} />
                                                     {activeChartId === config.id && isEditMode && (
                                                         <button onClick={(e) => { e.stopPropagation(); handleRemoveChart(config.id); }} className={`absolute -top-2.5 -right-2.5 text-rose-500 p-1.5 rounded-full shadow-md border hover:bg-rose-500 hover:text-white transition-all z-20 ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
                                                             <Trash2 size={14} />

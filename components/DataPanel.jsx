@@ -446,13 +446,6 @@ const DataPanel = ({
                         </div>
                     )}
                 </div>
-
-                {!activeChartConfig && (
-                    <div className="mt-auto p-8 text-center bg-gray-50/50 dark:bg-gray-700/30">
-                        <Target size={32} className="mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-                        <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase leading-tight">Focus a visual to tweak</p>
-                    </div>
-                )}
             </div>
         </aside>
     );

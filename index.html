@@ -77,6 +77,32 @@
             background-color: var(--scrollbar-hover);
         }
 
+        /* Report canvas scrollbar (always visible) */
+        .report-canvas-scrollbar {
+            scrollbar-width: auto;
+            scrollbar-color: var(--scrollbar-thumb) transparent;
+            scrollbar-gutter: stable;
+        }
+
+        .report-canvas-scrollbar::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        .report-canvas-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .report-canvas-scrollbar::-webkit-scrollbar-thumb {
+            background-color: var(--scrollbar-thumb);
+            border-radius: 10px;
+            border: 3px solid transparent;
+            background-clip: content-box;
+        }
+
+        .report-canvas-scrollbar::-webkit-scrollbar-thumb:hover {
+            background-color: var(--scrollbar-hover);
+        }
+
         /* Clean Panel Style */
         .glass-panel {
             background-color: var(--bg-card);
@@ -89,6 +115,9 @@
                 radial-gradient(var(--canvas-dot) 1px, transparent 1px);
             background-size: 24px 24px;
             background-color: var(--canvas-bg);
+        }
+
+        .designer-canvas .react-grid-layout {
             min-height: 2000px;
         }
 

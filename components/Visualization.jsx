@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import { ChartType } from '../types';
@@ -7,10 +7,18 @@ import { buildChartOption } from '../services/echartsOptionBuilder';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
-const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId }) => {
+const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange }) => {
     const { theme } = useTheme();
     const [drillPath, setDrillPath] = useState([]);
     const chartRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (onChartInstanceChange) {
+                onChartInstanceChange(config.id, null);
+            }
+        };
+    }, [onChartInstanceChange, config.id]);
 
     if (!dataset) return null;
 
@@ -144,11 +152,14 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     // Cross-chart brushing: register chart in group
     const handleChartReady = useCallback((instance) => {
         chartRef.current = instance;
+        if (onChartInstanceChange) {
+            onChartInstanceChange(config.id, instance);
+        }
         if (groupId) {
             instance.group = groupId;
             echarts.connect(groupId);
         }
-    }, [groupId]);
+    }, [groupId, onChartInstanceChange, config.id]);
 
     // Chart click events for drill-down
     const onEvents = useMemo(() => {

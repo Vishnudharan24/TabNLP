@@ -1,87 +1,181 @@
 const DEFAULT_BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_BASE_URL || '/api';
+const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_RETRY_COUNT = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 350;
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 const normalizeBaseUrl = (baseUrl) => (baseUrl || DEFAULT_BACKEND_BASE_URL).replace(/\/$/, '');
 
-async function request(path, options = {}, baseUrl) {
-    const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...(options.headers || {}),
-        },
-        ...options,
-    });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    let payload = null;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-        payload = await response.json();
-    } else {
-        payload = await response.text();
+const isAbortLikeError = (error) => error?.name === 'AbortError' || error?.name === 'TimeoutError';
+
+const withCancellationAndTimeout = (signal, timeoutMs) => {
+    const controller = new AbortController();
+
+    const timeoutId = setTimeout(() => {
+        const timeoutError = new Error(`Request timed out after ${timeoutMs}ms`);
+        timeoutError.name = 'TimeoutError';
+        controller.abort(timeoutError);
+    }, timeoutMs);
+
+    let detachExternalAbort = null;
+    if (signal) {
+        if (signal.aborted) {
+            controller.abort(signal.reason || new Error('Request was cancelled'));
+        } else {
+            const onAbort = () => controller.abort(signal.reason || new Error('Request was cancelled'));
+            signal.addEventListener('abort', onAbort, { once: true });
+            detachExternalAbort = () => signal.removeEventListener('abort', onAbort);
+        }
     }
 
-    if (!response.ok) {
-        const detail = typeof payload === 'object' ? payload?.detail : payload;
-        throw new Error(detail || `Request failed with status ${response.status}`);
+    const cleanup = () => {
+        clearTimeout(timeoutId);
+        if (detachExternalAbort) detachExternalAbort();
+    };
+
+    return { signal: controller.signal, cleanup };
+};
+
+const isRetryableError = (error) => {
+    if (!error) return false;
+    if (isAbortLikeError(error)) return false;
+    if (error?.retryable === true) return true;
+    if (error?.name === 'TypeError') return true; // network failure in fetch
+    return false;
+};
+
+const computeBackoffDelay = (attempt, baseDelayMs) => {
+    const exponential = baseDelayMs * (2 ** attempt);
+    const jitter = 0.85 + Math.random() * 0.3;
+    return Math.round(exponential * jitter);
+};
+
+async function request(path, options = {}, baseUrl, requestConfig = {}) {
+    const {
+        retries = DEFAULT_RETRY_COUNT,
+        timeoutMs = DEFAULT_TIMEOUT_MS,
+        retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
+        signal,
+    } = requestConfig;
+
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const { signal: requestSignal, cleanup } = withCancellationAndTimeout(signal, timeoutMs);
+
+        try {
+            const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(options.headers || {}),
+                },
+                ...options,
+                signal: requestSignal,
+            });
+
+            if (!response.ok && RETRYABLE_STATUS.has(response.status)) {
+                const retryableHttpError = new Error(`Retryable HTTP status ${response.status}`);
+                retryableHttpError.retryable = true;
+                retryableHttpError.status = response.status;
+                throw retryableHttpError;
+            }
+
+            let payload = null;
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                payload = await response.json();
+            } else {
+                payload = await response.text();
+            }
+
+            if (!response.ok) {
+                const detail = typeof payload === 'object' ? payload?.detail : payload;
+                throw new Error(detail || `Request failed with status ${response.status}`);
+            }
+
+            return payload;
+        } catch (error) {
+            lastError = error;
+
+            if (isAbortLikeError(error)) {
+                throw new Error('Request was cancelled or timed out');
+            }
+
+            const canRetry = attempt < retries && isRetryableError(error);
+            if (!canRetry) {
+                throw error;
+            }
+
+            await sleep(computeBackoffDelay(attempt, retryBaseDelayMs));
+        } finally {
+            cleanup();
+        }
     }
 
-    return payload;
+    throw lastError || new Error('Request failed');
 }
 
 export const backendApi = {
-    ingest(params = {}, baseUrl) {
+    createAbortController() {
+        return new AbortController();
+    },
+
+    ingest(params = {}, baseUrl, requestConfig) {
         const search = new URLSearchParams();
         if (params.source_id) search.set('source_id', params.source_id);
         if (params.url) search.set('url', params.url);
         const query = search.toString();
-        return request(`/ingest${query ? `?${query}` : ''}`, { method: 'POST' }, baseUrl);
+        return request(`/ingest${query ? `?${query}` : ''}`, { method: 'POST' }, baseUrl, requestConfig);
     },
 
-    listSourceConfigs(baseUrl) {
-        return request('/source-config', { method: 'GET' }, baseUrl);
+    listSourceConfigs(baseUrl, requestConfig) {
+        return request('/source-config', { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    getSourceConfig(sourceId, baseUrl) {
-        return request(`/source-config/${encodeURIComponent(sourceId)}`, { method: 'GET' }, baseUrl);
+    getSourceConfig(sourceId, baseUrl, requestConfig) {
+        return request(`/source-config/${encodeURIComponent(sourceId)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    saveSourceConfig(payload, baseUrl) {
-        return request('/source-config', { method: 'POST', body: JSON.stringify(payload) }, baseUrl);
+    saveSourceConfig(payload, baseUrl, requestConfig) {
+        return request('/source-config', { method: 'POST', body: JSON.stringify(payload) }, baseUrl, requestConfig);
     },
 
-    patchSourceConfig(sourceId, payload, baseUrl) {
-        return request(`/source-config/${encodeURIComponent(sourceId)}`, { method: 'PATCH', body: JSON.stringify(payload) }, baseUrl);
+    patchSourceConfig(sourceId, payload, baseUrl, requestConfig) {
+        return request(`/source-config/${encodeURIComponent(sourceId)}`, { method: 'PATCH', body: JSON.stringify(payload) }, baseUrl, requestConfig);
     },
 
-    ingestBySourceId(sourceId, baseUrl) {
-        return request(`/ingest/source/${encodeURIComponent(sourceId)}`, { method: 'POST' }, baseUrl);
+    ingestBySourceId(sourceId, baseUrl, requestConfig) {
+        return request(`/ingest/source/${encodeURIComponent(sourceId)}`, { method: 'POST' }, baseUrl, requestConfig);
     },
 
-    listLatestDatasets(limit = 100, baseUrl) {
-        return request(`/datasets/latest?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl);
+    listLatestDatasets(limit = 100, baseUrl, requestConfig) {
+        return request(`/datasets/latest?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    listDatasets(limit = 1000, baseUrl) {
-        return request(`/datasets?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl);
+    listDatasets(limit = 1000, baseUrl, requestConfig) {
+        return request(`/datasets?limit=${encodeURIComponent(limit)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    getLatestDatasetBySourceId(sourceId, baseUrl) {
-        return request(`/datasets/latest/${encodeURIComponent(sourceId)}`, { method: 'GET' }, baseUrl);
+    getLatestDatasetBySourceId(sourceId, baseUrl, requestConfig) {
+        return request(`/datasets/latest/${encodeURIComponent(sourceId)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    getDatasetByDocumentId(documentId, baseUrl) {
-        return request(`/datasets/${encodeURIComponent(documentId)}`, { method: 'GET' }, baseUrl);
+    getDatasetByDocumentId(documentId, baseUrl, requestConfig) {
+        return request(`/datasets/${encodeURIComponent(documentId)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    getTestExcel(baseUrl) {
-        return request('/test/file', { method: 'GET' }, baseUrl);
+    getTestExcel(baseUrl, requestConfig) {
+        return request('/test/file', { method: 'GET' }, baseUrl, requestConfig);
     },
 
-    createTestExcelSourceConfig(sourceId = 'local_excel_test', baseUrl) {
+    createTestExcelSourceConfig(sourceId = 'local_excel_test', baseUrl, requestConfig) {
         const query = new URLSearchParams({ source_id: sourceId }).toString();
-        return request(`/test/source-config/excel?${query}`, { method: 'POST' }, baseUrl);
+        return request(`/test/source-config/excel?${query}`, { method: 'POST' }, baseUrl, requestConfig);
     },
 
-    createTestSftpSourceConfig(params = {}, baseUrl) {
+    createTestSftpSourceConfig(params = {}, baseUrl, requestConfig) {
         const search = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => {
             if (value !== undefined && value !== null && `${value}`.trim() !== '') {
@@ -89,17 +183,17 @@ export const backendApi = {
             }
         });
         const query = search.toString();
-        return request(`/test/source-config/sftp${query ? `?${query}` : ''}`, { method: 'POST' }, baseUrl);
+        return request(`/test/source-config/sftp${query ? `?${query}` : ''}`, { method: 'POST' }, baseUrl, requestConfig);
     },
 
-    ingestTestExcel(sourceId = 'local_excel_test', baseUrl) {
+    ingestTestExcel(sourceId = 'local_excel_test', baseUrl, requestConfig) {
         const query = new URLSearchParams({ source_id: sourceId }).toString();
-        return request(`/test/ingest/excel?${query}`, { method: 'POST' }, baseUrl);
+        return request(`/test/ingest/excel?${query}`, { method: 'POST' }, baseUrl, requestConfig);
     },
 
-    ingestTestSftp(sourceId = 'local_sftp_test', baseUrl) {
+    ingestTestSftp(sourceId = 'local_sftp_test', baseUrl, requestConfig) {
         const query = new URLSearchParams({ source_id: sourceId }).toString();
-        return request(`/test/ingest/sftp?${query}`, { method: 'POST' }, baseUrl);
+        return request(`/test/ingest/sftp?${query}`, { method: 'POST' }, baseUrl, requestConfig);
     },
 };
 
