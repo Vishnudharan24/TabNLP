@@ -104,6 +104,8 @@ const mapBackendDatasetToAppDataset = (item) => {
             sourceId: item?.source_id,
             sourceKey: item?.source_key,
             ingestedAt: item?.ingested_at,
+            metadata: item?.metadata || null,
+            fileName: item?.metadata?.file_name || null,
             backend: true,
         },
     };

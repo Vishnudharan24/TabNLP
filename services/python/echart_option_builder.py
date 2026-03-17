@@ -875,7 +875,7 @@ if __name__ == "__main__":
         {"name": "Engineering", "salary": 125000, "tenure": 5.2, "rating": 4.5},
         {"name": "Sales", "salary": 88000, "tenure": 3.1, "rating": 4.0},
         {"name": "Marketing", "salary": 92000, "tenure": 3.5, "rating": 4.2},
-        {"name": "HR", "salary": 78000, "tenure": 4.1, "rating": 4.5},
+        {"name": "Operations", "salary": 78000, "tenure": 4.1, "rating": 4.5},
     ]
 
     config = {

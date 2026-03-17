@@ -140,7 +140,7 @@ const DataPanel = ({
         );
     }, [selectedDataset, activeChartConfig?.dimension, activeChartConfig?.measures]);
 
-    const recommendedTypes = useMemo(() => new Set(recommendations.slice(0, 6).map(r => r.type)), [recommendations]);
+    const recommendedTypes = useMemo(() => new Set(recommendations.map(r => r.type)), [recommendations]);
 
     const addFilter = () => {
         if (!activeChartConfig || !selectedDataset) return;
@@ -236,7 +236,7 @@ const DataPanel = ({
                                         <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Recommended</h4>
                                     </div>
                                     <div className="grid grid-cols-4 gap-2">
-                                        {recommendations.slice(0, 8).map(rec => {
+                                        {recommendations.map(rec => {
                                             const Icon = getChartIcon(rec.type);
                                             return (
                                                 <button

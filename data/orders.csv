@@ -1,0 +1,11 @@
+order_id,customer_id,product_id,order_date,quantity,status,payment_method
+1001,C001,P101,2025-01-01,2,Completed,UPI
+1002,C002,P102,2025-01-02,5,Completed,Credit Card
+1003,C003,P103,2025-01-03,3,Pending,Debit Card
+1004,C004,P104,2025-01-04,6,Completed,Net Banking
+1005,C005,P105,2025-01-05,8,Cancelled,UPI
+1006,C006,P101,2025-01-06,1,Completed,Cash
+1007,C007,P102,2025-01-07,4,Completed,UPI
+1008,C008,P103,2025-01-08,2,Pending,Credit Card
+1009,C009,P104,2025-01-09,7,Completed,Debit Card
+1010,C010,P105,2025-01-10,10,Completed,Net Banking

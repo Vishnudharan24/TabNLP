@@ -1,0 +1,11 @@
+customer_id,name,age,gender,city,state,signup_date
+C001,Amit Sharma,28,Male,Chennai,Tamil Nadu,2024-06-12
+C002,Priya Nair,32,Female,Kochi,Kerala,2024-07-15
+C003,Rahul Verma,24,Male,Bangalore,Karnataka,2024-08-20
+C004,Anjali Singh,29,Female,Delhi,Delhi,2024-09-05
+C005,Vikram Rao,35,Male,Hyderabad,Telangana,2024-10-11
+C006,Sneha Iyer,27,Female,Chennai,Tamil Nadu,2024-11-01
+C007,Arjun Das,31,Male,Kolkata,West Bengal,2024-12-18
+C008,Meera Kapoor,26,Female,Mumbai,Maharashtra,2025-01-02
+C009,Karan Mehta,30,Male,Ahmedabad,Gujarat,2025-01-15
+C010,Divya Reddy,33,Female,Hyderabad,Telangana,2025-02-01

@@ -38,6 +38,55 @@ const DataSourceView = ({
     // Dataset assignment dropdown
     const [assigningDatasetId, setAssigningDatasetId] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
+
+    const getDatasetSearchText = (dataset) => {
+        const metadata = dataset?._meta?.metadata || {};
+        const metadataColumns = Array.isArray(metadata?.columns) ? metadata.columns : [];
+
+        return [
+            dataset?.name,
+            dataset?._meta?.sourceId,
+            dataset?._meta?.sourceKey,
+            dataset?._meta?.fileName,
+            metadata?.file_name,
+            metadata?.source,
+            metadata?.source_type,
+            dataset?._meta?.ingestedAt,
+            ...(dataset?.columns || []).map(c => c?.name),
+            ...metadataColumns,
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+    };
+
+    const getDatasetDate = (dataset) => {
+        const candidate = dataset?._meta?.ingestedAt || dataset?._meta?.metadata?.timestamp;
+        if (!candidate) return null;
+        const parsed = new Date(candidate);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const isDatasetWithinDateRange = (dataset) => {
+        if (!fromDate && !toDate) return true;
+
+        const dsDate = getDatasetDate(dataset);
+        if (!dsDate) return false;
+
+        if (fromDate) {
+            const start = new Date(`${fromDate}T00:00:00`);
+            if (dsDate < start) return false;
+        }
+
+        if (toDate) {
+            const end = new Date(`${toDate}T23:59:59.999`);
+            if (dsDate > end) return false;
+        }
+
+        return true;
+    };
 
     // Filtered datasets by active company
     const filteredDatasets = useMemo(() => {
@@ -51,13 +100,11 @@ const DataSourceView = ({
         }
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
-            result = result.filter(d =>
-                d.name.toLowerCase().includes(q) ||
-                d.columns.some(c => c.name.toLowerCase().includes(q))
-            );
+            result = result.filter(d => getDatasetSearchText(d).includes(q));
         }
+        result = result.filter(isDatasetWithinDateRange);
         return result;
-    }, [datasets, activeCompanyId, searchQuery]);
+    }, [datasets, activeCompanyId, searchQuery, fromDate, toDate]);
 
     const getCompanyForDataset = (ds) => companies.find(c => c.id === ds.companyId);
     const unassignedCount = datasets.filter(d => !d.companyId).length;
@@ -269,7 +316,7 @@ const DataSourceView = ({
             </div>
 
             {/* ─── Search + Stats Bar ─── */}
-            <div className={`px-10 py-4 flex items-center gap-4 shrink-0`}>
+            <div className={`px-10 py-4 flex items-center gap-4 shrink-0 flex-wrap`}>
                 <div className={`flex items-center gap-2 flex-1 max-w-md px-3 py-2 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                     <Search size={14} className={isDark ? 'text-gray-500' : 'text-gray-400'} />
                     <input
@@ -282,6 +329,30 @@ const DataSourceView = ({
                     {searchQuery && (
                         <button onClick={() => setSearchQuery('')} className={isDark ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}>
                             <X size={12} />
+                        </button>
+                    )}
+                </div>
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>From</span>
+                    <input
+                        type="date"
+                        value={fromDate}
+                        onChange={e => setFromDate(e.target.value)}
+                        className={`text-xs bg-transparent outline-none ${isDark ? 'text-gray-200' : 'text-gray-700'}`}
+                    />
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>To</span>
+                    <input
+                        type="date"
+                        value={toDate}
+                        onChange={e => setToDate(e.target.value)}
+                        className={`text-xs bg-transparent outline-none ${isDark ? 'text-gray-200' : 'text-gray-700'}`}
+                    />
+                    {(fromDate || toDate) && (
+                        <button
+                            onClick={() => { setFromDate(''); setToDate(''); }}
+                            className={`text-[10px] font-semibold px-2 py-1 rounded ${isDark ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+                        >
+                            Clear
                         </button>
                     )}
                 </div>
@@ -413,8 +484,24 @@ const DataSourceView = ({
 
                                     {/* Footer */}
                                     <div className={`mt-8 pt-6 border-t ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+                                        {ds?._meta?.backend && (
+                                            <div className={`mb-3 text-[10px] space-y-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+                                                <div>
+                                                    <span className="font-bold uppercase tracking-wider">File:</span>{' '}
+                                                    <span className="font-semibold">{ds?._meta?.fileName || ds?._meta?.metadata?.file_name || 'N/A'}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="font-bold uppercase tracking-wider">Type:</span>{' '}
+                                                    <span className="font-semibold">{(ds?._meta?.metadata?.source_type || 'unknown').toUpperCase()}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="font-bold uppercase tracking-wider">Ingested:</span>{' '}
+                                                    <span className="font-semibold">{ds?._meta?.ingestedAt ? new Date(ds._meta.ingestedAt).toLocaleString() : 'N/A'}</span>
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className={`flex justify-between text-[10px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-gray-600' : 'text-gray-300'}`}>
-                                            <span>Source: {ds._meta?.merged ? 'Merged' : 'CSV'}</span>
+                                            <span>Source: {ds._meta?.merged ? 'Merged' : (ds?._meta?.metadata?.source_type || 'CSV')}</span>
                                             <span>Ready for Design</span>
                                         </div>
                                     </div>
