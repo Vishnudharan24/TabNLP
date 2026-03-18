@@ -15,6 +15,7 @@ import DataProfiler from './components/DataProfiler';
 import GlobalFilterBar from './components/GlobalFilterBar';
 import RelationshipDiagram from './components/RelationshipDiagram';
 import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
+import AuthScreen from './components/AuthScreen';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -45,6 +46,8 @@ const STORAGE_KEY_SELECTED_DATASET = 'power_bi_v3_selected_dataset_restored';
 const STORAGE_KEY_ACTIVE_COMPANY = 'power_bi_v3_active_company_restored';
 const STORAGE_KEY_VIEW = 'power_bi_v3_view_restored';
 const STORAGE_KEY_BACKEND_SOURCE_IDS = 'power_bi_v3_backend_source_ids_restored';
+const STORAGE_KEY_AUTH_TOKEN = 'power_bi_v3_auth_token';
+const STORAGE_KEY_AUTH_USER = 'power_bi_v3_auth_user';
 const SHARE_QUERY_PARAM = 'reportShare';
 const SHARE_SCHEMA_VERSION = 1;
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
@@ -172,6 +175,8 @@ const App = () => {
     const [isPreparingExport, setIsPreparingExport] = useState(false);
     const [isExportingPdf, setIsExportingPdf] = useState(false);
     const [isExportingPpt, setIsExportingPpt] = useState(false);
+    const [showShareExportPopup, setShowShareExportPopup] = useState(false);
+    const [showReportSettingsPopup, setShowReportSettingsPopup] = useState(false);
     const [exportScope, setExportScope] = useState('active');
     const [chartClarityMode, setChartClarityMode] = useState('standard');
     const [chartPaletteMode, setChartPaletteMode] = useState('vibrant');
@@ -182,6 +187,88 @@ const App = () => {
     const [activeCompanyId, setActiveCompanyId] = useState('__all__');
     const [globalFilters, setGlobalFilters] = useState([]);
     const [profilerDatasetId, setProfilerDatasetId] = useState(null);
+    const [authToken, setAuthToken] = useState(() => localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) || '');
+    const [authUser, setAuthUser] = useState(() => readStorageJson(STORAGE_KEY_AUTH_USER, null));
+    const [isAuthLoading, setIsAuthLoading] = useState(true);
+    const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+
+    const applyAuthSession = (token, user) => {
+        setAuthToken(token || '');
+        setAuthUser(user || null);
+        if (token) {
+            localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, token);
+        } else {
+            localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
+        }
+        if (user) {
+            writeStorageJson(STORAGE_KEY_AUTH_USER, user);
+        } else {
+            localStorage.removeItem(STORAGE_KEY_AUTH_USER);
+        }
+    };
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const bootstrapAuth = async () => {
+            if (!authToken) {
+                if (isMounted) setIsAuthLoading(false);
+                return;
+            }
+
+            try {
+                const response = await backendApi.getCurrentUser(authToken);
+                const currentUser = response?.user;
+                if (isMounted && currentUser) {
+                    applyAuthSession(authToken, currentUser);
+                }
+            } catch {
+                if (isMounted) applyAuthSession('', null);
+            } finally {
+                if (isMounted) setIsAuthLoading(false);
+            }
+        };
+
+        bootstrapAuth();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const handleLogin = async (payload) => {
+        setIsAuthSubmitting(true);
+        try {
+            const response = await backendApi.login(payload);
+            const token = response?.token;
+            const user = response?.user;
+            if (!token || !user) throw new Error('Invalid login response from server');
+            applyAuthSession(token, user);
+        } catch (error) {
+            throw new Error(error?.message || 'Login failed');
+        } finally {
+            setIsAuthSubmitting(false);
+        }
+    };
+
+    const handleSignUp = async (payload) => {
+        setIsAuthSubmitting(true);
+        try {
+            const response = await backendApi.signUp(payload);
+            const token = response?.token;
+            const user = response?.user;
+            if (!token || !user) throw new Error('Invalid signup response from server');
+            applyAuthSession(token, user);
+        } catch (error) {
+            throw new Error(error?.message || 'Signup failed');
+        } finally {
+            setIsAuthSubmitting(false);
+        }
+    };
+
+    const handleLogout = () => {
+        applyAuthSession('', null);
+    };
 
     useEffect(() => {
         const readSharedPayloadFromUrl = () => {
@@ -818,9 +905,21 @@ const App = () => {
         }
     };
 
+    if (isAuthLoading) {
+        return (
+            <div className={`min-h-screen flex items-center justify-center ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-700'}`}>
+                <div className="text-sm font-semibold">Loading authentication...</div>
+            </div>
+        );
+    }
+
+    if (!authUser) {
+        return <AuthScreen onLogin={handleLogin} onSignUp={handleSignUp} isLoading={isAuthSubmitting} />;
+    }
+
     return (
         <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
-            <Header />
+            <Header authUser={authUser} onLogout={handleLogout} />
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar setView={setView} currentView={view} />
                 <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -940,58 +1039,24 @@ const App = () => {
                                         <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
                                     </button>
                                     <button
-                                        onClick={handleShareDashboard}
-                                        disabled={isSharing || charts.length === 0}
+                                        onClick={() => setShowShareExportPopup(true)}
+                                        disabled={exportableVisualCount === 0 || isExportingPdf || isExportingPpt || isPreparingExport}
                                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
                                     >
-                                        <Share2 size={16} className={isSharing ? 'animate-pulse' : ''} />
-                                        <span>{isSharing ? 'Creating Link...' : 'Share Link'}</span>
+                                        <Share2 size={16} className={isPreparingExport ? 'animate-pulse' : ''} />
+                                        <span>Share</span>
                                     </button>
-                                    <select
-                                        value={chartClarityMode}
-                                        onChange={(e) => setChartClarityMode(e.target.value)}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
+                                    <button
+                                        onClick={() => setShowReportSettingsPopup(true)}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
                                     >
-                                        <option value="standard">Charts: Standard</option>
-                                        <option value="clear">Charts: Clear</option>
-                                    </select>
-                                    <select
-                                        value={chartPaletteMode}
-                                        onChange={(e) => setChartPaletteMode(e.target.value)}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
-                                    >
-                                        <option value="vibrant">Palette: Vibrant</option>
-                                        <option value="neutral">Palette: Neutral</option>
-                                    </select>
-                                    <select
-                                        value={exportScope}
-                                        onChange={(e) => setExportScope(e.target.value)}
-                                        disabled={isPreparingExport || isExportingPdf || isExportingPpt}
-                                        className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
-                                    >
-                                        <option value="active">Export: Active Page</option>
-                                        <option value="all">Export: All Pages</option>
-                                    </select>
+                                        <Settings size={16} />
+                                        <span>Settings</span>
+                                    </button>
                                     {/* <button onClick={handleSaveDashboard} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${isSaving ? (theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200') : (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')}`}>
                                         <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
                                         <span>{isSaving ? 'Saving...' : 'Save Layout'}</span>
                                     </button> */}
-                                    <button
-                                        onClick={handleExportPdf}
-                                        disabled={exportableVisualCount === 0 || isExportingPdf || isExportingPpt || isPreparingExport}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
-                                    >
-                                        <FileText size={16} className={isExportingPdf ? 'animate-pulse' : ''} />
-                                        <span>{isPreparingExport || isExportingPdf ? 'Exporting PDF...' : 'Export PDF'}</span>
-                                    </button>
-                                    <button
-                                        onClick={handleExportPpt}
-                                        disabled={exportableVisualCount === 0 || isExportingPpt || isExportingPdf || isPreparingExport}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
-                                    >
-                                        <Presentation size={16} className={isExportingPpt ? 'animate-pulse' : ''} />
-                                        <span>{isPreparingExport || isExportingPpt ? 'Exporting PPT...' : 'Export PPT'}</span>
-                                    </button>
                                     <button onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
                                         <Plus size={16} />
                                         <span>Add Visual</span>
@@ -1070,6 +1135,103 @@ const App = () => {
                         setShowMerger(false);
                     }}
                 />
+            )}
+
+            {showShareExportPopup && view === 'report' && (
+                <div
+                    className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+                    onClick={() => setShowShareExportPopup(false)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className={`text-base font-bold ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Share Report</h3>
+                            <button
+                                onClick={() => setShowShareExportPopup(false)}
+                                className={`p-1.5 rounded-lg transition-all ${theme === 'dark' ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className={`block text-xs font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Export Scope</label>
+                            <select
+                                value={exportScope}
+                                onChange={(e) => setExportScope(e.target.value)}
+                                disabled={isPreparingExport || isExportingPdf || isExportingPpt}
+                                className={`w-full px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                <option value="active">Active Page</option>
+                                <option value="all">All Pages</option>
+                            </select>
+
+                            <button
+                                onClick={() => { setShowShareExportPopup(false); handleExportPdf(); }}
+                                disabled={exportableVisualCount === 0 || isExportingPdf || isExportingPpt || isPreparingExport}
+                                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                <FileText size={16} className={isExportingPdf ? 'animate-pulse' : ''} />
+                                <span>{isPreparingExport || isExportingPdf ? 'Exporting PDF...' : 'Export as PDF'}</span>
+                            </button>
+
+                            <button
+                                onClick={() => { setShowShareExportPopup(false); handleExportPpt(); }}
+                                disabled={exportableVisualCount === 0 || isExportingPpt || isExportingPdf || isPreparingExport}
+                                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                <Presentation size={16} className={isExportingPpt ? 'animate-pulse' : ''} />
+                                <span>{isPreparingExport || isExportingPpt ? 'Exporting PPT...' : 'Export as PPT'}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showReportSettingsPopup && view === 'report' && (
+                <div
+                    className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+                    onClick={() => setShowReportSettingsPopup(false)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className={`text-base font-bold ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Report Settings</h3>
+                            <button
+                                onClick={() => setShowReportSettingsPopup(false)}
+                                className={`p-1.5 rounded-lg transition-all ${theme === 'dark' ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className={`block text-xs font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Charts</label>
+                            <select
+                                value={chartClarityMode}
+                                onChange={(e) => setChartClarityMode(e.target.value)}
+                                className={`w-full px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                <option value="standard">Standard</option>
+                                <option value="clear">Clear</option>
+                            </select>
+
+                            <label className={`block text-xs font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Pallete</label>
+                            <select
+                                value={chartPaletteMode}
+                                onChange={(e) => setChartPaletteMode(e.target.value)}
+                                className={`w-full px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                <option value="vibrant">Vibrant</option>
+                                <option value="neutral">Neutral</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
             )}
 
             <footer className={`h-10 border-t px-6 flex items-center justify-between shrink-0 z-40 text-xs ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>

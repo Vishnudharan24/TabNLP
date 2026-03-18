@@ -1,11 +1,18 @@
 
 import React from 'react';
-import { Bell, HelpCircle, Search, Settings, Sun, Moon } from 'lucide-react';
+import { Bell, HelpCircle, Search, Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import appLogo from '../ChillView_logo.jpg';
 
-const Header = () => {
+const Header = ({ authUser, onLogout }) => {
     const { theme, toggleTheme } = useTheme();
+    const displayName = authUser?.name || 'Local User';
+    const initials = (displayName || 'LU')
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(part => part[0]?.toUpperCase())
+        .join('') || 'LU';
 
     return (
         <header className="h-16 glass-panel border-b px-8 flex items-center justify-between sticky top-0 z-50 animate-fade-in dark:border-gray-700">
@@ -48,12 +55,21 @@ const Header = () => {
                     </button>
                 </div>
                 <div className="flex items-center gap-3 pl-2">
+                    {onLogout && (
+                        <button
+                            onClick={onLogout}
+                            className={`inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold border ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                        >
+                            <LogOut size={14} />
+                            <span>Logout</span>
+                        </button>
+                    )}
                     <div className="flex flex-col items-end">
-                        <span className="text-xs font-bold text-gray-800 dark:text-gray-200">Local User</span>
+                        <span className="text-xs font-bold text-gray-800 dark:text-gray-200">{displayName}</span>
                         <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-tighter">Editor Access</span>
                     </div>
                     <div className="h-10 w-10 rounded-2xl border-2 border-white dark:border-gray-700 shadow-lg flex items-center justify-center text-white font-bold text-sm transition-all hover:scale-105 cursor-pointer bg-gray-700 dark:bg-gray-500">
-                        LU
+                        {initials}
                     </div>
                 </div>
             </div>

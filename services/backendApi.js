@@ -3,6 +3,7 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_RETRY_COUNT = 2;
 const DEFAULT_RETRY_BASE_DELAY_MS = 350;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const STORAGE_KEY_AUTH_TOKEN = 'power_bi_v3_auth_token';
 
 const normalizeBaseUrl = (baseUrl) => (baseUrl || DEFAULT_BACKEND_BASE_URL).replace(/\/$/, '');
 
@@ -64,11 +65,15 @@ async function request(path, options = {}, baseUrl, requestConfig = {}) {
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         const { signal: requestSignal, cleanup } = withCancellationAndTimeout(signal, timeoutMs);
+        const persistedToken = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+        const providedHeaders = options.headers || {};
+        const hasAuthorizationHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'authorization');
 
         try {
             const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(persistedToken && !hasAuthorizationHeader ? { Authorization: `Bearer ${persistedToken}` } : {}),
                     ...(options.headers || {}),
                 },
                 ...options,
@@ -120,6 +125,28 @@ async function request(path, options = {}, baseUrl, requestConfig = {}) {
 export const backendApi = {
     createAbortController() {
         return new AbortController();
+    },
+
+    createAuthHeaders(token) {
+        if (!token) return {};
+        return { Authorization: `Bearer ${token}` };
+    },
+
+    signUp(payload, baseUrl, requestConfig) {
+        return request('/auth/signup', { method: 'POST', body: JSON.stringify(payload) }, baseUrl, requestConfig);
+    },
+
+    login(payload, baseUrl, requestConfig) {
+        return request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }, baseUrl, requestConfig);
+    },
+
+    getCurrentUser(token, baseUrl, requestConfig) {
+        return request('/auth/me', {
+            method: 'GET',
+            headers: {
+                ...this.createAuthHeaders(token),
+            },
+        }, baseUrl, requestConfig);
     },
 
     ingest(params = {}, baseUrl, requestConfig) {
