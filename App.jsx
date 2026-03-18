@@ -16,6 +16,7 @@ import GlobalFilterBar from './components/GlobalFilterBar';
 import RelationshipDiagram from './components/RelationshipDiagram';
 import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
 import AuthScreen from './components/AuthScreen';
+import HRAnalyticsDashboard from './components/hr/HRAnalyticsDashboard';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -995,6 +996,12 @@ const App = () => {
                                 </div>
                             )}
                         </div>
+                    ) : view === 'hr-analytics' ? (
+                        <HRAnalyticsDashboard
+                            datasets={datasets}
+                            selectedDatasetId={selectedDatasetId}
+                            setSelectedDatasetId={setSelectedDatasetId}
+                        />
                     ) : (
                         <div className="flex-1 flex flex-col overflow-hidden">
                             <div className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>

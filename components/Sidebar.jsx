@@ -7,7 +7,8 @@ import {
     Layout,
     Merge,
     GitBranch,
-    Server
+    Server,
+    BriefcaseBusiness
 } from 'lucide-react';
 
 const SidebarItem = ({
@@ -51,6 +52,13 @@ const Sidebar = ({ setView, currentView }) => {
                     label="Report View"
                     active={currentView === 'report'}
                     onClick={() => setView('report')}
+                />
+
+                <SidebarItem
+                    icon={BriefcaseBusiness}
+                    label="HR Data Visualization"
+                    active={currentView === 'hr-analytics'}
+                    onClick={() => setView('hr-analytics')}
                 />
 
                 <SidebarItem
