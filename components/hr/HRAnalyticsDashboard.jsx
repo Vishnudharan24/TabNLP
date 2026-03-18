@@ -1,9 +1,11 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { BriefcaseBusiness, AlertTriangle, TrendingUp, Users2, FileText, Presentation } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import PptxGenJS from 'pptxgenjs';
 import { useTheme } from '../../contexts/ThemeContext';
+import { recommendCharts } from '../../services/chartRecommender';
+import { ChartType } from '../../types';
 import HRKpiCards from './HRKpiCards';
 import HRFiltersBar from './HRFiltersBar';
 import HRChartCard from './HRChartCard';
@@ -26,6 +28,66 @@ const buildBaseGrid = (isDark) => ({
     backgroundColor: 'transparent',
     borderColor: isDark ? '#374151' : '#E5E7EB',
 });
+
+const LOCAL_CHART_TYPE_LABELS = {
+    bar: 'Bar',
+    line: 'Line',
+    pie: 'Pie',
+    donut: 'Donut',
+    combo: 'Combo',
+};
+
+const ALLOWED_LOCAL_TYPES = {
+    department: ['bar', 'line'],
+    gender: ['pie', 'donut'],
+    age: ['bar', 'line'],
+    hiringTrend: ['line', 'bar'],
+    attritionTrend: ['line', 'bar'],
+    attritionByDepartment: ['combo', 'bar'],
+    education: ['bar', 'pie', 'donut'],
+};
+
+const mapRecommenderTypeToLocal = (chartType) => {
+    if (!chartType) return null;
+
+    if (chartType === ChartType.PIE || chartType === ChartType.PIE_SEMI || chartType === ChartType.ROSE || chartType === ChartType.SUNBURST || chartType === ChartType.TREEMAP) {
+        return 'pie';
+    }
+    if (chartType === ChartType.DONUT || chartType === ChartType.DONUT_SEMI || chartType === ChartType.RADIAL_BAR) {
+        return 'donut';
+    }
+    if (chartType === ChartType.COMBO_BAR_LINE || chartType === ChartType.COMBO_STACKED_LINE || chartType === ChartType.COMBO_AREA_LINE) {
+        return 'combo';
+    }
+    if (chartType.startsWith('LINE_') || chartType.startsWith('AREA_') || chartType === ChartType.SPARKLINE) {
+        return 'line';
+    }
+    if (chartType.startsWith('BAR_')) {
+        return 'bar';
+    }
+    return null;
+};
+
+const getRecommendedLocalTypes = ({ columns, dimension, measures = [], allowed = [] }) => {
+    const recs = recommendCharts(columns, dimension, measures);
+    const ordered = [];
+
+    recs.forEach((rec) => {
+        const mapped = mapRecommenderTypeToLocal(rec.type);
+        if (!mapped) return;
+        if (!allowed.includes(mapped)) return;
+        if (ordered.includes(mapped)) return;
+        ordered.push(mapped);
+    });
+
+    if (ordered.length === 0) return [...allowed];
+
+    allowed.forEach((localType) => {
+        if (!ordered.includes(localType)) ordered.push(localType);
+    });
+
+    return ordered;
+};
 
 const toMonthSeries = (items, dateAccessor) => {
     const map = new Map();
@@ -69,6 +131,100 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
         attritionByDepartment: 'combo',
         education: 'bar',
     });
+
+    const chartTypeRecommendations = useMemo(() => {
+        const departmentColumns = [
+            { name: 'Department', type: 'string' },
+            { name: 'Employee Count', type: 'number' },
+        ];
+        const genderColumns = [
+            { name: 'Gender', type: 'string' },
+            { name: 'Employee Count', type: 'number' },
+        ];
+        const ageColumns = [
+            { name: 'Age Bucket', type: 'string' },
+            { name: 'Employee Count', type: 'number' },
+        ];
+        const hiringColumns = [
+            { name: 'Join Month', type: 'date' },
+            { name: 'Joined Count', type: 'number' },
+        ];
+        const attritionTrendColumns = [
+            { name: 'Exit Month', type: 'date' },
+            { name: 'Exited Count', type: 'number' },
+        ];
+        const attritionDeptColumns = [
+            { name: 'Department', type: 'string' },
+            { name: 'Attrition Rate', type: 'number' },
+            { name: 'Exited Count', type: 'number' },
+        ];
+        const educationColumns = [
+            { name: 'Education Level', type: 'string' },
+            { name: 'Employee Count', type: 'number' },
+        ];
+
+        return {
+            department: getRecommendedLocalTypes({
+                columns: departmentColumns,
+                dimension: 'Department',
+                measures: ['Employee Count'],
+                allowed: ALLOWED_LOCAL_TYPES.department,
+            }),
+            gender: getRecommendedLocalTypes({
+                columns: genderColumns,
+                dimension: 'Gender',
+                measures: ['Employee Count'],
+                allowed: ALLOWED_LOCAL_TYPES.gender,
+            }),
+            age: getRecommendedLocalTypes({
+                columns: ageColumns,
+                dimension: 'Age Bucket',
+                measures: ['Employee Count'],
+                allowed: ALLOWED_LOCAL_TYPES.age,
+            }),
+            hiringTrend: getRecommendedLocalTypes({
+                columns: hiringColumns,
+                dimension: 'Join Month',
+                measures: ['Joined Count'],
+                allowed: ALLOWED_LOCAL_TYPES.hiringTrend,
+            }),
+            attritionTrend: getRecommendedLocalTypes({
+                columns: attritionTrendColumns,
+                dimension: 'Exit Month',
+                measures: ['Exited Count'],
+                allowed: ALLOWED_LOCAL_TYPES.attritionTrend,
+            }),
+            attritionByDepartment: getRecommendedLocalTypes({
+                columns: attritionDeptColumns,
+                dimension: 'Department',
+                measures: ['Attrition Rate', 'Exited Count'],
+                allowed: ALLOWED_LOCAL_TYPES.attritionByDepartment,
+            }),
+            education: getRecommendedLocalTypes({
+                columns: educationColumns,
+                dimension: 'Education Level',
+                measures: ['Employee Count'],
+                allowed: ALLOWED_LOCAL_TYPES.education,
+            }),
+        };
+    }, []);
+
+    useEffect(() => {
+        setChartTypes((prev) => {
+            const next = { ...prev };
+            let changed = false;
+
+            Object.keys(ALLOWED_LOCAL_TYPES).forEach((key) => {
+                const options = chartTypeRecommendations[key] || ALLOWED_LOCAL_TYPES[key];
+                if (!options.includes(next[key])) {
+                    next[key] = options[0];
+                    changed = true;
+                }
+            });
+
+            return changed ? next : prev;
+        });
+    }, [chartTypeRecommendations]);
 
     const selectedDataset = useMemo(
         () => datasets.find(ds => ds.id === selectedDatasetId) || datasets[0] || null,
@@ -691,57 +847,63 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
             <div className={`rounded-2xl border p-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center justify-between mb-3">
                     <h3 className={`text-sm font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Chart Controls</h3>
-                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Choose chart type per visual</p>
+                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Recommended via chart recommender</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Department Dist.</span>
                         <select value={chartTypes.department} onChange={(e) => setChartTypes(prev => ({ ...prev, department: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="bar">Bar</option>
-                            <option value="line">Line</option>
+                            {(chartTypeRecommendations.department || ALLOWED_LOCAL_TYPES.department).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Gender Dist.</span>
                         <select value={chartTypes.gender} onChange={(e) => setChartTypes(prev => ({ ...prev, gender: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="pie">Pie</option>
-                            <option value="donut">Donut</option>
+                            {(chartTypeRecommendations.gender || ALLOWED_LOCAL_TYPES.gender).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Age Dist.</span>
                         <select value={chartTypes.age} onChange={(e) => setChartTypes(prev => ({ ...prev, age: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="bar">Bar</option>
-                            <option value="line">Line</option>
+                            {(chartTypeRecommendations.age || ALLOWED_LOCAL_TYPES.age).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Hiring Trend</span>
                         <select value={chartTypes.hiringTrend} onChange={(e) => setChartTypes(prev => ({ ...prev, hiringTrend: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="line">Line</option>
-                            <option value="bar">Bar</option>
+                            {(chartTypeRecommendations.hiringTrend || ALLOWED_LOCAL_TYPES.hiringTrend).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Attrition Trend</span>
                         <select value={chartTypes.attritionTrend} onChange={(e) => setChartTypes(prev => ({ ...prev, attritionTrend: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="line">Line</option>
-                            <option value="bar">Bar</option>
+                            {(chartTypeRecommendations.attritionTrend || ALLOWED_LOCAL_TYPES.attritionTrend).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Attrition by Dept.</span>
                         <select value={chartTypes.attritionByDepartment} onChange={(e) => setChartTypes(prev => ({ ...prev, attritionByDepartment: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="combo">Combo</option>
-                            <option value="bar">Bar</option>
+                            {(chartTypeRecommendations.attritionByDepartment || ALLOWED_LOCAL_TYPES.attritionByDepartment).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Education Dist.</span>
                         <select value={chartTypes.education} onChange={(e) => setChartTypes(prev => ({ ...prev, education: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            <option value="bar">Bar</option>
-                            <option value="pie">Pie</option>
-                            <option value="donut">Donut</option>
+                            {(chartTypeRecommendations.education || ALLOWED_LOCAL_TYPES.education).map((option, idx) => (
+                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            ))}
                         </select>
                     </label>
                 </div>
