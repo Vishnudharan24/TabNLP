@@ -4,7 +4,7 @@ import { Bell, HelpCircle, Search, Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import appLogo from '../ChillView_logo.jpg';
 
-const Header = ({ authUser, onLogout }) => {
+const Header = ({ authUser, onLogout, onLogoClick }) => {
     const { theme, toggleTheme } = useTheme();
     const displayName = authUser?.name || 'Local User';
     const initials = (displayName || 'LU')
@@ -21,7 +21,8 @@ const Header = ({ authUser, onLogout }) => {
                     <img
                         src={appLogo}
                         alt="ChillView"
-                        className="h-10 w-auto object-contain rounded-xl shadow-sm"
+                        className={`h-10 w-auto object-contain rounded-xl shadow-sm ${onLogoClick ? 'cursor-pointer' : ''}`}
+                        onClick={onLogoClick}
                     />
                 </div>
 

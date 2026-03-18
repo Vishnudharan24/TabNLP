@@ -919,7 +919,7 @@ const App = () => {
 
     return (
         <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
-            <Header authUser={authUser} onLogout={handleLogout} />
+            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => setView('data')} />
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar setView={setView} currentView={view} />
                 <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>

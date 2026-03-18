@@ -37,9 +37,17 @@ const DataSourceView = ({
 
     // Dataset assignment dropdown
     const [assigningDatasetId, setAssigningDatasetId] = useState(null);
+    const [openColumnDictionaryByDataset, setOpenColumnDictionaryByDataset] = useState({});
     const [searchQuery, setSearchQuery] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
+
+    const toggleColumnDictionary = (datasetId) => {
+        setOpenColumnDictionaryByDataset(prev => ({
+            ...prev,
+            [datasetId]: !prev[datasetId],
+        }));
+    };
 
     const getDatasetSearchText = (dataset) => {
         const metadata = dataset?._meta?.metadata || {};
@@ -385,6 +393,7 @@ const DataSourceView = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                         {filteredDatasets.map(ds => {
                             const company = getCompanyForDataset(ds);
+                            const datasetTitle = ds?._meta?.fileName || ds?._meta?.metadata?.file_name || ds.name;
                             return (
                                 <div key={ds.id} className={`p-8 rounded-2xl border shadow-sm group hover:shadow-xl transition-all duration-500 hover:-translate-y-1 flex flex-col h-full relative ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                                     {/* Company color strip */}
@@ -399,7 +408,7 @@ const DataSourceView = ({
                                                 <FileText size={28} />
                                             </div>
                                             <div>
-                                                <h4 className={`font-black tracking-tight text-lg truncate max-w-[160px] ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{ds.name}</h4>
+                                                <h4 className={`font-black tracking-tight text-lg truncate max-w-[160px] ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{datasetTitle}</h4>
                                                 <div className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                                                     <CheckCircle2 size={12} className="text-emerald-500" />
                                                     <span>{ds.data.length} Records</span>
@@ -468,38 +477,50 @@ const DataSourceView = ({
 
                                     {/* Column Dictionary */}
                                     <div className="flex-1">
-                                        <p className={`text-[10px] font-black uppercase tracking-widest mb-4 flex items-center gap-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                                            <Table size={12} />
-                                            Column Dictionary
-                                        </p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {ds.columns.map(col => (
-                                                <div key={col.name} className={`flex items-center gap-2 px-4 py-2 rounded-full transition-colors ${isDark ? 'bg-gray-700 border border-gray-600 hover:bg-gray-600 hover:border-gray-500' : 'bg-gray-50 border border-gray-100 hover:bg-white hover:border-gray-300'}`}>
-                                                    <span className={`w-2 h-2 rounded-full ${col.type === 'number' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
-                                                    <span className={`text-[11px] font-bold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{col.name}</span>
-                                                </div>
-                                            ))}
+                                        {/* Metadata */}
+                                        <div className={`mb-4 p-3 rounded-xl border text-[10px] space-y-1 ${isDark ? 'bg-gray-700/40 border-gray-600 text-gray-400' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                                            <div>
+                                                <span className="font-bold uppercase tracking-wider">File:</span>{' '}
+                                                <span className="font-semibold">{ds?._meta?.fileName || ds?._meta?.metadata?.file_name || ds?.name || 'N/A'}</span>
+                                            </div>
+                                            <div>
+                                                <span className="font-bold uppercase tracking-wider">Type:</span>{' '}
+                                                <span className="font-semibold">{(ds?._meta?.metadata?.source_type || (ds?._meta?.merged ? 'merged' : 'csv')).toUpperCase()}</span>
+                                            </div>
+                                            <div>
+                                                <span className="font-bold uppercase tracking-wider">Ingested:</span>{' '}
+                                                <span className="font-semibold">{ds?._meta?.ingestedAt ? new Date(ds._meta.ingestedAt).toLocaleString() : 'N/A'}</span>
+                                            </div>
                                         </div>
+
+                                        <button
+                                            onClick={() => toggleColumnDictionary(ds.id)}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border mb-3 transition-all ${isDark ? 'border-gray-600 bg-gray-700/40 text-gray-300 hover:bg-gray-700' : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-white'}`}
+                                        >
+                                            <span className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                                                <Table size={12} />
+                                                Column Dictionary
+                                            </span>
+                                            <ChevronDown
+                                                size={14}
+                                                className={`transition-transform ${openColumnDictionaryByDataset[ds.id] ? 'rotate-180' : ''}`}
+                                            />
+                                        </button>
+
+                                        {openColumnDictionaryByDataset[ds.id] && (
+                                            <div className="flex flex-wrap gap-2">
+                                                {ds.columns.map(col => (
+                                                    <div key={col.name} className={`flex items-center gap-2 px-4 py-2 rounded-full transition-colors ${isDark ? 'bg-gray-700 border border-gray-600 hover:bg-gray-600 hover:border-gray-500' : 'bg-gray-50 border border-gray-100 hover:bg-white hover:border-gray-300'}`}>
+                                                        <span className={`w-2 h-2 rounded-full ${col.type === 'number' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                                                        <span className={`text-[11px] font-bold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{col.name}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Footer */}
                                     <div className={`mt-8 pt-6 border-t ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
-                                        {ds?._meta?.backend && (
-                                            <div className={`mb-3 text-[10px] space-y-1 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                                                <div>
-                                                    <span className="font-bold uppercase tracking-wider">File:</span>{' '}
-                                                    <span className="font-semibold">{ds?._meta?.fileName || ds?._meta?.metadata?.file_name || 'N/A'}</span>
-                                                </div>
-                                                <div>
-                                                    <span className="font-bold uppercase tracking-wider">Type:</span>{' '}
-                                                    <span className="font-semibold">{(ds?._meta?.metadata?.source_type || 'unknown').toUpperCase()}</span>
-                                                </div>
-                                                <div>
-                                                    <span className="font-bold uppercase tracking-wider">Ingested:</span>{' '}
-                                                    <span className="font-semibold">{ds?._meta?.ingestedAt ? new Date(ds._meta.ingestedAt).toLocaleString() : 'N/A'}</span>
-                                                </div>
-                                            </div>
-                                        )}
                                         <div className={`flex justify-between text-[10px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-gray-600' : 'text-gray-300'}`}>
                                             <span>Source: {ds._meta?.merged ? 'Merged' : (ds?._meta?.metadata?.source_type || 'CSV')}</span>
                                             <span>Ready for Design</span>
