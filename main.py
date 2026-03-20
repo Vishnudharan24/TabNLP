@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
 from fastapi import Header
+from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -58,7 +59,9 @@ TEST_EXCEL_FILE = Path("/home/vishnudharan/odyssey/TabNLP/poweranalytics-desktop
 DEFAULT_SFTP_USERNAME = "sftp_user"
 DEFAULT_SFTP_PRIVATE_KEY_PATH = str(Path.home() / ".ssh" / "id_rsa")
 DEFAULT_SFTP_REMOTE_PATH = str(Path.home() / "odyssey" / "TabNLP" / "data" / "Employee_Master_Data_260220261036.xlsx")
-AUTH_SECRET = os.getenv("AUTH_SECRET", "change-this-auth-secret-in-production")
+AUTH_SECRET = os.getenv("AUTH_SECRET")
+if not AUTH_SECRET:
+    raise RuntimeError("AUTH_SECRET environment variable is required")
 AUTH_TOKEN_DAYS = int(os.getenv("AUTH_TOKEN_DAYS", "7"))
 
 
@@ -189,32 +192,54 @@ def _base64url_decode(data: str):
 
 def _create_access_token(user_id: str, email: str):
     now = datetime.now(timezone.utc)
+    header = {
+        "alg": "HS256",
+        "typ": "JWT",
+    }
     payload = {
         "sub": user_id,
         "email": email,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(days=AUTH_TOKEN_DAYS)).timestamp()),
     }
+    header_b64 = _base64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _base64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signature = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
+    signing_input = f"{header_b64}.{payload_b64}"
+    signature = hmac.new(AUTH_SECRET.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
     signature_b64 = _base64url_encode(signature)
-    return f"{payload_b64}.{signature_b64}"
+    return f"{header_b64}.{payload_b64}.{signature_b64}"
 
 
 def _decode_access_token(token: str):
-    try:
-        payload_b64, signature_b64 = token.split(".", 1)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    parts = token.split(".")
+    payload = None
 
-    expected_sig = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
-    expected_sig_b64 = _base64url_encode(expected_sig)
-    if not hmac.compare_digest(expected_sig_b64, signature_b64):
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    if len(parts) == 3:
+        header_b64, payload_b64, signature_b64 = parts
+        signing_input = f"{header_b64}.{payload_b64}"
+        expected_sig = hmac.new(AUTH_SECRET.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
+        expected_sig_b64 = _base64url_encode(expected_sig)
+        if not hmac.compare_digest(expected_sig_b64, signature_b64):
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
 
-    try:
-        payload = json.loads(_base64url_decode(payload_b64).decode("utf-8"))
-    except Exception:
+        try:
+            payload = json.loads(_base64url_decode(payload_b64).decode("utf-8"))
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    elif len(parts) == 2:
+        # Backward compatibility with previous non-JWT token format.
+        payload_b64, signature_b64 = parts
+        expected_sig = hmac.new(AUTH_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
+        expected_sig_b64 = _base64url_encode(expected_sig)
+        if not hmac.compare_digest(expected_sig_b64, signature_b64):
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+        try:
+            payload = json.loads(_base64url_decode(payload_b64).decode("utf-8"))
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
+    else:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
 
     exp = payload.get("exp")
@@ -234,6 +259,20 @@ def _user_public(user_doc: dict):
         "created_at": user_doc.get("created_at"),
         "last_login_at": user_doc.get("last_login_at"),
     }
+
+
+async def _require_current_user(authorization: Optional[str] = Header(default=None)):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+
+    token = authorization.split(" ", 1)[1].strip()
+    payload = _decode_access_token(token)
+    user_id = payload.get("sub")
+    user_doc = await get_user_by_id(user_id)
+    if not user_doc:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user_doc
 
 
 def _raise_internal_error(public_message: str, exc: Exception):
@@ -299,21 +338,11 @@ async def auth_login(payload: LoginRequest):
 
 
 @app.get("/auth/me")
-async def auth_me(authorization: Optional[str] = Header(default=None)):
+async def auth_me(current_user: dict = Depends(_require_current_user)):
     try:
-        if not authorization or not authorization.lower().startswith("bearer "):
-            raise HTTPException(status_code=401, detail="Missing authentication token")
-
-        token = authorization.split(" ", 1)[1].strip()
-        payload = _decode_access_token(token)
-        user_id = payload.get("sub")
-        user_doc = await get_user_by_id(user_id)
-        if not user_doc:
-            raise HTTPException(status_code=401, detail="User not found")
-
         return {
             "status": "success",
-            "user": _to_json_safe(_user_public(user_doc)),
+            "user": _to_json_safe(_user_public(current_user)),
         }
     except HTTPException:
         raise
@@ -326,7 +355,7 @@ async def startup_event():
     await ensure_indexes()
 
 @app.post("/ingest")
-async def ingest(source_id: Optional[str] = None, url: Optional[str] = None):
+async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, _current_user: dict = Depends(_require_current_user)):
     try:
         result = await run_ingestion(source_id=source_id, url=url)
         return result
@@ -337,7 +366,7 @@ async def ingest(source_id: Optional[str] = None, url: Optional[str] = None):
 
 
 @app.post("/ingest/source/{source_id}")
-async def ingest_by_source_config(source_id: str):
+async def ingest_by_source_config(source_id: str, _current_user: dict = Depends(_require_current_user)):
     try:
         return await run_ingestion(source_id=source_id)
     except ValueError as e:
@@ -347,7 +376,7 @@ async def ingest_by_source_config(source_id: str):
 
 
 @app.post("/source-config")
-async def create_or_update_source_config(payload: SourceConfigUpsertRequest):
+async def create_or_update_source_config(payload: SourceConfigUpsertRequest, _current_user: dict = Depends(_require_current_user)):
     try:
         config_payload = payload.model_dump(exclude_none=True)
         _validate_source_config(config_payload)
@@ -380,7 +409,7 @@ async def create_or_update_source_config(payload: SourceConfigUpsertRequest):
 
 
 @app.get("/source-config")
-async def get_all_source_configs(limit: int = 200):
+async def get_all_source_configs(limit: int = 200, _current_user: dict = Depends(_require_current_user)):
     try:
         configs = await list_source_configs(limit=limit)
         return {
@@ -393,7 +422,7 @@ async def get_all_source_configs(limit: int = 200):
 
 
 @app.get("/source-config/{source_id}")
-async def get_source_config_by_id(source_id: str):
+async def get_source_config_by_id(source_id: str, _current_user: dict = Depends(_require_current_user)):
     try:
         source_config = await get_source_config(source_id)
         if not source_config:
@@ -410,7 +439,7 @@ async def get_source_config_by_id(source_id: str):
 
 
 @app.patch("/source-config/{source_id}")
-async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest):
+async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest, _current_user: dict = Depends(_require_current_user)):
     try:
         existing = await get_source_config(source_id)
         if not existing:
@@ -454,7 +483,7 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest)
 
 
 @app.get("/datasets/latest")
-async def get_latest_datasets(limit: int = 100):
+async def get_latest_datasets(limit: int = 100, _current_user: dict = Depends(_require_current_user)):
     try:
         documents = await list_latest_datasets(limit=limit)
         return {
@@ -467,7 +496,7 @@ async def get_latest_datasets(limit: int = 100):
 
 
 @app.get("/datasets")
-async def get_all_datasets(limit: int = 1000):
+async def get_all_datasets(limit: int = 1000, _current_user: dict = Depends(_require_current_user)):
     try:
         documents = await list_datasets(limit=limit)
         return {
@@ -480,7 +509,7 @@ async def get_all_datasets(limit: int = 1000):
 
 
 @app.get("/datasets/latest/{source_id}")
-async def get_latest_dataset_for_source(source_id: str):
+async def get_latest_dataset_for_source(source_id: str, _current_user: dict = Depends(_require_current_user)):
     try:
         document = await get_latest_dataset_by_source(source_id)
         if not document:
@@ -497,7 +526,7 @@ async def get_latest_dataset_for_source(source_id: str):
 
 
 @app.get("/datasets/{document_id}")
-async def get_dataset_document(document_id: str):
+async def get_dataset_document(document_id: str, _current_user: dict = Depends(_require_current_user)):
     try:
         document = await get_dataset_by_id(document_id)
         if not document:
@@ -515,7 +544,7 @@ async def get_dataset_document(document_id: str):
 
 #The below endpoints are added for testiing
 @app.get("/test/file")
-async def get_test_excel_file():
+async def get_test_excel_file(_current_user: dict = Depends(_require_current_user)):
     if not TEST_EXCEL_FILE.exists():
         raise HTTPException(status_code=404, detail="Test source file not found")
 
@@ -529,7 +558,7 @@ async def get_test_excel_file():
 
 
 @app.post("/test/source-config/excel")
-async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test"):
+async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test", _current_user: dict = Depends(_require_current_user)):
     try:
         api_endpoint = f"{str(request.base_url).rstrip('/')}/test/file"
         result = await upsert_source_config(
@@ -559,6 +588,7 @@ async def add_test_sftp_source_config(
     passphrase: Optional[str] = None,
     remote_path: str = DEFAULT_SFTP_REMOTE_PATH,
     known_hosts_path: Optional[str] = None,
+    _current_user: dict = Depends(_require_current_user),
 ):
     try:
         sftp_config = {
@@ -592,7 +622,7 @@ async def add_test_sftp_source_config(
 
 
 @app.post("/test/ingest/excel")
-async def ingest_test_excel(source_id: str = "local_excel_test"):
+async def ingest_test_excel(source_id: str = "local_excel_test", _current_user: dict = Depends(_require_current_user)):
     try:
         return await run_ingestion(source_id=source_id)
     except ValueError as e:
@@ -602,7 +632,7 @@ async def ingest_test_excel(source_id: str = "local_excel_test"):
 
 
 @app.post("/test/ingest/sftp")
-async def ingest_test_sftp(source_id: str = "local_sftp_test"):
+async def ingest_test_sftp(source_id: str = "local_sftp_test", _current_user: dict = Depends(_require_current_user)):
     try:
         return await run_ingestion(source_id=source_id)
     except ValueError as e:

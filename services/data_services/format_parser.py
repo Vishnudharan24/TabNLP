@@ -3,6 +3,52 @@ from io import BytesIO
 from pathlib import Path
 
 
+def _is_unnamed_column(column_name) -> bool:
+    text = str(column_name).strip().lower()
+    return text == "" or text.startswith("unnamed")
+
+
+def _promote_first_row_to_header_if_needed(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Some sources arrive with placeholder headers (e.g., Unnamed: 0 ...)
+    while the real headers are in the first data row.
+    This promotes the first row to header only when that pattern is likely.
+    """
+    if df.empty or len(df.columns) == 0 or len(df.index) == 0:
+        return df
+
+    unnamed_count = sum(1 for col in df.columns if _is_unnamed_column(col))
+    min_unnamed_for_promotion = max(1, len(df.columns) // 2)
+    if unnamed_count < min_unnamed_for_promotion:
+        return df
+
+    first_row = df.iloc[0]
+    populated_values = [v for v in first_row.tolist() if not pd.isna(v) and str(v).strip() != ""]
+    if len(populated_values) < max(2, len(df.columns) // 3):
+        return df
+
+    new_columns = []
+    seen = {}
+    for idx, raw in enumerate(first_row.tolist()):
+        candidate = str(raw).strip() if not pd.isna(raw) else ""
+        if candidate == "":
+            original = str(df.columns[idx]).strip()
+            candidate = original if original else f"column_{idx + 1}"
+
+        if candidate in seen:
+            seen[candidate] += 1
+            candidate = f"{candidate}_{seen[candidate]}"
+        else:
+            seen[candidate] = 1
+
+        new_columns.append(candidate)
+
+    promoted = df.iloc[1:].reset_index(drop=True).copy()
+    promoted.columns = new_columns
+    promoted = promoted.dropna(axis=0, how="all").reset_index(drop=True)
+    return promoted
+
+
 def _normalize_excel_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -14,7 +60,7 @@ def _normalize_excel_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     # Keep all columns (including Unnamed:* ones) and only drop fully empty rows.
     df = df.dropna(axis=0, how="all").reset_index(drop=True)
-    return df
+    return _promote_first_row_to_header_if_needed(df)
 
 
 def _safe_text_head(data: bytes, size: int = 2048) -> str:
@@ -92,13 +138,13 @@ def parse_data(data, content_type, source_name: str = ""):
     for detected_format in _detect_format_order(data, content_type, source_name):
         try:
             if detected_format == "json":
-                return pd.read_json(BytesIO(data))
+                return _promote_first_row_to_header_if_needed(pd.read_json(BytesIO(data)))
 
             if detected_format == "csv":
-                return pd.read_csv(BytesIO(data))
+                return _promote_first_row_to_header_if_needed(pd.read_csv(BytesIO(data)))
 
             if detected_format == "tsv":
-                return pd.read_csv(BytesIO(data), sep="\t")
+                return _promote_first_row_to_header_if_needed(pd.read_csv(BytesIO(data), sep="\t"))
 
             if detected_format == "excel":
                 df = pd.read_excel(BytesIO(data), engine="openpyxl")
