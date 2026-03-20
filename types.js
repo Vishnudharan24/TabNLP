@@ -118,6 +118,9 @@ export const ChartType = {
  *   labelMode?: 'auto' | 'show' | 'hide',
  *   tooltipEnabled?: boolean,
  *   tooltipDecimals?: number,
+ *   colorMode?: 'single' | 'multi',
+ *   singleColor?: string,
+ *   multiColors?: string[],
  * }} [style]
  */
 

@@ -18,23 +18,36 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const isDark = theme === 'dark';
     const isClearMode = clarityMode === 'clear';
     const useNeutralPalette = paletteMode === 'neutral';
-    const colors = useNeutralPalette
+    const basePalette = useNeutralPalette
         ? (isDark ? CHART_COLORS_DARK_NEUTRAL : CHART_COLORS_NEUTRAL)
         : (isDark ? CHART_COLORS_DARK : CHART_COLORS);
-    const textColor = isDark ? '#e2e8f0' : '#334155';
-    const subTextColor = isDark ? (isClearMode ? '#cbd5e1' : '#94a3b8') : (isClearMode ? '#64748b' : '#94a3b8');
+    const textColor = isDark ? '#f1f5f9' : '#1f2937';
+    const subTextColor = isDark ? (isClearMode ? '#cbd5e1' : '#a8b4c5') : (isClearMode ? '#475569' : '#64748b');
     const bgColor = 'transparent';
     const borderColor = isDark ? '#334155' : '#e2e8f0';
-    const gridBorderColor = isDark ? (isClearMode ? '#334155' : '#1e293b') : (isClearMode ? '#e2e8f0' : '#f1f5f9');
+    const gridBorderColor = isDark ? (isClearMode ? 'rgba(148,163,184,0.24)' : 'rgba(148,163,184,0.14)') : (isClearMode ? 'rgba(148,163,184,0.26)' : 'rgba(148,163,184,0.14)');
 
     const { measures = [], dimension = '' } = config;
     const style = config?.style || {};
+    const colorMode = style.colorMode === 'single' ? 'single' : 'multi';
+    const normalizedSingle = typeof style.singleColor === 'string' && style.singleColor.trim() ? style.singleColor.trim() : null;
+    const normalizedMulti = Array.isArray(style.multiColors)
+        ? style.multiColors.map(c => String(c || '').trim()).filter(Boolean)
+        : [];
+
+    const colors = colorMode === 'single' && normalizedSingle
+        ? [normalizedSingle]
+        : (colorMode === 'multi' && normalizedMulti.length > 0 ? normalizedMulti : basePalette);
     const fontFamily = style.fontFamily || 'Plus Jakarta Sans, sans-serif';
     const fontSize = Number(style.fontSize) || (isClearMode ? 12 : 11);
     const labelMode = style.labelMode || 'auto';
     const tooltipEnabled = style.tooltipEnabled !== false;
     const tooltipDecimals = Number.isFinite(Number(style.tooltipDecimals)) ? Number(style.tooltipDecimals) : 2;
     const categories = processedData.map(d => d.name);
+    const axisNameFromDimension = String(dimension || 'Category');
+    const axisNameFromMeasure = measures.length === 1
+        ? String(measures[0] || 'Value')
+        : 'Values';
 
     const baseTextStyle = { color: textColor, fontFamily };
     const numberFormatter = (value) => {
@@ -66,20 +79,30 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         itemWidth: isClearMode ? 14 : 12,
         itemHeight: isClearMode ? 9 : 8,
     };
-    const gridStyle = { left: 56, right: 24, top: 28, bottom: 54, containLabel: true };
+    const gridStyle = { left: 52, right: 22, top: 24, bottom: 48, containLabel: true };
     const axisLabelStyle = { color: subTextColor, fontSize, fontFamily };
+    const axisNameStyle = {
+        color: textColor,
+        fontSize: Math.max(fontSize + 1, 12),
+        fontWeight: 700,
+        fontFamily,
+    };
     const axisLineStyle = { lineStyle: { color: gridBorderColor } };
     const splitLineStyle = {
         lineStyle: {
             color: gridBorderColor,
             type: 'solid',
-            opacity: isClearMode ? 0.8 : 0.5,
+            opacity: isClearMode ? 0.55 : 0.35,
         },
     };
 
     const xAxisCategory = {
         type: 'category',
         data: categories,
+        name: axisNameFromDimension,
+        nameLocation: 'middle',
+        nameGap: 34,
+        nameTextStyle: axisNameStyle,
         axisLabel: axisLabelStyle,
         axisLine: axisLineStyle,
         axisTick: { show: false },
@@ -87,6 +110,10 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     };
     const yAxisValue = {
         type: 'value',
+        name: axisNameFromMeasure,
+        nameLocation: 'middle',
+        nameGap: 48,
+        nameTextStyle: axisNameStyle,
         axisLabel: axisLabelStyle,
         axisLine: { show: false },
         axisTick: { show: false },
@@ -162,6 +189,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const buildPremiumLineSeries = ({ measure, values, smooth = true, step = false, index = 0 }) => {
         const isPrimarySeries = index === 0;
         const insights = isPrimarySeries ? getLineInsights(values) : null;
+        const lineColor = colors[index % colors.length] || '#3B82F6';
 
         return {
             name: measure,
@@ -182,17 +210,17 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         x2: 1,
                         y2: 0,
                         colorStops: [
-                            { offset: 0, color: '#3B82F6' },
-                            { offset: 1, color: '#60A5FA' },
+                            { offset: 0, color: lineColor },
+                            { offset: 1, color: lineColor },
                         ],
                     }
-                    : '#93C5FD',
+                    : lineColor,
                 shadowColor: lineUi.lineShadow,
                 shadowBlur: 10,
                 shadowOffsetY: 3,
             },
             itemStyle: {
-                color: '#3B82F6',
+                color: lineColor,
                 borderColor: lineUi.markerBorder,
                 borderWidth: 2,
             },
@@ -205,8 +233,8 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     x2: 0,
                     y2: 1,
                     colorStops: [
-                        { offset: 0, color: 'rgba(59,130,246,0.28)' },
-                        { offset: 1, color: 'rgba(59,130,246,0.02)' },
+                            { offset: 0, color: lineColor },
+                            { offset: 1, color: lineColor },
                     ],
                 },
             },
@@ -249,6 +277,26 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         };
     };
 
+    const applyBarColorStyle = (series, seriesIndex, seriesCount) => {
+        const next = { ...series };
+
+        if (colorMode === 'single' && colors[0]) {
+            next.itemStyle = { ...(next.itemStyle || {}), color: colors[0] };
+            return next;
+        }
+
+        if (colorMode === 'multi' && seriesCount === 1 && Array.isArray(colors) && colors.length > 1) {
+            next.colorBy = 'data';
+            next.itemStyle = {
+                ...(next.itemStyle || {}),
+                color: (params) => colors[params.dataIndex % colors.length],
+            };
+            return next;
+        }
+
+        return next;
+    };
+
     switch (visualType) {
         // ═══════════════════ BAR CHARTS ═══════════════════
         case ChartType.BAR_CLUSTERED:
@@ -259,14 +307,29 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 grid: gridStyle,
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
-                series: measures.map((m, i) => ({
+                series: measures.map((m, i) => applyBarColorStyle({
                     name: m,
                     type: 'bar',
                     data: processedData.map(d => d[m]),
                     itemStyle: { borderRadius: [4, 4, 0, 0] },
-                    barMaxWidth: 32,
-                    emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.15)' } },
-                })),
+                    barMaxWidth: 38,
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: subTextColor,
+                        fontSize: Math.max(10, fontSize - 1),
+                        formatter: ({ value }) => Number(value || 0).toLocaleString(),
+                    },
+                    emphasis: {
+                        focus: 'series',
+                        itemStyle: {
+                            shadowBlur: 18,
+                            shadowColor: isDark ? 'rgba(96,165,250,0.35)' : 'rgba(37,99,235,0.28)',
+                            borderColor: isDark ? '#bfdbfe' : '#1d4ed8',
+                            borderWidth: 1,
+                        },
+                    },
+                }, i, measures.length)),
             };
 
         case ChartType.BAR_STACKED:
@@ -277,14 +340,21 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 grid: gridStyle,
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
-                series: measures.map((m, i) => ({
+                series: measures.map((m, i) => applyBarColorStyle({
                     name: m,
                     type: 'bar',
                     stack: 'total',
                     data: processedData.map(d => d[m]),
                     itemStyle: { borderRadius: i === measures.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0] },
-                    barMaxWidth: 32,
-                })),
+                    barMaxWidth: 38,
+                    emphasis: {
+                        focus: 'series',
+                        itemStyle: {
+                            shadowBlur: 14,
+                            shadowColor: isDark ? 'rgba(96,165,250,0.3)' : 'rgba(37,99,235,0.22)',
+                        },
+                    },
+                }, i, measures.length)),
             };
 
         case ChartType.BAR_PERCENT: {
@@ -309,7 +379,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 grid: gridStyle,
                 xAxis: xAxisCategory,
                 yAxis: { ...yAxisValue, max: 100 },
-                series: measures.map((m, i) => ({
+                series: measures.map((m, i) => applyBarColorStyle({
                     name: m,
                     type: 'bar',
                     stack: 'total',
@@ -317,8 +387,8 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         totals[idx] ? ((d[m] || 0) / totals[idx]) * 100 : 0
                     ),
                     itemStyle: { borderRadius: i === measures.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0] },
-                    barMaxWidth: 32,
-                })),
+                    barMaxWidth: 38,
+                }, i, measures.length)),
             };
         }
 
@@ -330,13 +400,27 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 grid: { ...gridStyle, left: 80 },
                 yAxis: { ...xAxisCategory, type: 'category' },
                 xAxis: { ...yAxisValue, type: 'value' },
-                series: measures.map((m) => ({
+                series: measures.map((m, i) => applyBarColorStyle({
                     name: m,
                     type: 'bar',
                     data: processedData.map(d => d[m]),
                     itemStyle: { borderRadius: [0, 4, 4, 0] },
-                    barMaxWidth: 24,
-                })),
+                    barMaxWidth: 28,
+                    label: {
+                        show: true,
+                        position: 'right',
+                        color: subTextColor,
+                        fontSize: Math.max(10, fontSize - 1),
+                        formatter: ({ value }) => Number(value || 0).toLocaleString(),
+                    },
+                    emphasis: {
+                        focus: 'series',
+                        itemStyle: {
+                            shadowBlur: 16,
+                            shadowColor: isDark ? 'rgba(96,165,250,0.3)' : 'rgba(37,99,235,0.22)',
+                        },
+                    },
+                }, i, measures.length)),
             };
 
         // ═══════════════════ LINE CHARTS ═══════════════════
@@ -667,7 +751,23 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     type: i === 0 ? 'bar' : 'line',
                     data: processedData.map(d => d[m]),
                     ...(i === 0
-                        ? { itemStyle: { borderRadius: [4, 4, 0, 0] }, barMaxWidth: 28 }
+                        ? applyBarColorStyle({
+                            itemStyle: { borderRadius: [4, 4, 0, 0] },
+                            barMaxWidth: 34,
+                            label: {
+                                show: true,
+                                position: 'top',
+                                color: subTextColor,
+                                fontSize: Math.max(10, fontSize - 1),
+                                formatter: ({ value }) => Number(value || 0).toLocaleString(),
+                            },
+                            emphasis: {
+                                itemStyle: {
+                                    shadowBlur: 16,
+                                    shadowColor: isDark ? 'rgba(96,165,250,0.3)' : 'rgba(37,99,235,0.22)',
+                                },
+                            },
+                        }, i, measures.length)
                         : { smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { width: 3 } }),
                 })),
             };
@@ -817,13 +917,26 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 grid: gridStyle,
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
-                series: measures.map((m) => ({
+                series: measures.map((m, i) => applyBarColorStyle({
                     name: m,
                     type: 'bar',
                     data: processedData.map(d => d[m]),
                     itemStyle: { borderRadius: [4, 4, 0, 0] },
-                    barMaxWidth: 32,
-                })),
+                    barMaxWidth: 38,
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: subTextColor,
+                        fontSize: Math.max(10, fontSize - 1),
+                        formatter: ({ value }) => Number(value || 0).toLocaleString(),
+                    },
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 16,
+                            shadowColor: isDark ? 'rgba(96,165,250,0.3)' : 'rgba(37,99,235,0.22)',
+                        },
+                    },
+                }, i, measures.length)),
             };
     }
 }

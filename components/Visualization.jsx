@@ -7,7 +7,7 @@ import { buildChartOption } from '../services/echartsOptionBuilder';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
-const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant', onDataPointClick }) => {
+const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant', onDataPointClick, isExportRenderMode = false }) => {
     const { theme } = useTheme();
     const [drillPath, setDrillPath] = useState([]);
     const chartRef = useRef(null);
@@ -62,23 +62,83 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     const effectiveDimension = getEffectiveDimension();
 
+    const toTitleCase = (value = '') => String(value)
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+
+    const semanticTitle = (() => {
+        const configured = (config.title || '').trim();
+        const isGeneric = !configured || /^new visual$/i.test(configured) || /^analytics card$/i.test(configured);
+        if (!isGeneric) return configured;
+
+        const firstMeasure = config?.measures?.[0] ? toTitleCase(config.measures[0]) : 'Value';
+        const dim = effectiveDimension ? toTitleCase(effectiveDimension) : 'Category';
+        return `${firstMeasure} by ${dim}`;
+    })();
+
+    const semanticContext = effectiveDimension
+        ? `Grouped by ${toTitleCase(effectiveDimension)}`
+        : toTitleCase(config.type.replace(/_/g, ' '));
+
+    const valueFieldsText = Array.isArray(config?.measures) && config.measures.length > 0
+        ? config.measures.map(toTitleCase).join(', ')
+        : 'None';
+
+    const aggregationText = config?.aggregation ? toTitleCase(config.aggregation) : 'N/A';
+
     const applyFilters = (data) => {
         if (!config.filters || config.filters.length === 0) return data;
+
+        const columnTypeMap = new Map((dataset?.columns || []).map(col => [col.name, col.type]));
+        const toComparable = (raw, typeHint) => {
+            if (typeHint === 'date') {
+                const ts = new Date(raw).getTime();
+                return Number.isNaN(ts) ? null : ts;
+            }
+
+            const numeric = Number(raw);
+            if (!Number.isNaN(numeric) && `${raw}`.trim() !== '') {
+                return numeric;
+            }
+
+            const parsedDate = new Date(raw).getTime();
+            if (!Number.isNaN(parsedDate)) {
+                return parsedDate;
+            }
+
+            return null;
+        };
 
         return data.filter(row => {
             return config.filters.every(f => {
                 const val = row[f.column];
                 const target = f.value;
                 const targetSec = f.valueSecondary;
+                const inferredType = f.columnType || columnTypeMap.get(f.column);
 
                 switch (f.operator) {
                     case 'EQUALS': return String(val).toLowerCase() === String(target).toLowerCase();
                     case 'CONTAINS': return String(val).toLowerCase().includes(String(target).toLowerCase());
                     case 'STARTS_WITH': return String(val).toLowerCase().startsWith(String(target).toLowerCase());
                     case 'IS_EMPTY': return !val || val === '';
-                    case 'GT': return Number(val) > Number(target);
-                    case 'LT': return Number(val) < Number(target);
-                    case 'BETWEEN': return Number(val) >= Number(target) && Number(val) <= Number(targetSec);
+                    case 'GT': {
+                        const left = toComparable(val, inferredType);
+                        const right = toComparable(target, inferredType);
+                        return left !== null && right !== null ? left > right : false;
+                    }
+                    case 'LT': {
+                        const left = toComparable(val, inferredType);
+                        const right = toComparable(target, inferredType);
+                        return left !== null && right !== null ? left < right : false;
+                    }
+                    case 'BETWEEN': {
+                        const left = toComparable(val, inferredType);
+                        const min = toComparable(target, inferredType);
+                        const max = toComparable(targetSec, inferredType);
+                        return left !== null && min !== null && max !== null ? left >= min && left <= max : false;
+                    }
                     case 'IS_TRUE': return !!val;
                     case 'IS_FALSE': return !val;
                     default: return true;
@@ -183,6 +243,66 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     // Chart click events for drill-down
     const onEvents = useMemo(() => ({ click: handlePointClick }), [handlePointClick]);
 
+    const applyExportReadabilityOverrides = (option) => {
+        if (!option || typeof option !== 'object') return option;
+
+        const forceSeriesLabel = (series) => {
+            if (!series || typeof series !== 'object') return series;
+            const currentLabel = series.label || {};
+            const next = {
+                ...series,
+                label: {
+                    ...currentLabel,
+                    show: true,
+                    fontSize: Math.max(Number(currentLabel.fontSize || 10), 11),
+                    formatter: currentLabel.formatter || ((params) => {
+                        const value = params?.value;
+                        if (Array.isArray(value)) return value[value.length - 1];
+                        return value;
+                    }),
+                },
+            };
+
+            if (next.type === 'pie' || next.type === 'sunburst') {
+                next.label = {
+                    ...next.label,
+                    formatter: currentLabel.formatter || '{b}: {c}',
+                };
+            }
+
+            return next;
+        };
+
+        const patchAxis = (axis) => {
+            if (!axis) return axis;
+            const patchOne = (item) => ({
+                ...item,
+                axisLabel: {
+                    ...(item?.axisLabel || {}),
+                    show: true,
+                    fontSize: Math.max(Number(item?.axisLabel?.fontSize || 11), 12),
+                },
+            });
+            return Array.isArray(axis) ? axis.map(patchOne) : patchOne(axis);
+        };
+
+        return {
+            ...option,
+            tooltip: { ...(option.tooltip || {}), show: false },
+            legend: option.legend ? {
+                ...option.legend,
+                show: true,
+                textStyle: {
+                    ...(option.legend?.textStyle || {}),
+                    fontSize: Math.max(Number(option.legend?.textStyle?.fontSize || 11), 12),
+                },
+            } : option.legend,
+            xAxis: patchAxis(option.xAxis),
+            yAxis: patchAxis(option.yAxis),
+            series: Array.isArray(option.series) ? option.series.map(forceSeriesLabel) : option.series,
+        };
+    };
+
     const renderVisual = () => {
         if (chartData.length === 0) return (
             <div className="h-full flex items-center justify-center text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide p-12 text-center">
@@ -234,7 +354,27 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         }
 
         // All other types — render via ECharts
-        const option = buildChartOption(type, chartData, { ...config, dimension: effectiveDimension }, theme, chartClarityMode, chartPaletteMode);
+        const exportStyleOverrides = isExportRenderMode
+            ? {
+                ...(config.style || {}),
+                labelMode: 'show',
+                tooltipEnabled: false,
+                fontSize: Math.max(Number(config?.style?.fontSize || 11), 12),
+            }
+            : (config.style || {});
+
+        let option = buildChartOption(
+            type,
+            chartData,
+            { ...config, dimension: effectiveDimension, style: exportStyleOverrides },
+            theme,
+            chartClarityMode,
+            chartPaletteMode
+        );
+
+        if (isExportRenderMode) {
+            option = applyExportReadabilityOverrides(option);
+        }
 
         return (
             <ReactECharts
@@ -250,17 +390,28 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     };
 
     return (
-        <div className={`h-full w-full rounded-2xl border flex flex-col group overflow-hidden transition-all duration-300 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} ${isEditMode ? 'p-4 shadow-sm' : 'p-5 shadow-md border-transparent'} ${isActive ? 'ring-2 ring-gray-500 dark:ring-gray-400 shadow-lg scale-[1.005]' : 'hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-md'}`}>
+        <div className={`h-full w-full rounded-2xl border flex flex-col group overflow-hidden transition-all duration-300 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} ${isEditMode ? 'p-3 shadow-sm' : 'p-4 shadow-md border-transparent'} ${isActive ? 'ring-2 ring-gray-500 dark:ring-gray-400 shadow-lg scale-[1.005]' : 'hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-md'}`}>
             <div className="flex justify-between items-start mb-3 shrink-0">
                 <div className="flex items-start gap-3 overflow-hidden">
                     {isEditMode && <div className="drag-handle mt-0.5 cursor-move p-1 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-300 transition-colors shrink-0"><GripHorizontal size={14} /></div>}
                     <div className="overflow-hidden">
-                        <h3 className="text-[13px] font-bold text-gray-800 dark:text-gray-200 tracking-tight leading-none truncate">{config.title || "Analytics Card"}</h3>
+                        <h3 className="text-[13px] font-bold text-gray-800 dark:text-gray-200 tracking-tight leading-none truncate">{semanticTitle}</h3>
                         <div className="flex items-center gap-2 mt-1">
-                            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{config.type.replace(/_/g, ' ')}</p>
+                            <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{semanticContext}</p>
                             {config.filters.length > 0 && <Filter size={8} className="text-blue-500" />}
                             {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
                             {!canDrill && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
+                        </div>
+                        <div className="flex flex-wrap items-start gap-2 mt-1.5 min-w-0">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-semibold whitespace-normal break-all max-w-full" title={`Dimension: ${effectiveDimension || 'N/A'}`}>
+                                {`Dimension: ${effectiveDimension || 'N/A'}`}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-semibold truncate max-w-full" title={`Values: ${valueFieldsText}`}>
+                                {`Values: ${valueFieldsText}`}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-semibold" title={`Aggregation: ${aggregationText}`}>
+                                {`Aggregation: ${aggregationText}`}
+                            </span>
                         </div>
                     </div>
                 </div>

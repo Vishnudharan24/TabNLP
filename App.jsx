@@ -174,6 +174,7 @@ const App = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [isSharing, setIsSharing] = useState(false);
     const [isPreparingExport, setIsPreparingExport] = useState(false);
+    const [isExportRenderMode, setIsExportRenderMode] = useState(false);
     const [isExportingPdf, setIsExportingPdf] = useState(false);
     const [isExportingPpt, setIsExportingPpt] = useState(false);
     const [showShareExportPopup, setShowShareExportPopup] = useState(false);
@@ -535,7 +536,8 @@ const App = () => {
 
     const waitForRenderStabilization = async () => {
         await new Promise(resolve => requestAnimationFrame(resolve));
-        await new Promise(resolve => setTimeout(resolve, 80));
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        await new Promise(resolve => setTimeout(resolve, 220));
     };
 
     const buildFileSafeName = (baseName, extension) => {
@@ -663,6 +665,9 @@ const App = () => {
         setIsPreparingExport(true);
         setIsExportingPdf(true);
         try {
+            setIsExportRenderMode(true);
+            await waitForRenderStabilization();
+
             const exportImages = await prepareExportImages(exportScope);
             if (exportImages.length === 0) return;
 
@@ -703,6 +708,7 @@ const App = () => {
             console.error('Failed to export PDF:', error);
             window.alert('Unable to export PDF right now. Please try again.');
         } finally {
+            setIsExportRenderMode(false);
             setIsPreparingExport(false);
             setIsExportingPdf(false);
         }
@@ -714,6 +720,9 @@ const App = () => {
         setIsPreparingExport(true);
         setIsExportingPpt(true);
         try {
+            setIsExportRenderMode(true);
+            await waitForRenderStabilization();
+
             const exportImages = await prepareExportImages(exportScope);
             if (exportImages.length === 0) return;
 
@@ -765,6 +774,7 @@ const App = () => {
             console.error('Failed to export PPT:', error);
             window.alert('Unable to export PPT right now. Please try again.');
         } finally {
+            setIsExportRenderMode(false);
             setIsPreparingExport(false);
             setIsExportingPpt(false);
         }
@@ -819,6 +829,9 @@ const App = () => {
                 labelMode: 'auto',
                 tooltipEnabled: true,
                 tooltipDecimals: 2,
+                colorMode: 'multi',
+                singleColor: '#2563EB',
+                multiColors: [],
             },
         };
         setCharts([...charts, newChart]);
@@ -1159,7 +1172,7 @@ const App = () => {
                                                     data-export-title={config.title || 'Visual'}
                                                     className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}
                                                 >
-                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} chartClarityMode={chartClarityMode} chartPaletteMode={chartPaletteMode} onDataPointClick={handleVisualizationDataPoint} />
+                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} chartClarityMode={chartClarityMode} chartPaletteMode={chartPaletteMode} onDataPointClick={handleVisualizationDataPoint} isExportRenderMode={isExportRenderMode} />
                                                     {activeChartId === config.id && isEditMode && (
                                                         <button onClick={(e) => { e.stopPropagation(); handleRemoveChart(config.id); }} className={`absolute -top-2.5 -right-2.5 text-rose-500 p-1.5 rounded-full shadow-md border hover:bg-rose-500 hover:text-white transition-all z-20 ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
                                                             <Trash2 size={14} />

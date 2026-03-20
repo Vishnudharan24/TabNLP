@@ -98,6 +98,13 @@ const OPERATORS_MAP = {
         { label: 'Starts With', value: 'STARTS_WITH' },
         { label: 'Is Empty', value: 'IS_EMPTY' }
     ],
+    date: [
+        { label: 'Equals', value: 'EQUALS' },
+        { label: 'After', value: 'GT' },
+        { label: 'Before', value: 'LT' },
+        { label: 'Between', value: 'BETWEEN' },
+        { label: 'Is Empty', value: 'IS_EMPTY' }
+    ],
     number: [
         { label: 'Greater Than', value: 'GT' },
         { label: 'Less Than', value: 'LT' },
@@ -108,6 +115,13 @@ const OPERATORS_MAP = {
         { label: 'Is True', value: 'IS_TRUE' },
         { label: 'Is False', value: 'IS_FALSE' }
     ]
+};
+
+const COLOR_PRESETS = {
+    vibrant: ['#2563EB', '#7C3AED', '#EA580C', '#16A34A', '#DC2626', '#0D9488'],
+    cool: ['#1D4ED8', '#0891B2', '#0EA5E9', '#4338CA', '#7C3AED', '#0F766E'],
+    warm: ['#DC2626', '#EA580C', '#D97706', '#CA8A04', '#B45309', '#BE123C'],
+    neutral: ['#334155', '#475569', '#64748B', '#94A3B8', '#1F2937', '#0F172A'],
 };
 
 const DataPanel = ({
@@ -154,11 +168,15 @@ const DataPanel = ({
     const addFilter = () => {
         if (!activeChartConfig || !selectedDataset) return;
         const col = selectedDataset.columns[0];
+        if (!col) return;
+        const colOps = OPERATORS_MAP[col.type] || OPERATORS_MAP.string;
         const newFilter = {
             id: Math.random().toString(36).substr(2, 9),
             column: col.name,
-            operator: OPERATORS_MAP[col.type][0].value,
-            value: col.type === 'number' ? 0 : ''
+            operator: colOps[0].value,
+            value: col.type === 'number' ? 0 : '',
+            valueSecondary: col.type === 'number' ? 0 : '',
+            columnType: col.type,
         };
         onUpdateConfig({ filters: [...(activeChartConfig.filters || []), newFilter] });
     };
@@ -347,7 +365,7 @@ const DataPanel = ({
                                 <div className="space-y-3">
                                     {activeChartConfig?.filters?.map(f => {
                                         const col = selectedDataset?.columns.find(c => c.name === f.column);
-                                        const ops = OPERATORS_MAP[col?.type || 'string'];
+                                        const ops = OPERATORS_MAP[col?.type || 'string'] || OPERATORS_MAP.string;
 
                                         return (
                                             <div key={f.id} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600 space-y-3 group relative">
@@ -359,7 +377,18 @@ const DataPanel = ({
                                                     <p className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase">Column</p>
                                                     <select
                                                         value={f.column}
-                                                        onChange={(e) => updateFilter(f.id, { column: e.target.value })}
+                                                        onChange={(e) => {
+                                                            const nextColumn = e.target.value;
+                                                            const nextCol = selectedDataset?.columns.find(c => c.name === nextColumn);
+                                                            const nextOps = OPERATORS_MAP[nextCol?.type || 'string'] || OPERATORS_MAP.string;
+                                                            updateFilter(f.id, {
+                                                                column: nextColumn,
+                                                                columnType: nextCol?.type,
+                                                                operator: nextOps[0].value,
+                                                                value: nextCol?.type === 'number' ? 0 : '',
+                                                                valueSecondary: nextCol?.type === 'number' ? 0 : '',
+                                                            });
+                                                        }}
                                                         className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-1.5 px-2 text-[10px] font-bold text-gray-700 dark:text-gray-200 focus:outline-none"
                                                     >
                                                         {selectedDataset?.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -565,6 +594,63 @@ const DataPanel = ({
                                             </select>
                                         </div>
                                     </div>
+
+                                    <div className="space-y-2 pt-1">
+                                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Color Mode</label>
+                                        <select
+                                            value={chartStyle.colorMode || 'multi'}
+                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, colorMode: e.target.value } })}
+                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                        >
+                                            <option value="multi">Multi Color</option>
+                                            <option value="single">Single Color</option>
+                                        </select>
+                                    </div>
+
+                                    {(chartStyle.colorMode || 'multi') === 'single' ? (
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Chart Color</label>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="color"
+                                                    value={chartStyle.singleColor || '#2563EB'}
+                                                    onChange={(e) => onUpdateConfig({ style: { ...chartStyle, singleColor: e.target.value } })}
+                                                    className="h-8 w-10 p-0 border border-gray-200 dark:border-gray-600 rounded"
+                                                />
+                                                <input
+                                                    type="text"
+                                                    value={chartStyle.singleColor || '#2563EB'}
+                                                    onChange={(e) => onUpdateConfig({ style: { ...chartStyle, singleColor: e.target.value } })}
+                                                    className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-1.5 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Multi Color Palette</label>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                {Object.entries(COLOR_PRESETS).map(([name, palette]) => (
+                                                    <button
+                                                        key={name}
+                                                        onClick={() => onUpdateConfig({ style: { ...chartStyle, multiColors: palette } })}
+                                                        className="px-2 py-1.5 rounded-lg text-[10px] font-bold border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+                                                    >
+                                                        {name}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <input
+                                                type="text"
+                                                value={Array.isArray(chartStyle.multiColors) ? chartStyle.multiColors.join(', ') : ''}
+                                                onChange={(e) => {
+                                                    const parsed = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                                    onUpdateConfig({ style: { ...chartStyle, multiColors: parsed } });
+                                                }}
+                                                placeholder="#2563EB, #7C3AED, #16A34A"
+                                                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-1.5 px-2 text-[10px] font-bold text-gray-700 dark:text-gray-200"
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
