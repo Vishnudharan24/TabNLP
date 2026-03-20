@@ -1,12 +1,5 @@
 import { ChartType } from '../types';
 
-/**
- * Analyzes dataset columns and recommends the most suitable chart types.
- * @param {import('../types').ColumnSchema[]} columns - The dataset columns
- * @param {string} [dimension] - Currently assigned dimension
- * @param {string[]} [measures] - Currently assigned measures
- * @returns {{ type: string, score: number, reason: string }[]}
- */
 export function recommendCharts(columns, dimension, measures) {
     const allColumns = Array.isArray(columns) ? columns : [];
     const colByName = Object.fromEntries(allColumns.map(c => [c.name, c]));
@@ -19,148 +12,147 @@ export function recommendCharts(columns, dimension, measures) {
     const selectedMeasures = Array.isArray(measures)
         ? measures.map(m => colByName[m]).filter(Boolean)
         : [];
+
     const selectedNumericMeasures = selectedMeasures.filter(c => c.type === 'number');
-    const selectedDateMeasures = selectedMeasures.filter(c => c.type === 'date');
 
-    const hasDimension = !!dimension;
-    const dimensionCol = hasDimension ? colByName[dimension] : null;
-    const isDateDimension = dimensionCol?.type === 'date';
-    const isCategoricalDimension = ['string', 'boolean', 'date'].includes(dimensionCol?.type);
+    const dimensionCol = dimension ? colByName[dimension] : null;
 
-    // Effective profile: prefer explicit assignments if provided.
-    const effectiveNumeric = selectedNumericMeasures.length > 0 ? selectedNumericMeasures.length : numericCols.length;
-    const effectiveCategorical = hasDimension
-        ? (isCategoricalDimension ? 1 : 0)
-        : (categoricalCols.length + booleanCols.length);
-    const effectiveDate = isDateDimension
-        ? 1
-        : (selectedDateMeasures.length > 0 ? selectedDateMeasures.length : dateCols.length);
+    // ─────────────────────────────────────────────
+    // ✅ CONTEXT
+    // ─────────────────────────────────────────────
+    const numericCount = selectedNumericMeasures.length || numericCols.length;
+    const categoricalCount = dimensionCol ? 1 : (categoricalCols.length + booleanCols.length);
 
-    const scores = [];
-    const add = (type, score, reason) => scores.push({ type, score, reason });
+    const ctx = {
+        hasNumeric: numericCount > 0,
+        hasCategorical: categoricalCount > 0,
+        hasDate: dimensionCol?.type === 'date' || dateCols.length > 0,
 
-    const hasAnyFields = allColumns.length > 0;
-    const hasNumeric = effectiveNumeric > 0;
-    const hasCategorical = effectiveCategorical > 0;
-    const hasDate = effectiveDate > 0;
+        numericCount,
+        categoricalCount,
 
-    // ── Time series ───────────────────────────────────────────────────
-    if (hasDate && hasNumeric) {
-        add(ChartType.LINE_SMOOTH, 96, 'Best fit for time-series trends');
-        add(ChartType.LINE_STRAIGHT, 92, 'Clear trend tracking over time');
-        add(ChartType.AREA_SMOOTH, 88, 'Trend with magnitude emphasis');
-        add(ChartType.AREA_STACKED, 84, 'Cumulative trend over time');
-        add(ChartType.LINE_STEP, 78, 'Step-wise change across time buckets');
-        add(ChartType.AREA_STEP, 74, 'Stepped area trend view');
-        add(ChartType.SPARKLINE, 70, 'Compact trend indicator');
-    }
+        isTimeSeries: dimensionCol?.type === 'date' && numericCount > 0,
+        isSingleMetric: numericCount === 1,
+        isMultiMetric: numericCount >= 2,
+        isHighCardinality: categoricalCount > 8,
+        hasHierarchy: categoricalCols.length >= 2
+    };
 
-    // Date-only data can still be visualized by count by date.
-    if (hasDate && !hasNumeric) {
-        add(ChartType.LINE_SMOOTH, 84, 'Record count trend by date');
-        add(ChartType.BAR_CLUSTERED, 76, 'Count by date buckets');
-    }
+    // ─────────────────────────────────────────────
+    // ✅ RULES (ALL CHARTS COVERED)
+    // ─────────────────────────────────────────────
+    const RULES = [
 
-    // ── Categorical + numeric (comparison/composition) ───────────────
-    if (hasCategorical && hasNumeric) {
-        add(ChartType.BAR_CLUSTERED, 94, 'Compare measures across categories');
-        add(ChartType.BAR_HORIZONTAL, 88, 'Readable with long category labels');
-        add(ChartType.LINE_SMOOTH, 72, 'Category-wise trend view');
+        // 📈 LINE CHARTS
+        { chart: ChartType.LINE_SMOOTH, score: 96, when: c => c.isTimeSeries, reason: () => 'Smooth time-series trend' },
+        { chart: ChartType.LINE_STRAIGHT, score: 92, when: c => c.isTimeSeries, reason: () => 'Precise trend tracking' },
+        { chart: ChartType.LINE_STEP, score: 80, when: c => c.isTimeSeries, reason: () => 'Step-wise changes' },
+        { chart: ChartType.LINE_DASHED, score: 70, when: c => c.isTimeSeries, reason: () => 'Alternative visual emphasis' },
+        { chart: ChartType.LINE_MULTI_AXIS, score: 78, when: c => c.isTimeSeries && c.numericCount >= 2, reason: () => 'Different scale comparison' },
 
-        if (effectiveNumeric >= 2) {
-            add(ChartType.BAR_STACKED, 90, 'Composition by category');
-            add(ChartType.BAR_PERCENT, 86, 'Proportional composition by category');
-            add(ChartType.BAR_HORIZONTAL_STACKED, 84, 'Horizontal stacked comparison');
-            add(ChartType.BAR_HORIZONTAL_PERCENT, 82, 'Horizontal proportional comparison');
-            add(ChartType.COMBO_BAR_LINE, 88, 'Compare totals and trend in one chart');
-            add(ChartType.COMBO_STACKED_LINE, 84, 'Stacked contribution plus trend');
-            add(ChartType.COMBO_AREA_LINE, 78, 'Area + line for mixed emphasis');
-            add(ChartType.LINE_MULTI_AXIS, 74, 'Different-scale measures on separate axes');
-            add(ChartType.AREA_PERCENT, 74, 'Share-of-total trend by category');
-        }
+        // 📊 AREA CHARTS
+        { chart: ChartType.AREA_SMOOTH, score: 88, when: c => c.isTimeSeries, reason: () => 'Trend with volume emphasis' },
+        { chart: ChartType.AREA_STEP, score: 75, when: c => c.isTimeSeries, reason: () => 'Stepped area trend' },
+        { chart: ChartType.AREA_STACKED, score: 85, when: c => c.isTimeSeries && c.numericCount >= 2, reason: () => 'Cumulative trend' },
+        { chart: ChartType.AREA_PERCENT, score: 82, when: c => c.isTimeSeries && c.numericCount >= 2, reason: () => 'Proportional trend' },
+        { chart: ChartType.AREA_GRADIENT, score: 65, when: c => c.isTimeSeries, reason: () => 'Styled trend' },
+        { chart: ChartType.AREA_REVERSE, score: 55, when: c => c.isTimeSeries, reason: () => 'Alternative orientation' },
 
-        // Part-to-whole
-        add(ChartType.PIE, 82, 'Part-to-whole category split');
-        add(ChartType.DONUT, 82, 'Part-to-whole with compact center');
-        add(ChartType.ROSE, 72, 'Polar part-to-whole comparison');
-        add(ChartType.TREEMAP, 76, 'Compact proportional breakdown');
-        add(ChartType.SUNBURST, 70, 'Nested category hierarchy split');
-    }
+        // 📊 BAR CHARTS
+        { chart: ChartType.BAR_CLUSTERED, score: 94, when: c => c.hasCategorical && c.hasNumeric, reason: () => 'Category comparison' },
+        { chart: ChartType.BAR_HORIZONTAL, score: 88, when: c => c.hasCategorical && c.hasNumeric, reason: () => 'Better for long labels' },
+        { chart: ChartType.BAR_STACKED, score: 90, when: c => c.numericCount >= 2, reason: () => 'Composition analysis' },
+        { chart: ChartType.BAR_PERCENT, score: 86, when: c => c.numericCount >= 2, reason: () => 'Proportional comparison' },
+        { chart: ChartType.BAR_HORIZONTAL_STACKED, score: 84, when: c => c.numericCount >= 2, reason: () => 'Horizontal composition' },
+        { chart: ChartType.BAR_HORIZONTAL_PERCENT, score: 82, when: c => c.numericCount >= 2, reason: () => 'Horizontal proportion' },
 
-    // Categorical only can still use count-based charts.
-    if (hasCategorical && !hasNumeric) {
-        add(ChartType.BAR_CLUSTERED, 84, 'Frequency distribution by category');
-        add(ChartType.BAR_HORIZONTAL, 82, 'Readable frequency comparison');
-        add(ChartType.PIE, 74, 'Category share by count');
-        add(ChartType.DONUT, 74, 'Category share by count');
-        add(ChartType.TREEMAP, 68, 'Compact category frequency layout');
-    }
+        { chart: ChartType.BAR_WATERFALL, score: 70, when: c => c.isSingleMetric && c.hasCategorical, reason: () => 'Sequential contributions' },
+        { chart: ChartType.BAR_RANGE, score: 68, when: c => c.numericCount >= 1, reason: () => 'Range comparison' },
 
-    // ── Numeric-only profiles ────────────────────────────────────────
-    if (hasNumeric && !hasCategorical && !hasDate) {
-        if (effectiveNumeric === 1) {
-            add(ChartType.KPI_SINGLE, 92, 'Single-metric KPI card');
-            add(ChartType.KPI_PROGRESS, 84, 'Progress-style KPI');
-            add(ChartType.KPI_BULLET, 80, 'Target-vs-actual KPI');
-            add(ChartType.GAUGE, 78, 'Single metric gauge visualization');
-            add(ChartType.CARD_LIST, 72, 'Summary metric card');
-        } else {
-            add(ChartType.SCATTER, 90, 'Correlation across numeric measures');
-            add(ChartType.SCATTER_LINE, 80, 'Correlation with trend line');
-            add(ChartType.BUBBLE, 84, 'Three-variable numeric relationship');
-            add(ChartType.RADAR, 70, 'Multi-metric profile comparison');
-            add(ChartType.RADIAL_BAR, 68, 'Radial multi-metric comparison');
-        }
-    }
+        // 🥧 PIE / DONUT
+        {
+            chart: ChartType.PIE,
+            score: c => c.isHighCardinality ? 40 : 82,
+            when: c => c.hasCategorical && c.hasNumeric,
+            reason: () => 'Part-to-whole'
+        },
+        {
+            chart: ChartType.DONUT,
+            score: c => c.isHighCardinality ? 45 : 82,
+            when: c => c.hasCategorical && c.hasNumeric,
+            reason: () => 'Compact part-to-whole'
+        },
+        { chart: ChartType.PIE_SEMI, score: 60, when: c => c.hasCategorical, reason: () => 'Semi-circle proportion' },
+        { chart: ChartType.DONUT_SEMI, score: 60, when: c => c.hasCategorical, reason: () => 'Semi donut view' },
 
-    // ── Correlation and matrix views ────────────────────────────────
-    if (effectiveNumeric >= 2) {
-        add(ChartType.SCATTER, 88, 'Two-measure correlation view');
-        add(ChartType.SCATTER_LINE, 78, 'Correlation with fitted trend');
-    }
-    if (effectiveNumeric >= 3) {
-        add(ChartType.BUBBLE, 86, 'Three-variable relationship mapping');
-    }
-    if ((categoricalCols.length + booleanCols.length) >= 2 && hasNumeric) {
-        add(ChartType.HEATMAP, 80, 'Matrix intensity across category pairs');
-    }
+        // 🌸 ADVANCED CIRCULAR
+        { chart: ChartType.ROSE, score: 72, when: c => c.hasCategorical, reason: () => 'Polar comparison' },
+        { chart: ChartType.SUNBURST, score: 75, when: c => c.hasHierarchy, reason: () => 'Hierarchical breakdown' },
+        { chart: ChartType.RADIAL_BAR, score: 70, when: c => c.numericCount >= 2, reason: () => 'Radial metric comparison' },
+        { chart: ChartType.RADAR, score: c => c.numericCount >= 3 ? 72 : 50, when: c => c.numericCount >= 2, reason: () => 'Multi-metric comparison' },
 
-    // ── Specialized recommendations ─────────────────────────────────
-    if (hasCategorical && effectiveNumeric >= 3) {
-        add(ChartType.RADAR, 76, 'Compare many metrics per category');
-        add(ChartType.RADIAL_BAR, 70, 'Radial metric comparison by category');
-    }
+        // 🔗 RELATIONSHIP
+        { chart: ChartType.SCATTER, score: 90, when: c => c.numericCount >= 2, reason: () => 'Correlation analysis' },
+        { chart: ChartType.SCATTER_LINE, score: 80, when: c => c.numericCount >= 2, reason: () => 'Correlation with trend' },
+        { chart: ChartType.BUBBLE, score: 85, when: c => c.numericCount >= 3, reason: () => '3-variable relation' },
 
-    if (hasNumeric) {
-        add(ChartType.KPI_SINGLE, 66, 'High-level metric summary');
-        add(ChartType.GAUGE, 60, 'Single KPI indicator view');
-        add(ChartType.CARD_LIST, 58, 'Compact summary cards');
-    }
+        // 🧊 MATRIX
+        { chart: ChartType.HEATMAP, score: 80, when: c => c.hasCategorical && c.numericCount >= 1 && c.categoricalCount >= 2, reason: () => 'Matrix intensity' },
 
-    // Optional variants with lower default confidence.
-    if (hasCategorical && hasNumeric) {
-        add(ChartType.BAR_WATERFALL, 58, 'Sequential contribution analysis');
-        add(ChartType.BAR_RANGE, 54, 'Range span comparison');
-        add(ChartType.PIE_SEMI, 52, 'Semi-circle proportion view');
-        add(ChartType.DONUT_SEMI, 52, 'Semi-circle donut proportion view');
-        add(ChartType.AREA_GRADIENT, 56, 'Styled area trend emphasis');
-        add(ChartType.AREA_REVERSE, 48, 'Alternative area direction styling');
-        add(ChartType.LINE_DASHED, 50, 'Alternative line style emphasis');
-        add(ChartType.LINE_AREA_MIX, 62, 'Line + area combined narrative');
-    }
+        // 🌳 STRUCTURE
+        { chart: ChartType.TREEMAP, score: 78, when: c => c.hasCategorical, reason: () => 'Compact hierarchy' },
 
-    // Baseline fallback: always available
-    if (hasAnyFields) {
-        add(ChartType.TABLE, 42, 'Raw data table view');
-    }
+        // 🔀 COMBO
+        { chart: ChartType.COMBO_BAR_LINE, score: 88, when: c => c.hasCategorical && c.numericCount >= 2, reason: () => 'Compare trend + bars' },
+        { chart: ChartType.COMBO_STACKED_LINE, score: 85, when: c => c.numericCount >= 2, reason: () => 'Stacked + trend' },
+        { chart: ChartType.COMBO_AREA_LINE, score: 80, when: c => c.numericCount >= 2, reason: () => 'Area + line mix' },
 
-    // Deduplicate by type (keep highest score)
-    const deduped = {};
-    for (const s of scores) {
-        if (!deduped[s.type] || deduped[s.type].score < s.score) {
-            deduped[s.type] = s;
+        // 📊 KPI / INDICATORS
+        { chart: ChartType.KPI_SINGLE, score: 92, when: c => c.isSingleMetric, reason: () => 'Single KPI' },
+        { chart: ChartType.KPI_PROGRESS, score: 85, when: c => c.isSingleMetric, reason: () => 'Progress indicator' },
+        { chart: ChartType.KPI_BULLET, score: 82, when: c => c.isSingleMetric, reason: () => 'Target vs actual' },
+        { chart: ChartType.GAUGE, score: 78, when: c => c.isSingleMetric, reason: () => 'Gauge visualization' },
+        { chart: ChartType.CARD_LIST, score: 70, when: c => c.hasNumeric, reason: () => 'Summary cards' },
+        { chart: ChartType.SPARKLINE, score: 72, when: c => c.isTimeSeries, reason: () => 'Mini trend' },
+
+        // 📋 FALLBACK
+        { chart: ChartType.TABLE, score: 40, when: () => true, reason: () => 'Raw data' }
+    ];
+
+    // ─────────────────────────────────────────────
+    // ✅ APPLY RULES
+    // ─────────────────────────────────────────────
+    const scoreMap = new Map();
+
+    for (const rule of RULES) {
+        if (!rule.when(ctx)) continue;
+
+        const score = typeof rule.score === 'function'
+            ? rule.score(ctx)
+            : rule.score;
+
+        if (score <= 0) continue;
+
+        const existing = scoreMap.get(rule.chart);
+
+        if (!existing || existing.score < score) {
+            scoreMap.set(rule.chart, {
+                type: rule.chart,
+                score,
+                reason: rule.reason(ctx)
+            });
         }
     }
 
-    return Object.values(deduped).sort((a, b) => b.score - a.score);
+    // ─────────────────────────────────────────────
+    // ✅ FINAL OUTPUT
+    // ─────────────────────────────────────────────
+    return Array.from(scoreMap.values())
+        .map(r => ({
+            ...r,
+            confidence:
+                r.score >= 90 ? 'high' :
+                r.score >= 70 ? 'medium' : 'low'
+        }))
+        .sort((a, b) => b.score - a.score);
 }

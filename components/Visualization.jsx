@@ -7,7 +7,7 @@ import { buildChartOption } from '../services/echartsOptionBuilder';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
-const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant' }) => {
+const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant', onDataPointClick }) => {
     const { theme } = useTheme();
     const [drillPath, setDrillPath] = useState([]);
     const chartRef = useRef(null);
@@ -145,6 +145,25 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         setDrillPath(prev => [...prev, { dimensionCol: effectiveDimension, value: params.name }]);
     }, [canDrill, effectiveDimension]);
 
+    const handlePointClick = useCallback((params) => {
+        if (!params?.name) return;
+
+        if (onDataPointClick) {
+            onDataPointClick({
+                chartId: config.id,
+                chartTitle: config.title,
+                datasetId: config.datasetId,
+                dimension: effectiveDimension,
+                value: params.name,
+                params,
+            });
+        }
+
+        if (canDrill) {
+            handleDrillDown(params);
+        }
+    }, [onDataPointClick, config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown]);
+
     const handleDrillUp = (index) => {
         setDrillPath(prev => prev.slice(0, index));
     };
@@ -162,10 +181,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     }, [groupId, onChartInstanceChange, config.id]);
 
     // Chart click events for drill-down
-    const onEvents = useMemo(() => {
-        if (!canDrill) return {};
-        return { click: handleDrillDown };
-    }, [canDrill, handleDrillDown]);
+    const onEvents = useMemo(() => ({ click: handlePointClick }), [handlePointClick]);
 
     const renderVisual = () => {
         if (chartData.length === 0) return (
@@ -244,6 +260,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                             <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{config.type.replace(/_/g, ' ')}</p>
                             {config.filters.length > 0 && <Filter size={8} className="text-blue-500" />}
                             {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
+                            {!canDrill && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
                         </div>
                     </div>
                 </div>

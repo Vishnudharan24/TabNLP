@@ -112,6 +112,13 @@ export const ChartType = {
  * @property {AggregationType} aggregation
  * @property {LayoutConfig} layout
  * @property {FilterConfig[]} filters
+ * @property {{
+ *   fontFamily?: string,
+ *   fontSize?: number,
+ *   labelMode?: 'auto' | 'show' | 'hide',
+ *   tooltipEnabled?: boolean,
+ *   tooltipDecimals?: number,
+ * }} [style]
  */
 
 /**

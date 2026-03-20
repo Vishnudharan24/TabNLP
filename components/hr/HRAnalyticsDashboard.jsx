@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import PptxGenJS from 'pptxgenjs';
 import { useTheme } from '../../contexts/ThemeContext';
 import { recommendCharts } from '../../services/chartRecommender';
+import { buildChartOption } from '../../services/echartsOptionBuilder';
 import { ChartType } from '../../types';
 import HRKpiCards from './HRKpiCards';
 import HRFiltersBar from './HRFiltersBar';
@@ -29,63 +30,18 @@ const buildBaseGrid = (isDark) => ({
     borderColor: isDark ? '#374151' : '#E5E7EB',
 });
 
-const LOCAL_CHART_TYPE_LABELS = {
-    bar: 'Bar',
-    line: 'Line',
-    pie: 'Pie',
-    donut: 'Donut',
-    combo: 'Combo',
-};
+const ALL_CHART_TYPES = Object.values(ChartType);
+const toLabel = (type) => type.replace(/_/g, ' ');
 
-const ALLOWED_LOCAL_TYPES = {
-    department: ['bar', 'line'],
-    gender: ['pie', 'donut'],
-    age: ['bar', 'line'],
-    hiringTrend: ['line', 'bar'],
-    attritionTrend: ['line', 'bar'],
-    attritionByDepartment: ['combo', 'bar'],
-    education: ['bar', 'pie', 'donut'],
-};
-
-const mapRecommenderTypeToLocal = (chartType) => {
-    if (!chartType) return null;
-
-    if (chartType === ChartType.PIE || chartType === ChartType.PIE_SEMI || chartType === ChartType.ROSE || chartType === ChartType.SUNBURST || chartType === ChartType.TREEMAP) {
-        return 'pie';
-    }
-    if (chartType === ChartType.DONUT || chartType === ChartType.DONUT_SEMI || chartType === ChartType.RADIAL_BAR) {
-        return 'donut';
-    }
-    if (chartType === ChartType.COMBO_BAR_LINE || chartType === ChartType.COMBO_STACKED_LINE || chartType === ChartType.COMBO_AREA_LINE) {
-        return 'combo';
-    }
-    if (chartType.startsWith('LINE_') || chartType.startsWith('AREA_') || chartType === ChartType.SPARKLINE) {
-        return 'line';
-    }
-    if (chartType.startsWith('BAR_')) {
-        return 'bar';
-    }
-    return null;
-};
-
-const getRecommendedLocalTypes = ({ columns, dimension, measures = [], allowed = [] }) => {
-    const recs = recommendCharts(columns, dimension, measures);
+const getRecommendedChartTypes = ({ columns, dimension, measures = [] }) => {
+    const recs = recommendCharts(columns, dimension, measures).map(r => r.type);
     const ordered = [];
-
-    recs.forEach((rec) => {
-        const mapped = mapRecommenderTypeToLocal(rec.type);
-        if (!mapped) return;
-        if (!allowed.includes(mapped)) return;
-        if (ordered.includes(mapped)) return;
-        ordered.push(mapped);
+    recs.forEach((type) => {
+        if (!ordered.includes(type)) ordered.push(type);
     });
-
-    if (ordered.length === 0) return [...allowed];
-
-    allowed.forEach((localType) => {
-        if (!ordered.includes(localType)) ordered.push(localType);
+    ALL_CHART_TYPES.forEach((type) => {
+        if (!ordered.includes(type)) ordered.push(type);
     });
-
     return ordered;
 };
 
@@ -123,13 +79,13 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     });
 
     const [chartTypes, setChartTypes] = useState({
-        department: 'bar',
-        gender: 'pie',
-        age: 'bar',
-        hiringTrend: 'line',
-        attritionTrend: 'line',
-        attritionByDepartment: 'combo',
-        education: 'bar',
+        department: ChartType.BAR_CLUSTERED,
+        gender: ChartType.PIE,
+        age: ChartType.BAR_CLUSTERED,
+        hiringTrend: ChartType.LINE_SMOOTH,
+        attritionTrend: ChartType.LINE_SMOOTH,
+        attritionByDepartment: ChartType.COMBO_BAR_LINE,
+        education: ChartType.BAR_HORIZONTAL,
     });
 
     const chartTypeRecommendations = useMemo(() => {
@@ -164,47 +120,40 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
         ];
 
         return {
-            department: getRecommendedLocalTypes({
+            department: getRecommendedChartTypes({
                 columns: departmentColumns,
                 dimension: 'Department',
                 measures: ['Employee Count'],
-                allowed: ALLOWED_LOCAL_TYPES.department,
             }),
-            gender: getRecommendedLocalTypes({
+            gender: getRecommendedChartTypes({
                 columns: genderColumns,
                 dimension: 'Gender',
                 measures: ['Employee Count'],
-                allowed: ALLOWED_LOCAL_TYPES.gender,
             }),
-            age: getRecommendedLocalTypes({
+            age: getRecommendedChartTypes({
                 columns: ageColumns,
                 dimension: 'Age Bucket',
                 measures: ['Employee Count'],
-                allowed: ALLOWED_LOCAL_TYPES.age,
             }),
-            hiringTrend: getRecommendedLocalTypes({
+            hiringTrend: getRecommendedChartTypes({
                 columns: hiringColumns,
                 dimension: 'Join Month',
                 measures: ['Joined Count'],
-                allowed: ALLOWED_LOCAL_TYPES.hiringTrend,
             }),
-            attritionTrend: getRecommendedLocalTypes({
+            attritionTrend: getRecommendedChartTypes({
                 columns: attritionTrendColumns,
                 dimension: 'Exit Month',
                 measures: ['Exited Count'],
-                allowed: ALLOWED_LOCAL_TYPES.attritionTrend,
             }),
-            attritionByDepartment: getRecommendedLocalTypes({
+            attritionByDepartment: getRecommendedChartTypes({
                 columns: attritionDeptColumns,
                 dimension: 'Department',
                 measures: ['Attrition Rate', 'Exited Count'],
-                allowed: ALLOWED_LOCAL_TYPES.attritionByDepartment,
             }),
-            education: getRecommendedLocalTypes({
+            education: getRecommendedChartTypes({
                 columns: educationColumns,
                 dimension: 'Education Level',
                 measures: ['Employee Count'],
-                allowed: ALLOWED_LOCAL_TYPES.education,
             }),
         };
     }, []);
@@ -214,8 +163,8 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
             const next = { ...prev };
             let changed = false;
 
-            Object.keys(ALLOWED_LOCAL_TYPES).forEach((key) => {
-                const options = chartTypeRecommendations[key] || ALLOWED_LOCAL_TYPES[key];
+            Object.keys(chartTypeRecommendations).forEach((key) => {
+                const options = chartTypeRecommendations[key] || ALL_CHART_TYPES;
                 if (!options.includes(next[key])) {
                     next[key] = options[0];
                     changed = true;
@@ -367,154 +316,59 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
         splitLine: { lineStyle: { color: isDark ? '#374151' : '#F3F4F6' } },
     };
 
-    const departmentOption = {
-        color: [chartColors[0]],
-        tooltip: {
-            trigger: 'axis',
-            axisPointer: { type: 'shadow' },
-            formatter: (params) => {
-                const p = params?.[0];
-                if (!p) return '';
-                const count = p.value;
-                return `${p.name}<br/>Employees: <b>${count}</b>`;
-            },
-        },
-        grid: buildBaseGrid(isDark),
-        xAxis: { type: 'category', data: departmentDist.map(d => d.name), ...commonAxisStyle },
-        yAxis: { type: 'value', ...commonAxisStyle },
-        series: [{
-            type: chartTypes.department,
-            data: departmentDist.map(d => d.value),
-            barMaxWidth: chartTypes.department === 'bar' ? 36 : undefined,
-            smooth: chartTypes.department === 'line',
-            symbolSize: chartTypes.department === 'line' ? 7 : undefined,
-            areaStyle: chartTypes.department === 'line' ? { opacity: 0.1 } : undefined,
-            itemStyle: chartTypes.department === 'bar' ? { borderRadius: [8, 8, 0, 0] } : undefined,
-        }],
-    };
+    const departmentOption = buildChartOption(
+        chartTypes.department,
+        departmentDist.map(item => ({ name: item.name, employees: item.value })),
+        { dimension: 'Department', measures: ['employees'], title: 'Employee Distribution by Department' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
-    const genderOption = {
-        color: chartColors,
-        tooltip: {
-            trigger: 'item',
-            formatter: (param) => `${param.name}<br/>Employees: <b>${param.value}</b> (${param.percent}%)`,
-        },
-        legend: { bottom: 0, textStyle: { color: isDark ? '#D1D5DB' : '#4B5563' } },
-        series: [{
-            type: 'pie',
-            radius: chartTypes.gender === 'donut' ? ['42%', '72%'] : ['0%', '72%'],
-            center: ['50%', '45%'],
-            label: { color: isDark ? '#F9FAFB' : '#111827', formatter: '{b}: {d}%' },
-            data: genderDist,
-        }],
-    };
+    const genderOption = buildChartOption(
+        chartTypes.gender,
+        genderDist.map(item => ({ name: item.name, employees: item.value })),
+        { dimension: 'Gender', measures: ['employees'], title: 'Gender Distribution' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
-    const ageOption = {
-        color: [chartColors[2]],
-        tooltip: {
-            trigger: 'axis',
-            axisPointer: { type: 'shadow' },
-            formatter: (params) => {
-                const p = params?.[0];
-                if (!p) return '';
-                return `${p.name} years<br/>Employees: <b>${p.value}</b>`;
-            },
-        },
-        grid: buildBaseGrid(isDark),
-        xAxis: { type: 'category', data: ageHistogram.map(bin => bin.name), ...commonAxisStyle },
-        yAxis: { type: 'value', ...commonAxisStyle },
-        series: [{
-            type: chartTypes.age,
-            data: ageHistogram.map(bin => bin.value),
-            barMaxWidth: chartTypes.age === 'bar' ? 34 : undefined,
-            smooth: chartTypes.age === 'line',
-            symbolSize: chartTypes.age === 'line' ? 7 : undefined,
-            areaStyle: chartTypes.age === 'line' ? { opacity: 0.1 } : undefined,
-            itemStyle: chartTypes.age === 'bar' ? { borderRadius: [8, 8, 0, 0] } : undefined,
-        }],
-    };
+    const ageOption = buildChartOption(
+        chartTypes.age,
+        ageHistogram.map(item => ({ name: item.name, employees: item.value })),
+        { dimension: 'Age Bucket', measures: ['employees'], title: 'Age Distribution' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
-    const hiringOption = {
-        color: [chartColors[1]],
-        tooltip: {
-            trigger: 'axis',
-            formatter: (params) => {
-                const p = params?.[0];
-                if (!p) return '';
-                return `${p.axisValue}<br/>Joined: <b>${p.data}</b>`;
-            },
-        },
-        grid: buildBaseGrid(isDark),
-        xAxis: { type: 'category', data: hiringTrend.labels, ...commonAxisStyle },
-        yAxis: { type: 'value', ...commonAxisStyle },
-        series: [{
-            type: chartTypes.hiringTrend,
-            smooth: chartTypes.hiringTrend === 'line',
-            symbolSize: chartTypes.hiringTrend === 'line' ? 7 : undefined,
-            areaStyle: chartTypes.hiringTrend === 'line' ? { opacity: 0.15 } : undefined,
-            barMaxWidth: chartTypes.hiringTrend === 'bar' ? 34 : undefined,
-            itemStyle: chartTypes.hiringTrend === 'bar' ? { borderRadius: [8, 8, 0, 0] } : undefined,
-            data: hiringTrend.values,
-        }],
-    };
+    const hiringOption = buildChartOption(
+        chartTypes.hiringTrend,
+        hiringTrend.labels.map((label, idx) => ({ name: label, joined: hiringTrend.values[idx] || 0 })),
+        { dimension: 'Join Month', measures: ['joined'], title: 'Hiring Trend Over Time' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
-    const attritionTrendOption = {
-        color: [chartColors[3]],
-        tooltip: {
-            trigger: 'axis',
-            formatter: (params) => {
-                const p = params?.[0];
-                if (!p) return '';
-                return `${p.axisValue}<br/>Exited: <b>${p.data}</b>`;
-            },
-        },
-        grid: buildBaseGrid(isDark),
-        xAxis: { type: 'category', data: attritionTrend.labels, ...commonAxisStyle },
-        yAxis: { type: 'value', ...commonAxisStyle },
-        series: [{
-            type: chartTypes.attritionTrend,
-            smooth: chartTypes.attritionTrend === 'line',
-            symbolSize: chartTypes.attritionTrend === 'line' ? 7 : undefined,
-            areaStyle: chartTypes.attritionTrend === 'line' ? { opacity: 0.14 } : undefined,
-            barMaxWidth: chartTypes.attritionTrend === 'bar' ? 34 : undefined,
-            itemStyle: chartTypes.attritionTrend === 'bar' ? { borderRadius: [8, 8, 0, 0] } : undefined,
-            data: attritionTrend.values,
-        }],
-    };
+    const attritionTrendOption = buildChartOption(
+        chartTypes.attritionTrend,
+        attritionTrend.labels.map((label, idx) => ({ name: label, exited: attritionTrend.values[idx] || 0 })),
+        { dimension: 'Exit Month', measures: ['exited'], title: 'Attrition Trend Over Time' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
-    const attritionByDeptOption = {
-        color: [chartColors[3], chartColors[0]],
-        tooltip: {
-            trigger: 'axis',
-            axisPointer: { type: 'shadow' },
-            formatter: (params) => {
-                const row = attritionByDepartment.find(d => d.name === params?.[0]?.name);
-                if (!row) return '';
-                return `${row.name}<br/>Attrition Rate: <b>${row.rate.toFixed(1)}%</b><br/>Exited: <b>${row.exited}</b> / ${row.employees}`;
-            },
-        },
-        legend: chartTypes.attritionByDepartment === 'combo' ? { textStyle: { color: isDark ? '#D1D5DB' : '#4B5563' } } : undefined,
-        grid: buildBaseGrid(isDark),
-        xAxis: { type: 'category', data: attritionByDepartment.map(d => d.name), ...commonAxisStyle },
-        yAxis: chartTypes.attritionByDepartment === 'combo'
-            ? [
-                { type: 'value', name: 'Rate %', ...commonAxisStyle },
-                { type: 'value', name: 'Exited', ...commonAxisStyle },
-            ]
-            : { type: 'value', name: 'Rate %', ...commonAxisStyle },
-        series: chartTypes.attritionByDepartment === 'combo'
-            ? [
-                { type: 'bar', name: 'Attrition %', data: attritionByDepartment.map(d => Number(d.rate.toFixed(2))), barMaxWidth: 32, itemStyle: { borderRadius: [8, 8, 0, 0] } },
-                { type: 'line', name: 'Exited Count', yAxisIndex: 1, smooth: true, data: attritionByDepartment.map(d => d.exited) },
-            ]
-            : [{
-                type: 'bar',
-                name: 'Attrition %',
-                data: attritionByDepartment.map(d => Number(d.rate.toFixed(2))),
-                barMaxWidth: 32,
-                itemStyle: { borderRadius: [8, 8, 0, 0] },
-            }],
-    };
+    const attritionByDeptOption = buildChartOption(
+        chartTypes.attritionByDepartment,
+        attritionByDepartment.map(item => ({ name: item.name, rate: Number(item.rate.toFixed(2)), exited: item.exited })),
+        { dimension: 'Department', measures: ['rate', 'exited'], title: 'Attrition by Department' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
     const scatterOption = {
         color: [chartColors[4]],
@@ -543,40 +397,14 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
         }],
     };
 
-    const educationOption = {
-        color: [chartColors[5]],
-        tooltip: chartTypes.education === 'bar'
-            ? {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: (params) => {
-                    const p = params?.[0];
-                    if (!p) return '';
-                    return `${p.name}<br/>Employees: <b>${p.value}</b>`;
-                },
-            }
-            : {
-                trigger: 'item',
-                formatter: (param) => `${param.name}<br/>Employees: <b>${param.value}</b> (${param.percent}%)`,
-            },
-        ...(chartTypes.education === 'bar'
-            ? {
-                grid: buildBaseGrid(isDark),
-                xAxis: { type: 'value', ...commonAxisStyle },
-                yAxis: { type: 'category', data: educationDist.map(d => d.name), ...commonAxisStyle },
-                series: [{ type: 'bar', data: educationDist.map(d => d.value), barMaxWidth: 26, itemStyle: { borderRadius: [0, 8, 8, 0] } }],
-            }
-            : {
-                legend: { bottom: 0, textStyle: { color: isDark ? '#D1D5DB' : '#4B5563' } },
-                series: [{
-                    type: 'pie',
-                    radius: chartTypes.education === 'donut' ? ['42%', '72%'] : ['0%', '72%'],
-                    center: ['50%', '45%'],
-                    label: { color: isDark ? '#F9FAFB' : '#111827', formatter: '{b}: {d}%' },
-                    data: educationDist,
-                }],
-            }),
-    };
+    const educationOption = buildChartOption(
+        chartTypes.education,
+        educationDist.map(item => ({ name: item.name, employees: item.value })),
+        { dimension: 'Education Level', measures: ['employees'], title: 'Education Level Distribution' },
+        theme,
+        'clear',
+        'vibrant'
+    );
 
     const handleDepartmentDrill = {
         click: (params) => {
@@ -853,56 +681,56 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Department Dist.</span>
                         <select value={chartTypes.department} onChange={(e) => setChartTypes(prev => ({ ...prev, department: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.department || ALLOWED_LOCAL_TYPES.department).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.department || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Gender Dist.</span>
                         <select value={chartTypes.gender} onChange={(e) => setChartTypes(prev => ({ ...prev, gender: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.gender || ALLOWED_LOCAL_TYPES.gender).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.gender || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Age Dist.</span>
                         <select value={chartTypes.age} onChange={(e) => setChartTypes(prev => ({ ...prev, age: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.age || ALLOWED_LOCAL_TYPES.age).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.age || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Hiring Trend</span>
                         <select value={chartTypes.hiringTrend} onChange={(e) => setChartTypes(prev => ({ ...prev, hiringTrend: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.hiringTrend || ALLOWED_LOCAL_TYPES.hiringTrend).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.hiringTrend || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Attrition Trend</span>
                         <select value={chartTypes.attritionTrend} onChange={(e) => setChartTypes(prev => ({ ...prev, attritionTrend: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.attritionTrend || ALLOWED_LOCAL_TYPES.attritionTrend).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.attritionTrend || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Attrition by Dept.</span>
                         <select value={chartTypes.attritionByDepartment} onChange={(e) => setChartTypes(prev => ({ ...prev, attritionByDepartment: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.attritionByDepartment || ALLOWED_LOCAL_TYPES.attritionByDepartment).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.attritionByDepartment || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Education Dist.</span>
                         <select value={chartTypes.education} onChange={(e) => setChartTypes(prev => ({ ...prev, education: e.target.value }))} className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}>
-                            {(chartTypeRecommendations.education || ALLOWED_LOCAL_TYPES.education).map((option, idx) => (
-                                <option key={option} value={option}>{`${LOCAL_CHART_TYPE_LABELS[option] || option}${idx === 0 ? ' (Recommended)' : ''}`}</option>
+                            {(chartTypeRecommendations.education || ALL_CHART_TYPES).map((option, idx) => (
+                                <option key={option} value={option}>{`${toLabel(option)}${idx === 0 ? ' (Recommended)' : ''}`}</option>
                             ))}
                         </select>
                     </label>

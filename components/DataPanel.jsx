@@ -192,6 +192,46 @@ const DataPanel = ({
         }
     };
 
+    const chartStyle = activeChartConfig?.style || {};
+
+    const handleFieldDragStart = (event, col) => {
+        event.dataTransfer.setData('text/plain', JSON.stringify(col));
+        event.dataTransfer.effectAllowed = 'move';
+    };
+
+    const handleDropDimension = (event) => {
+        event.preventDefault();
+        if (!activeChartConfig) return;
+        try {
+            const payload = JSON.parse(event.dataTransfer.getData('text/plain'));
+            if (payload?.type === 'string' || payload?.type === 'date') {
+                onUpdateConfig({ dimension: payload.name });
+            }
+        } catch {
+            // ignore invalid drag payload
+        }
+    };
+
+    const handleDropMeasure = (event) => {
+        event.preventDefault();
+        if (!activeChartConfig) return;
+        try {
+            const payload = JSON.parse(event.dataTransfer.getData('text/plain'));
+            if (payload?.type !== 'number') return;
+            const currentMeasures = activeChartConfig.measures || [];
+            if (!currentMeasures.includes(payload.name)) {
+                onUpdateConfig({ measures: [...currentMeasures, payload.name] });
+            }
+        } catch {
+            // ignore invalid drag payload
+        }
+    };
+
+    const preventDropDefault = (event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+    };
+
     return (
         <aside className="side-panel-normalized w-80 shrink-0 h-full flex flex-col gap-6 overflow-hidden relative">
             {showNewChartPrompt && (
@@ -378,17 +418,41 @@ const DataPanel = ({
                                 <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Fields</h4>
                                 {activeChartConfig && (
                                     <div className="space-y-2 mb-3">
-                                        <div className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
+                                        <div
+                                            onDragOver={preventDropDefault}
+                                            onDrop={handleDropDimension}
+                                            className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800"
+                                        >
                                             <p className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase mb-1">Dimension (category)</p>
                                             <p className="text-[11px] font-bold text-blue-800 dark:text-blue-200">{activeChartConfig.dimension || '—'}</p>
                                         </div>
-                                        <div className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800">
+                                        <div
+                                            onDragOver={preventDropDefault}
+                                            onDrop={handleDropMeasure}
+                                            className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800"
+                                        >
                                             <p className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-1">Measures (values)</p>
-                                            <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200">{activeChartConfig.measures?.join(', ') || '—'}</p>
+                                            {activeChartConfig.measures?.length ? (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {activeChartConfig.measures.map((measure) => (
+                                                        <span key={measure} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-200">
+                                                            {measure}
+                                                            <button
+                                                                onClick={() => onUpdateConfig({ measures: activeChartConfig.measures.filter(m => m !== measure) })}
+                                                                className="text-emerald-700/70 dark:text-emerald-200/80 hover:text-rose-500"
+                                                            >
+                                                                <X size={10} />
+                                                            </button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200">—</p>
+                                            )}
                                         </div>
                                     </div>
                                 )}
-                                <p className="text-[9px] text-gray-400 dark:text-gray-500 italic">Click a text field to set as dimension, click a number field to toggle as measure.</p>
+                                <p className="text-[9px] text-gray-400 dark:text-gray-500 italic">Click or drag text/date fields into Dimension and number fields into Measures.</p>
                                 <div className="space-y-1">
                                     {filteredColumns.map(col => {
                                         const isDimension = activeChartConfig?.dimension === col.name;
@@ -397,6 +461,8 @@ const DataPanel = ({
                                         return (
                                             <div
                                                 key={col.name}
+                                                draggable
+                                                onDragStart={(e) => handleFieldDragStart(e, col)}
                                                 onClick={() => handleFieldClick(col)}
                                                 className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-all ${isSelected ? (isDimension ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-200 dark:ring-blue-700' : 'bg-emerald-50 dark:bg-emerald-900/30 ring-1 ring-emerald-200 dark:ring-emerald-700') : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
                                             >
@@ -432,14 +498,72 @@ const DataPanel = ({
                         <div className="space-y-6">
                             <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Properties</h4>
                             <div className="space-y-4">
-                                {/* <div className="space-y-2">
+                                <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Visual Title</label>
-                                    <input type="text" value={activeChartConfig?.title || ''} onChange={(e) => onUpdateConfig({ title: e.target.value })} className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3 text-xs font-bold text-gray-700 dark:text-gray-200" />
-                                </div> */}
+                                    <input
+                                        type="text"
+                                        value={activeChartConfig?.title || ''}
+                                        onChange={(e) => onUpdateConfig({ title: e.target.value })}
+                                        className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3 text-xs font-bold text-gray-700 dark:text-gray-200"
+                                    />
+                                </div>
                                 <div className="p-5 bg-gray-50 dark:bg-gray-700 rounded-xl space-y-4">
                                     <div className="space-y-2">
                                         <div className="flex justify-between"><span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Width</span><span className="text-xs font-black text-gray-700 dark:text-gray-200">{activeChartConfig?.layout.w}</span></div>
                                         <input type="range" min="2" max="12" value={activeChartConfig?.layout.w || 4} onChange={(e) => onUpdateLayout({ w: parseInt(e.target.value) })} className="w-full accent-gray-700 dark:accent-gray-300" />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Font Family</label>
+                                        <select
+                                            value={chartStyle.fontFamily || 'Plus Jakarta Sans, sans-serif'}
+                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, fontFamily: e.target.value } })}
+                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                        >
+                                            <option value="Plus Jakarta Sans, sans-serif">Plus Jakarta Sans</option>
+                                            <option value="Inter, sans-serif">Inter</option>
+                                            <option value="Roboto, sans-serif">Roboto</option>
+                                            <option value="Arial, sans-serif">Arial</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between"><span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Font Size</span><span className="text-xs font-black text-gray-700 dark:text-gray-200">{chartStyle.fontSize || 11}px</span></div>
+                                        <input
+                                            type="range"
+                                            min="10"
+                                            max="18"
+                                            value={chartStyle.fontSize || 11}
+                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, fontSize: parseInt(e.target.value) } })}
+                                            className="w-full accent-gray-700 dark:accent-gray-300"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Labels</label>
+                                            <select
+                                                value={chartStyle.labelMode || 'auto'}
+                                                onChange={(e) => onUpdateConfig({ style: { ...chartStyle, labelMode: e.target.value } })}
+                                                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                            >
+                                                <option value="auto">Auto</option>
+                                                <option value="show">Show</option>
+                                                <option value="hide">Hide</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Tooltips</label>
+                                            <select
+                                                value={chartStyle.tooltipEnabled === false ? 'off' : 'on'}
+                                                onChange={(e) => onUpdateConfig({ style: { ...chartStyle, tooltipEnabled: e.target.value === 'on' } })}
+                                                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                            >
+                                                <option value="on">On</option>
+                                                <option value="off">Off</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

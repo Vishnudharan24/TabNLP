@@ -28,20 +28,38 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const gridBorderColor = isDark ? (isClearMode ? '#334155' : '#1e293b') : (isClearMode ? '#e2e8f0' : '#f1f5f9');
 
     const { measures = [], dimension = '' } = config;
+    const style = config?.style || {};
+    const fontFamily = style.fontFamily || 'Plus Jakarta Sans, sans-serif';
+    const fontSize = Number(style.fontSize) || (isClearMode ? 12 : 11);
+    const labelMode = style.labelMode || 'auto';
+    const tooltipEnabled = style.tooltipEnabled !== false;
+    const tooltipDecimals = Number.isFinite(Number(style.tooltipDecimals)) ? Number(style.tooltipDecimals) : 2;
     const categories = processedData.map(d => d.name);
 
-    const baseTextStyle = { color: textColor, fontFamily: 'Plus Jakarta Sans, sans-serif' };
+    const baseTextStyle = { color: textColor, fontFamily };
+    const numberFormatter = (value) => {
+        const num = Number(value);
+        if (Number.isNaN(num)) return value;
+        return num.toLocaleString(undefined, { maximumFractionDigits: tooltipDecimals });
+    };
+    const resolveLabel = (fallback = {}) => {
+        if (labelMode === 'hide') return { ...fallback, show: false };
+        if (labelMode === 'show') return { ...fallback, show: true };
+        return fallback;
+    };
     const tooltipStyle = {
         trigger: 'axis',
+        show: tooltipEnabled,
         backgroundColor: isDark ? '#1e293b' : '#ffffff',
         borderColor: isDark ? '#334155' : '#e2e8f0',
-        textStyle: { color: textColor, fontSize: isClearMode ? 12 : 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+        textStyle: { color: textColor, fontSize, fontFamily },
         borderWidth: 1,
         padding: [12, 16],
         extraCssText: 'border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);',
+        valueFormatter: (value) => numberFormatter(value),
     };
     const legendStyle = {
-        textStyle: { color: subTextColor, fontSize: isClearMode ? 12 : 11, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+        textStyle: { color: subTextColor, fontSize, fontFamily },
         bottom: 0,
         itemGap: isClearMode ? 18 : 16,
         icon: 'roundRect',
@@ -49,7 +67,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         itemHeight: isClearMode ? 9 : 8,
     };
     const gridStyle = { left: 56, right: 24, top: 28, bottom: 54, containLabel: true };
-    const axisLabelStyle = { color: subTextColor, fontSize: isClearMode ? 12 : 11, fontFamily: 'Plus Jakarta Sans, sans-serif' };
+    const axisLabelStyle = { color: subTextColor, fontSize, fontFamily };
     const axisLineStyle = { lineStyle: { color: gridBorderColor } };
     const splitLineStyle = {
         lineStyle: {
@@ -192,6 +210,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     ],
                 },
             },
+            label: resolveLabel({ show: false }),
             emphasis: {
                 focus: 'series',
                 scale: true,
@@ -477,7 +496,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         name: d.name,
                         value: d[measures[0]] || 0,
                     })),
-                    label: { color: subTextColor, fontSize: 10 },
+                    label: resolveLabel({ color: subTextColor, fontSize: Math.max(10, fontSize - 1) }),
                     itemStyle: { borderRadius: 4, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                     emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.15)' } },
                 }],
@@ -495,10 +514,10 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         name: d.name,
                         value: d[measures[0]] || 0,
                     })),
-                    label: { show: false },
+                    label: resolveLabel({ show: false }),
                     itemStyle: { borderRadius: 6, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 3 },
                     emphasis: {
-                        label: { show: true, fontSize: 13, fontWeight: 'bold', color: textColor },
+                        label: resolveLabel({ show: true, fontSize: Math.max(12, fontSize + 1), fontWeight: 'bold', color: textColor }),
                         itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.15)' },
                     },
                 }],
@@ -517,7 +536,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         name: d.name,
                         value: d[measures[0]] || 0,
                     })),
-                    label: { color: subTextColor, fontSize: 10 },
+                    label: resolveLabel({ color: subTextColor, fontSize: Math.max(10, fontSize - 1) }),
                     itemStyle: { borderRadius: 6, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                 }],
             };
@@ -537,7 +556,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         })) : undefined,
                     })),
                     radius: ['15%', '80%'],
-                    label: { fontSize: 9, color: textColor },
+                    label: resolveLabel({ fontSize: Math.max(9, fontSize - 2), color: textColor }),
                     itemStyle: { borderRadius: 4, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                 }],
             };
@@ -608,7 +627,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 series: [{
                     type: 'heatmap',
                     data: heatData,
-                    label: { show: true, fontSize: 10, color: textColor },
+                    label: resolveLabel({ show: true, fontSize: Math.max(10, fontSize - 1), color: textColor }),
                     itemStyle: { borderRadius: 2, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                 }],
             };
@@ -625,6 +644,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         value: d[measures[0]] || 0,
                     })),
                     label: { fontSize: 11, fontWeight: 'bold', color: '#fff' },
+                    upperLabel: resolveLabel({ show: false }),
                     breadcrumb: { show: false },
                     itemStyle: { borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2, borderRadius: 4 },
                     levels: [{

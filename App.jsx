@@ -187,6 +187,7 @@ const App = () => {
     const [companies, setCompanies] = useState([]);
     const [activeCompanyId, setActiveCompanyId] = useState('__all__');
     const [globalFilters, setGlobalFilters] = useState([]);
+    const [drillThroughContext, setDrillThroughContext] = useState(null);
     const [profilerDatasetId, setProfilerDatasetId] = useState(null);
     const [authToken, setAuthToken] = useState(() => localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) || '');
     const [authUser, setAuthUser] = useState(() => readStorageJson(STORAGE_KEY_AUTH_USER, null));
@@ -811,7 +812,14 @@ const App = () => {
             measures: [measure],
             aggregation: 'SUM',
             layout: { x: 0, y: Infinity, w: 6, h: 8 },
-            filters: []
+            filters: [],
+            style: {
+                fontFamily: 'Plus Jakarta Sans, sans-serif',
+                fontSize: 11,
+                labelMode: 'auto',
+                tooltipEnabled: true,
+                tooltipDecimals: 2,
+            },
         };
         setCharts([...charts, newChart]);
         setActiveChartId(newChart.id);
@@ -862,6 +870,64 @@ const App = () => {
     };
     const handleClearGlobalFilters = () => {
         setGlobalFilters([]);
+    };
+
+    const handleClearInteractionFilters = () => {
+        setGlobalFilters(prev => prev.filter(f => f?.source !== 'interaction'));
+    };
+
+    const applyFiltersToRows = (rows = [], filters = []) => {
+        if (!Array.isArray(filters) || filters.length === 0) return rows;
+        return rows.filter(row => filters.every((gf) => {
+            if (!gf?.column || !(gf.column in row)) return true;
+            const val = row[gf.column];
+            if (gf.type === 'include' && Array.isArray(gf.values) && gf.values.length > 0) {
+                return gf.values.includes(String(val));
+            }
+            if (gf.type === 'range') {
+                const num = Number(val);
+                if (Number.isNaN(num)) return false;
+                return num >= Number(gf.rangeMin) && num <= Number(gf.rangeMax);
+            }
+            return true;
+        }));
+    };
+
+    const handleVisualizationDataPoint = ({ chartId, chartTitle, datasetId, dimension, value }) => {
+        if (!chartId || !datasetId || !dimension || value === undefined || value === null) return;
+
+        const interactionFilterId = `interaction-${chartId}`;
+        const nextFilter = {
+            id: interactionFilterId,
+            source: 'interaction',
+            sourceChartId: chartId,
+            column: dimension,
+            columnType: 'string',
+            type: 'include',
+            values: [String(value)],
+            allValues: [String(value)],
+        };
+
+        setGlobalFilters(prev => {
+            const withoutSameSource = prev.filter(f => f.id !== interactionFilterId);
+            return [...withoutSameSource, nextFilter];
+        });
+
+        const sourceDataset = datasets.find(d => d.id === datasetId);
+        const sourceRows = Array.isArray(sourceDataset?.data) ? sourceDataset.data : [];
+        const scopedRows = sourceRows.filter(row => String(row?.[dimension]) === String(value));
+        const nonInteractionGlobalFilters = globalFilters.filter(f => f?.source !== 'interaction');
+        const filteredRows = applyFiltersToRows(scopedRows, nonInteractionGlobalFilters);
+
+        setDrillThroughContext({
+            chartId,
+            chartTitle: chartTitle || 'Visual',
+            datasetName: sourceDataset?.name || 'Dataset',
+            dimension,
+            value: String(value),
+            rows: filteredRows.slice(0, 200),
+            totalRows: filteredRows.length,
+        });
     };
 
     // Chart group ID for cross-chart brushing (per page)
@@ -1079,6 +1145,7 @@ const App = () => {
                                 onUpdateFilter={handleUpdateGlobalFilter}
                                 onRemoveFilter={handleRemoveGlobalFilter}
                                 onClearAll={handleClearGlobalFilters}
+                                onClearInteractions={handleClearInteractionFilters}
                             />
 
                             <div className="flex-1 flex overflow-hidden p-6 gap-6">
@@ -1092,7 +1159,7 @@ const App = () => {
                                                     data-export-title={config.title || 'Visual'}
                                                     className={`h-full w-full relative group transition-all ${activeChartId === config.id && isEditMode ? 'ring-2 ring-gray-500 dark:ring-gray-400 rounded-lg z-10' : ''}`}
                                                 >
-                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} chartClarityMode={chartClarityMode} chartPaletteMode={chartPaletteMode} />
+                                                    <Visualization config={config} dataset={datasets.find(d => d.id === config.datasetId)} isActive={activeChartId === config.id && isEditMode} isEditMode={isEditMode} globalFilters={globalFilters} groupId={chartGroupId} onChartInstanceChange={handleChartInstanceChange} chartClarityMode={chartClarityMode} chartPaletteMode={chartPaletteMode} onDataPointClick={handleVisualizationDataPoint} />
                                                     {activeChartId === config.id && isEditMode && (
                                                         <button onClick={(e) => { e.stopPropagation(); handleRemoveChart(config.id); }} className={`absolute -top-2.5 -right-2.5 text-rose-500 p-1.5 rounded-full shadow-md border hover:bg-rose-500 hover:text-white transition-all z-20 ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
                                                             <Trash2 size={14} />
@@ -1236,6 +1303,61 @@ const App = () => {
                                 <option value="vibrant">Vibrant</option>
                                 <option value="neutral">Neutral</option>
                             </select>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {drillThroughContext && (
+                <div
+                    className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                    onClick={() => setDrillThroughContext(null)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-[92vw] max-w-5xl max-h-[85vh] rounded-2xl border shadow-2xl overflow-hidden ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-900'}`}
+                    >
+                        <div className={`px-5 py-4 border-b flex items-start justify-between ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
+                            <div>
+                                <p className={`text-[11px] uppercase tracking-widest font-bold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Drill Through</p>
+                                <h3 className="text-lg font-bold">{drillThroughContext.chartTitle}</h3>
+                                <p className={`text-sm mt-1 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
+                                    {`${drillThroughContext.dimension} = ${drillThroughContext.value} • ${drillThroughContext.totalRows.toLocaleString()} rows`}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setDrillThroughContext(null)}
+                                className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="p-5 overflow-auto max-h-[65vh]">
+                            {drillThroughContext.rows.length === 0 ? (
+                                <p className={theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>No rows available for this drill-through selection.</p>
+                            ) : (
+                                <table className="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr className={`border-b ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
+                                            {Object.keys(drillThroughContext.rows[0]).map((col) => (
+                                                <th key={col} className={`py-2 px-3 font-bold sticky top-0 ${theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-white text-gray-600'}`}>
+                                                    {col}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {drillThroughContext.rows.map((row, idx) => (
+                                            <tr key={idx} className={`border-b ${theme === 'dark' ? 'border-gray-700/60' : 'border-gray-100'}`}>
+                                                {Object.entries(row).map(([col, val]) => (
+                                                    <td key={`${idx}-${col}`} className="py-2 px-3 whitespace-nowrap">{String(val ?? '')}</td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </div>
                 </div>

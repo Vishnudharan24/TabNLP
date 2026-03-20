@@ -3,7 +3,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Filter, Plus, X, ChevronDown, Search, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
-const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter, onRemoveFilter, onClearAll }) => {
+const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter, onRemoveFilter, onClearAll, onClearInteractions }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
     const [showAddMenu, setShowAddMenu] = useState(false);
@@ -84,6 +84,8 @@ const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter,
         if (showAddMenu) setShowAddMenu(false);
     };
 
+    const interactionFiltersCount = globalFilters.filter(f => f?.source === 'interaction').length;
+
     if (datasets.length === 0) return null;
 
     return (
@@ -144,10 +146,18 @@ const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter,
                     </div>
 
                     {globalFilters.length > 0 && (
-                        <button onClick={onClearAll}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors ${isDark ? 'text-gray-500 hover:text-rose-400' : 'text-gray-400 hover:text-rose-500'}`}>
-                            <Trash2 size={10} /> Clear All
-                        </button>
+                        <div className="flex items-center gap-1">
+                            {interactionFiltersCount > 0 && onClearInteractions && (
+                                <button onClick={onClearInteractions}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}>
+                                    <Trash2 size={10} /> Clear Interactions ({interactionFiltersCount})
+                                </button>
+                            )}
+                            <button onClick={onClearAll}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors ${isDark ? 'text-gray-500 hover:text-rose-400' : 'text-gray-400 hover:text-rose-500'}`}>
+                                <Trash2 size={10} /> Clear All
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>
