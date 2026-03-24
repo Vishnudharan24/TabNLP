@@ -962,7 +962,11 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     orient: 'horizontal',
                     left: 'center',
                     bottom: 0,
-                    inRange: { color: isDark ? ['#1e293b', '#3b82f6', '#ef4444'] : ['#f0f9ff', '#3b82f6', '#ef4444'] },
+                    inRange: {
+                        color: (Array.isArray(colors) && colors.length >= 3)
+                            ? [colors[0], colors[Math.floor(colors.length / 2)], colors[colors.length - 1]]
+                            : (isDark ? ['#1e293b', '#3b82f6', '#ef4444'] : ['#f0f9ff', '#3b82f6', '#ef4444']),
+                    },
                     textStyle: { color: subTextColor, fontSize: 10 },
                 },
                 series: [{

@@ -82,18 +82,74 @@ const ALL_CHART_TYPES = [
     ChartType.TABLE,
 ];
 
-const FIELD_ROLE_OPTIONS = [
-    { value: FieldRoles.X, label: 'X' },
-    { value: FieldRoles.Y, label: 'Y' },
-    { value: FieldRoles.LEGEND, label: 'Legend' },
-    { value: FieldRoles.SIZE, label: 'Size' },
-    { value: FieldRoles.COLOR, label: 'Color' },
-    { value: FieldRoles.HIERARCHY, label: 'Hierarchy' },
-    { value: FieldRoles.TIME, label: 'Time' },
-    { value: FieldRoles.VALUE, label: 'Value' },
+const AGG_OPTIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+
+const ROLE_SECTION_DEFS = [
+    { key: 'hierarchy', title: 'Hierarchy', icon: Layers, roles: [FieldRoles.HIERARCHY], emoji: '🧩', multi: true },
+    { key: 'values', title: 'Values', icon: BarChart, roles: [FieldRoles.VALUE, FieldRoles.Y], emoji: '📊', multi: true },
+    { key: 'axis', title: 'Axis', icon: Columns3, roles: [FieldRoles.TIME, FieldRoles.X], emoji: '🧭', multi: false },
+    { key: 'legend', title: 'Legend / Color', icon: PieIcon, roles: [FieldRoles.LEGEND, FieldRoles.COLOR], emoji: '🎨', multi: false },
+    { key: 'size', title: 'Size', icon: Maximize2, roles: [FieldRoles.SIZE], emoji: '📐', multi: false },
 ];
 
-const AGG_OPTIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+const getFieldTypeMeta = (type) => {
+    if (type === 'number') {
+        return {
+            icon: 'Σ',
+            badge: 'NUM',
+            chipClass: 'bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-200',
+        };
+    }
+    if (type === 'date') {
+        return {
+            icon: '⏱',
+            badge: 'DATE',
+            chipClass: 'bg-amber-100 dark:bg-amber-800 text-amber-700 dark:text-amber-200',
+        };
+    }
+    return {
+        icon: 'Aa',
+        badge: 'CAT',
+        chipClass: 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200',
+    };
+};
+
+const FieldChip = ({ field, role, aggregation, fieldType, onRemove, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) => {
+    const meta = getFieldTypeMeta(fieldType);
+    const showAgg = ['y', 'value', 'x', 'size'].includes(role) && aggregation;
+
+    return (
+        <div className="group flex items-center gap-1.5 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80">
+            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${meta.chipClass}`}>{meta.icon}</span>
+            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[130px]" title={field}>{field}</span>
+            <span className="text-[9px] font-bold uppercase text-gray-400 dark:text-gray-500">{role}</span>
+            {showAgg && <span className="text-[9px] font-semibold text-violet-500">({aggregation})</span>}
+            {(canMoveUp || canMoveDown) && (
+                <>
+                    <button onClick={onMoveUp} disabled={!canMoveUp} className="text-[10px] px-1 text-gray-400 disabled:opacity-30 hover:text-gray-600 dark:hover:text-gray-300">↑</button>
+                    <button onClick={onMoveDown} disabled={!canMoveDown} className="text-[10px] px-1 text-gray-400 disabled:opacity-30 hover:text-gray-600 dark:hover:text-gray-300">↓</button>
+                </>
+            )}
+            <button onClick={onRemove} className="ml-auto text-gray-400 hover:text-rose-500 transition-colors">×</button>
+        </div>
+    );
+};
+
+const RoleSection = ({ title, emoji, icon: Icon, children, onAdd }) => (
+    <div className="space-y-2 p-3 rounded-xl bg-gray-50/70 dark:bg-gray-800/40 border border-gray-200/70 dark:border-gray-700/70">
+        <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+                <span className="text-[11px]">{emoji}</span>
+                <Icon size={12} className="text-gray-500 dark:text-gray-400" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">{title}</p>
+            </div>
+            <button onClick={onAdd} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700">
+                <Plus size={10} /> Add Field
+            </button>
+        </div>
+        <div className="flex flex-col gap-1.5">{children}</div>
+    </div>
+);
 
 const OPERATORS_MAP = {
     string: [
@@ -128,6 +184,10 @@ const COLOR_PRESETS = {
     neutral: ['#334155', '#475569', '#64748B', '#94A3B8', '#1F2937', '#0F172A'],
 };
 
+const SIDEBAR_WIDTH_MIN = 320;
+const SIDEBAR_WIDTH_MAX = 560;
+const SIDEBAR_WIDTH_STEP = 40;
+
 const DataPanel = ({
     datasets,
     selectedDatasetId,
@@ -140,8 +200,13 @@ const DataPanel = ({
     onCancelNewChart,
 }) => {
     const [activePane, setActivePane] = useState('data');
+    const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH_MIN);
     const [fieldSearch, setFieldSearch] = useState('');
+    const [pickerRole, setPickerRole] = useState(null);
+    const [pickerSearch, setPickerSearch] = useState('');
+    const [pickerCursor, setPickerCursor] = useState(0);
     const [showAllCharts, setShowAllCharts] = useState(false);
+    const [showAvailableFields, setShowAvailableFields] = useState(false);
     const [newChartName, setNewChartName] = useState('');
 
     const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
@@ -244,72 +309,156 @@ const DataPanel = ({
 
         const currentAssignments = [...effectiveAssignments];
 
-        if (col.type === 'string' || col.type === 'date') {
-            const filtered = currentAssignments.filter(a => a.role !== FieldRoles.X && a.role !== FieldRoles.TIME && a.role !== FieldRoles.LEGEND);
-            filtered.unshift({ field: col.name, role: col.type === 'date' ? FieldRoles.TIME : FieldRoles.X });
-            syncConfigFromAssignments(filtered);
-        } else if (col.type === 'number') {
-            const idx = currentAssignments.findIndex(a => (a.role === FieldRoles.Y || a.role === FieldRoles.VALUE) && a.field === col.name);
-            if (idx >= 0) {
-                const next = currentAssignments.filter((a, i) => i !== idx);
-                syncConfigFromAssignments(next);
-            } else {
-                const next = [...currentAssignments, { field: col.name, role: FieldRoles.Y, aggregation: activeChartConfig.aggregation || 'SUM' }];
-                syncConfigFromAssignments(next);
-            }
+        const hasRole = (role) => currentAssignments.some(a => a.role === role);
+        const hasField = (field) => currentAssignments.some(a => a.field === field);
+        if (hasField(col.name)) return;
+
+        const type = activeChartConfig.type;
+
+        let nextRole = FieldRoles.X;
+        if (col.type === 'number') {
+            nextRole = hasRole(FieldRoles.VALUE) || hasRole(FieldRoles.Y) ? FieldRoles.Y : FieldRoles.VALUE;
+        } else if (col.type === 'date') {
+            nextRole = hasRole(FieldRoles.TIME) ? FieldRoles.HIERARCHY : FieldRoles.TIME;
+        } else if (type === ChartType.SUNBURST || type === ChartType.TREEMAP) {
+            nextRole = FieldRoles.HIERARCHY;
+        } else if (!hasRole(FieldRoles.X) && !hasRole(FieldRoles.TIME)) {
+            nextRole = FieldRoles.X;
+        } else {
+            nextRole = hasRole(FieldRoles.LEGEND) ? FieldRoles.HIERARCHY : FieldRoles.LEGEND;
         }
+
+        const next = [...currentAssignments, {
+            field: col.name,
+            role: nextRole,
+            aggregation: ['y', 'value', 'x', 'size'].includes(nextRole) ? (activeChartConfig.aggregation || 'SUM') : undefined,
+        }];
+        syncConfigFromAssignments(next);
     };
 
     const chartStyle = activeChartConfig?.style || {};
+    const resolvedMultiColors = useMemo(() => {
+        if (Array.isArray(chartStyle.multiColors) && chartStyle.multiColors.length > 0) {
+            return chartStyle.multiColors;
+        }
+        return [...COLOR_PRESETS.vibrant];
+    }, [chartStyle.multiColors]);
 
     const handleFieldDragStart = (event, col) => {
         event.dataTransfer.setData('text/plain', JSON.stringify(col));
         event.dataTransfer.effectAllowed = 'move';
     };
 
-    const handleDropDimension = (event) => {
-        event.preventDefault();
-        if (!activeChartConfig) return;
-        try {
-            const payload = JSON.parse(event.dataTransfer.getData('text/plain'));
-            if (payload?.type === 'string' || payload?.type === 'date') {
-                const next = effectiveAssignments.filter(a => a.role !== FieldRoles.X && a.role !== FieldRoles.TIME && a.role !== FieldRoles.LEGEND);
-                next.unshift({ field: payload.name, role: payload.type === 'date' ? FieldRoles.TIME : FieldRoles.X });
-                syncConfigFromAssignments(next);
-            }
-        } catch {
-            // ignore invalid drag payload
-        }
-    };
-
-    const handleDropMeasure = (event) => {
-        event.preventDefault();
-        if (!activeChartConfig) return;
-        try {
-            const payload = JSON.parse(event.dataTransfer.getData('text/plain'));
-            if (payload?.type !== 'number') return;
-            const exists = effectiveAssignments.some(a => (a.role === FieldRoles.Y || a.role === FieldRoles.VALUE) && a.field === payload.name);
-            if (!exists) {
-                const next = [...effectiveAssignments, { field: payload.name, role: FieldRoles.Y, aggregation: activeChartConfig.aggregation || 'SUM' }];
-                syncConfigFromAssignments(next);
-            }
-        } catch {
-            // ignore invalid drag payload
-        }
-    };
 
     const roleDerivedConfig = useMemo(() => {
         if (!activeChartConfig) return null;
         return configFromAssignments(activeChartConfig.type, effectiveAssignments);
     }, [activeChartConfig, effectiveAssignments]);
 
-    const preventDropDefault = (event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
+    const fieldsByType = useMemo(() => {
+        const cols = filteredColumns || [];
+        return {
+            categorical: cols.filter(c => c.type !== 'number' && c.type !== 'date'),
+            date: cols.filter(c => c.type === 'date'),
+            numeric: cols.filter(c => c.type === 'number'),
+        };
+    }, [filteredColumns]);
+
+    const assignmentWarnings = useMemo(() => {
+        if (!selectedDataset || !activeChartConfig) return [];
+        const simulated = assignRoles(activeChartConfig.type, selectedDataset.columns, selectedDataset.data, {
+            dimension: roleDerivedConfig?.dimension,
+            measures: roleDerivedConfig?.measures,
+        });
+        const warnings = Array.isArray(simulated?.warnings) ? simulated.warnings : [];
+
+        const hierarchyCount = effectiveAssignments.filter(a => a.role === FieldRoles.HIERARCHY).length;
+        if (hierarchyCount > 4) warnings.push('Too many hierarchy levels. Keep to 3-4 for readability.');
+
+        return Array.from(new Set(warnings));
+    }, [selectedDataset, activeChartConfig, roleDerivedConfig?.dimension, roleDerivedConfig?.measures, effectiveAssignments]);
+
+    const openFieldPicker = (role) => {
+        setPickerRole(role);
+        setPickerSearch('');
+        setPickerCursor(0);
+    };
+
+    const closeFieldPicker = () => {
+        setPickerRole(null);
+        setPickerSearch('');
+        setPickerCursor(0);
+    };
+
+    const candidateFieldsForRole = useMemo(() => {
+        if (!pickerRole || !selectedDataset) return [];
+        const used = new Set(effectiveAssignments.map(a => a.field));
+        const includeCount = ['y', 'value', 'x', 'size'].includes(pickerRole);
+
+        const allowed = selectedDataset.columns.filter((col) => {
+            if (pickerRole === FieldRoles.HIERARCHY || pickerRole === FieldRoles.LEGEND || pickerRole === FieldRoles.COLOR || pickerRole === FieldRoles.X) {
+                return col.type !== 'number';
+            }
+            if (pickerRole === FieldRoles.TIME) return col.type === 'date';
+            if (pickerRole === FieldRoles.Y || pickerRole === FieldRoles.VALUE || pickerRole === FieldRoles.SIZE) return col.type === 'number';
+            return true;
+        });
+
+        return allowed
+            .filter(col => !used.has(col.name))
+            .filter(col => col.name.toLowerCase().includes(pickerSearch.toLowerCase()))
+            .concat(includeCount && !used.has('__count__') ? [{ name: '__count__', type: 'number' }] : []);
+    }, [pickerRole, selectedDataset, effectiveAssignments, pickerSearch]);
+
+    const handlePickFieldForRole = (fieldName, role = pickerRole) => {
+        if (!role || !fieldName) return;
+        if (effectiveAssignments.some(a => a.field === fieldName && a.role === role)) return;
+
+        const next = [...effectiveAssignments, {
+            field: fieldName,
+            role,
+            aggregation: ['y', 'value', 'x', 'size'].includes(role) ? (activeChartConfig?.aggregation || 'SUM') : undefined,
+        }];
+        syncConfigFromAssignments(next);
+        closeFieldPicker();
+    };
+
+    const updateAssignment = (index, updates) => {
+        const next = [...effectiveAssignments];
+        next[index] = { ...next[index], ...updates };
+        syncConfigFromAssignments(next);
+    };
+
+    const removeAssignment = (index) => {
+        const next = effectiveAssignments.filter((_, i) => i !== index);
+        syncConfigFromAssignments(next);
+    };
+
+    const moveHierarchyAssignment = (index, direction) => {
+        const hierarchyIndexes = effectiveAssignments
+            .map((a, i) => ({ ...a, idx: i }))
+            .filter(a => a.role === FieldRoles.HIERARCHY)
+            .map(a => a.idx);
+        const localPos = hierarchyIndexes.indexOf(index);
+        if (localPos < 0) return;
+        const targetPos = localPos + direction;
+        if (targetPos < 0 || targetPos >= hierarchyIndexes.length) return;
+
+        const from = hierarchyIndexes[localPos];
+        const to = hierarchyIndexes[targetPos];
+        const next = [...effectiveAssignments];
+        const temp = next[from];
+        next[from] = next[to];
+        next[to] = temp;
+        syncConfigFromAssignments(next);
+    };
+
+    const increaseSidebarWidth = () => {
+        setSidebarWidth((prev) => Math.min(prev + SIDEBAR_WIDTH_STEP, SIDEBAR_WIDTH_MAX));
     };
 
     return (
-        <aside className="side-panel-normalized w-80 shrink-0 h-full flex flex-col gap-6 overflow-hidden relative">
+        <aside className="side-panel-normalized shrink-0 h-full flex flex-col gap-6 overflow-hidden relative" style={{ width: `${sidebarWidth}px` }}>
             {showNewChartPrompt && (
                 <div className="absolute inset-0 z-50 flex items-start justify-center pt-24 bg-black/30 dark:bg-black/50 backdrop-blur-sm rounded-2xl">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 w-64 space-y-4 animate-in">
@@ -347,6 +496,14 @@ const DataPanel = ({
                     </button>
                     <button onClick={() => setActivePane('format')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[11px] font-bold transition-all ${activePane === 'format' ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 shadow-lg' : 'text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
                         <Settings2 size={14} /> Format
+                    </button>
+                    <button
+                        onClick={increaseSidebarWidth}
+                        disabled={sidebarWidth >= SIDEBAR_WIDTH_MAX}
+                        title="Increase sidebar width"
+                        className="px-2 py-3 rounded-xl text-[10px] font-bold border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        Wider
                     </button>
                 </div>
 
@@ -501,170 +658,201 @@ const DataPanel = ({
                                 </div>
                             </div>
 
-                            {/* Field Picker (click-to-assign) */}
+                            {/* Modern Field Assignment Panel */}
                             <div className="space-y-4">
                                 <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Fields</h4>
-                                {activeChartConfig && (
-                                    <div className="space-y-2 mb-3">
-                                        <div
-                                            onDragOver={preventDropDefault}
-                                            onDrop={handleDropDimension}
-                                            className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800"
-                                        >
-                                            <p className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase mb-1">Dimension (category)</p>
-                                            <p className="text-[11px] font-bold text-blue-800 dark:text-blue-200">{roleDerivedConfig?.dimension || activeChartConfig.dimension || '—'}</p>
-                                        </div>
-                                        <div
-                                            onDragOver={preventDropDefault}
-                                            onDrop={handleDropMeasure}
-                                            className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800"
-                                        >
-                                            <p className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-1">Measures (values)</p>
-                                            {roleDerivedConfig?.measures?.length ? (
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {roleDerivedConfig.measures.map((measure) => (
-                                                        <span key={measure} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-200">
-                                                            {measure}
-                                                            <button
-                                                                onClick={() => {
-                                                                    const next = effectiveAssignments.filter(a => a.field !== measure);
-                                                                    syncConfigFromAssignments(next);
-                                                                }}
-                                                                className="text-emerald-700/70 dark:text-emerald-200/80 hover:text-rose-500"
-                                                            >
-                                                                <X size={10} />
-                                                            </button>
-                                                        </span>
-                                                    ))}
+
+                                <div className="space-y-3">
+                                    <button
+                                        onClick={() => setShowAvailableFields((prev) => !prev)}
+                                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all"
+                                    >
+                                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-600 dark:text-gray-300">Available Fields</span>
+                                        {showAvailableFields ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                                    </button>
+
+                                    {showAvailableFields && (
+                                        <>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Search Fields</label>
+                                                <div className="relative">
+                                                    <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                                                    <input
+                                                        type="text"
+                                                        value={fieldSearch}
+                                                        onChange={(e) => setFieldSearch(e.target.value)}
+                                                        placeholder="Search fields..."
+                                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl py-2 pl-8 pr-8 text-[11px] font-medium text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                                                    />
+                                                    {fieldSearch && (
+                                                        <button onClick={() => setFieldSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                                                            <X size={12} />
+                                                        </button>
+                                                    )}
                                                 </div>
-                                            ) : (
-                                                <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200">—</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {activeChartConfig && (
-                                    <div className="space-y-2 mb-2">
-                                        <div className="flex items-center justify-between">
-                                            <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Field Roles</p>
-                                            <button
-                                                onClick={() => {
-                                                    const next = [...effectiveAssignments, { field: selectedDataset?.columns?.[0]?.name || '', role: FieldRoles.X }];
-                                                    syncConfigFromAssignments(next);
-                                                }}
-                                                className="p-1 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                                title="Add assignment"
-                                            >
-                                                <Plus size={12} />
-                                            </button>
-                                        </div>
-
-                                        <div className="space-y-1.5">
-                                            {effectiveAssignments.map((assignment, idx) => (
-                                                <div key={`${assignment.field}-${assignment.role}-${idx}`} className="grid grid-cols-12 gap-1.5 items-center">
-                                                    <select
-                                                        value={assignment.field}
-                                                        onChange={(e) => {
-                                                            const next = [...effectiveAssignments];
-                                                            next[idx] = { ...next[idx], field: e.target.value };
-                                                            syncConfigFromAssignments(next);
-                                                        }}
-                                                        className="col-span-5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-medium text-gray-700 dark:text-gray-200"
-                                                    >
-                                                        {(selectedDataset?.columns || []).map((c) => (
-                                                            <option key={c.name} value={c.name}>{c.name}</option>
-                                                        ))}
-                                                        {assignment.field === '__count__' && <option value="__count__">__count__</option>}
-                                                    </select>
-                                                    <select
-                                                        value={assignment.role}
-                                                        onChange={(e) => {
-                                                            const next = [...effectiveAssignments];
-                                                            next[idx] = { ...next[idx], role: e.target.value };
-                                                            syncConfigFromAssignments(next);
-                                                        }}
-                                                        className="col-span-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-medium text-gray-700 dark:text-gray-200"
-                                                    >
-                                                        {FIELD_ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                                                    </select>
-                                                    <select
-                                                        value={assignment.aggregation || 'SUM'}
-                                                        onChange={(e) => {
-                                                            const next = [...effectiveAssignments];
-                                                            next[idx] = { ...next[idx], aggregation: e.target.value };
-                                                            syncConfigFromAssignments(next);
-                                                        }}
-                                                        className="col-span-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-medium text-gray-700 dark:text-gray-200"
-                                                    >
-                                                        {AGG_OPTIONS.map((agg) => <option key={agg} value={agg}>{agg}</option>)}
-                                                    </select>
-                                                    <button
-                                                        onClick={() => {
-                                                            const next = effectiveAssignments.filter((_, i) => i !== idx);
-                                                            syncConfigFromAssignments(next);
-                                                        }}
-                                                        className="col-span-1 p-1 rounded text-gray-500 dark:text-gray-400 hover:text-rose-500"
-                                                        title="Remove"
-                                                    >
-                                                        <X size={11} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Search Fields</label>
-                                    <div className="relative">
-                                        <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                                        <input
-                                            type="text"
-                                            value={fieldSearch}
-                                            onChange={(e) => setFieldSearch(e.target.value)}
-                                            placeholder="Search columns..."
-                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 pl-8 pr-8 text-[11px] font-medium text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-                                        />
-                                        {fieldSearch && (
-                                            <button
-                                                onClick={() => setFieldSearch('')}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                                                title="Clear"
-                                            >
-                                                <X size={12} />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <p className="text-[9px] text-gray-400 dark:text-gray-500 italic">Click or drag text/date fields into Dimension and number fields into Measures.</p>
-                                <div className="space-y-1">
-                                    {filteredColumns.map(col => {
-                                        const isDimension = roleDerivedConfig?.dimension === col.name;
-                                        const isMeasure = roleDerivedConfig?.measures?.includes(col.name);
-                                        const isSelected = isDimension || isMeasure;
-                                        return (
-                                            <div
-                                                key={col.name}
-                                                draggable
-                                                onDragStart={(e) => handleFieldDragStart(e, col)}
-                                                onClick={() => handleFieldClick(col)}
-                                                className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-all ${isSelected ? (isDimension ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-200 dark:ring-blue-700' : 'bg-emerald-50 dark:bg-emerald-900/30 ring-1 ring-emerald-200 dark:ring-emerald-700') : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
-                                            >
-                                                <span className={`text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-lg shadow-sm ${col.type === 'number' ? 'bg-emerald-100 dark:bg-emerald-800 text-emerald-600 dark:text-emerald-300' : 'bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-300'}`}>{col.type === 'number' ? 'Σ' : 'Aa'}</span>
-                                                <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300 truncate">{col.name}</span>
-                                                {isDimension && <span className="ml-auto text-[8px] font-bold text-blue-500 uppercase">dim</span>}
-                                                {isMeasure && <span className="ml-auto text-[8px] font-bold text-emerald-500 uppercase">val</span>}
                                             </div>
-                                        );
-                                    })}
-                                    {filteredColumns.length === 0 && (
-                                        <div className="text-center py-4 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 text-[10px] font-semibold text-gray-400 dark:text-gray-500">
-                                            No fields match your search.
-                                        </div>
+
+                                            <div className="space-y-2">
+                                                {[
+                                                    { title: 'Categorical', key: 'categorical' },
+                                                    { title: 'Date', key: 'date' },
+                                                    { title: 'Numeric', key: 'numeric' },
+                                                ].map((group) => (
+                                                    <div key={group.key} className="space-y-1">
+                                                        <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">{group.title}</p>
+                                                        {(fieldsByType[group.key] || []).length === 0 ? (
+                                                            <div className="text-[10px] text-gray-400 dark:text-gray-500 italic px-2 py-1">No fields</div>
+                                                        ) : (
+                                                            <div className="space-y-1">
+                                                                {fieldsByType[group.key].map((col) => {
+                                                                    const selected = effectiveAssignments.some(a => a.field === col.name);
+                                                                    const meta = getFieldTypeMeta(col.type);
+                                                                    return (
+                                                                        <button
+                                                                            key={col.name}
+                                                                            draggable
+                                                                            onDragStart={(e) => handleFieldDragStart(e, col)}
+                                                                            onClick={() => handleFieldClick(col)}
+                                                                            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selected ? 'bg-gray-100 dark:bg-gray-700 ring-1 ring-gray-300 dark:ring-gray-600' : 'hover:bg-gray-50 dark:hover:bg-gray-700/60'}`}
+                                                                        >
+                                                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${meta.chipClass}`}>{meta.icon}</span>
+                                                                            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">{col.name}</span>
+                                                                            <span className="ml-auto text-[9px] font-bold text-gray-400 dark:text-gray-500">{meta.badge}</span>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </>
                                     )}
                                 </div>
+
+                                {activeChartConfig && (
+                                    <div className="space-y-3">
+                                        <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Field Roles</h4>
+
+                                        {ROLE_SECTION_DEFS.map((section) => {
+                                            const chips = effectiveAssignments
+                                                .map((a, idx) => ({ ...a, idx }))
+                                                .filter((a) => section.roles.includes(a.role));
+
+                                            return (
+                                                <RoleSection
+                                                    key={section.key}
+                                                    title={section.title}
+                                                    emoji={section.emoji}
+                                                    icon={section.icon}
+                                                    onAdd={() => openFieldPicker(section.roles[0])}
+                                                >
+                                                    {chips.length === 0 ? (
+                                                        <div className="text-[10px] text-gray-400 dark:text-gray-500 italic px-1 py-1">No fields assigned</div>
+                                                    ) : chips.map((chip, idx) => {
+                                                        const col = selectedDataset?.columns?.find(c => c.name === chip.field);
+                                                        const chipType = chip.field === '__count__' ? 'number' : (col?.type || 'string');
+                                                        return (
+                                                            <div key={`${chip.field}-${chip.role}-${chip.idx}`} className="flex items-center gap-1.5">
+                                                                <div className="flex-1">
+                                                                    <FieldChip
+                                                                        field={chip.field}
+                                                                        role={chip.role}
+                                                                        aggregation={chip.aggregation}
+                                                                        fieldType={chipType}
+                                                                        canMoveUp={chip.role === FieldRoles.HIERARCHY && idx > 0}
+                                                                        canMoveDown={chip.role === FieldRoles.HIERARCHY && idx < chips.length - 1}
+                                                                        onMoveUp={() => moveHierarchyAssignment(chip.idx, -1)}
+                                                                        onMoveDown={() => moveHierarchyAssignment(chip.idx, 1)}
+                                                                        onRemove={() => removeAssignment(chip.idx)}
+                                                                    />
+                                                                </div>
+                                                                {['y', 'value', 'x', 'size'].includes(chip.role) && (
+                                                                    <select
+                                                                        value={chip.aggregation || 'SUM'}
+                                                                        onChange={(e) => updateAssignment(chip.idx, { aggregation: e.target.value })}
+                                                                        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-semibold text-gray-700 dark:text-gray-200"
+                                                                    >
+                                                                        {AGG_OPTIONS.map(agg => <option key={agg} value={agg}>{agg}</option>)}
+                                                                    </select>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </RoleSection>
+                                            );
+                                        })}
+
+                                        {assignmentWarnings.length > 0 && (
+                                            <div className="space-y-1">
+                                                {assignmentWarnings.map((warning, idx) => (
+                                                    <div key={`${warning}-${idx}`} className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-2 py-1.5">
+                                                        {warning}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {pickerRole && (
+                                    <div className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">Add field to {pickerRole}</p>
+                                            <button onClick={closeFieldPicker} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X size={12} /></button>
+                                        </div>
+                                        <div className="relative">
+                                            <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                                            <input
+                                                autoFocus
+                                                value={pickerSearch}
+                                                onChange={(e) => {
+                                                    setPickerSearch(e.target.value);
+                                                    setPickerCursor(0);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'ArrowDown') {
+                                                        e.preventDefault();
+                                                        setPickerCursor((prev) => Math.min(prev + 1, Math.max(candidateFieldsForRole.length - 1, 0)));
+                                                    }
+                                                    if (e.key === 'ArrowUp') {
+                                                        e.preventDefault();
+                                                        setPickerCursor((prev) => Math.max(prev - 1, 0));
+                                                    }
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        const picked = candidateFieldsForRole[pickerCursor];
+                                                        if (picked?.name) handlePickFieldForRole(picked.name);
+                                                    }
+                                                    if (e.key === 'Escape') {
+                                                        e.preventDefault();
+                                                        closeFieldPicker();
+                                                    }
+                                                }}
+                                                placeholder="Search fields..."
+                                                className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg py-1.5 pl-7 pr-2 text-[11px]"
+                                            />
+                                        </div>
+                                        <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                                            {candidateFieldsForRole.length === 0 ? (
+                                                <div className="text-[10px] text-gray-400 dark:text-gray-500 p-2 italic">No matching fields</div>
+                                            ) : candidateFieldsForRole.map((field, idx) => {
+                                                const active = idx === pickerCursor;
+                                                const meta = getFieldTypeMeta(field.type);
+                                                return (
+                                                    <button
+                                                        key={`${field.name}-${idx}`}
+                                                        onClick={() => handlePickFieldForRole(field.name)}
+                                                        className={`w-full text-left px-2.5 py-1.5 text-[11px] flex items-center gap-2 ${active ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/60'}`}
+                                                    >
+                                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${meta.chipClass}`}>{meta.icon}</span>
+                                                        <span className="truncate text-gray-700 dark:text-gray-200">{field.name}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Aggregation selector */}
@@ -769,7 +957,21 @@ const DataPanel = ({
                                         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Color Mode</label>
                                         <select
                                             value={chartStyle.colorMode || 'multi'}
-                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, colorMode: e.target.value } })}
+                                            onChange={(e) => {
+                                                const nextMode = e.target.value;
+                                                if (nextMode === 'multi') {
+                                                    onUpdateConfig({
+                                                        style: {
+                                                            ...chartStyle,
+                                                            colorMode: 'multi',
+                                                            multiColors: resolvedMultiColors,
+                                                        }
+                                                    });
+                                                    return;
+                                                }
+
+                                                onUpdateConfig({ style: { ...chartStyle, colorMode: 'single' } });
+                                            }}
                                             className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
                                         >
                                             <option value="multi">Multi Color</option>
@@ -797,28 +999,56 @@ const DataPanel = ({
                                         </div>
                                     ) : (
                                         <div className="space-y-2">
-                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Multi Color Palette</label>
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                                {Object.entries(COLOR_PRESETS).map(([name, palette]) => (
-                                                    <button
-                                                        key={name}
-                                                        onClick={() => onUpdateConfig({ style: { ...chartStyle, multiColors: palette } })}
-                                                        className="px-2 py-1.5 rounded-lg text-[10px] font-bold border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
-                                                    >
-                                                        {name}
-                                                    </button>
+                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Multi Color Wheel</label>
+                                            <div className="space-y-2">
+                                                {resolvedMultiColors.map((color, idx) => (
+                                                    <div key={`multi-color-${idx}`} className="flex items-center gap-2">
+                                                        <input
+                                                            type="color"
+                                                            value={color}
+                                                            onChange={(e) => {
+                                                                const current = [...resolvedMultiColors];
+                                                                current[idx] = e.target.value;
+                                                                onUpdateConfig({ style: { ...chartStyle, multiColors: current } });
+                                                            }}
+                                                            className="h-8 w-10 p-0 border border-gray-200 dark:border-gray-600 rounded"
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={color}
+                                                            onChange={(e) => {
+                                                                const current = [...resolvedMultiColors];
+                                                                current[idx] = e.target.value;
+                                                                onUpdateConfig({ style: { ...chartStyle, multiColors: current } });
+                                                            }}
+                                                            className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-1.5 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                const current = [...resolvedMultiColors];
+                                                                if (current.length <= 1) return;
+                                                                current.splice(idx, 1);
+                                                                onUpdateConfig({ style: { ...chartStyle, multiColors: current } });
+                                                            }}
+                                                            disabled={resolvedMultiColors.length <= 1}
+                                                            className="px-2 py-1.5 rounded-lg text-[10px] font-bold border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                                                            title="Remove color"
+                                                        >
+                                                            <X size={12} />
+                                                        </button>
+                                                    </div>
                                                 ))}
+                                                <button
+                                                    onClick={() => {
+                                                        const current = [...resolvedMultiColors];
+                                                        current.push('#2563EB');
+                                                        onUpdateConfig({ style: { ...chartStyle, multiColors: current } });
+                                                    }}
+                                                    className="w-full px-2 py-1.5 rounded-lg text-[10px] font-bold border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                                >
+                                                    + Add Color
+                                                </button>
                                             </div>
-                                            <input
-                                                type="text"
-                                                value={Array.isArray(chartStyle.multiColors) ? chartStyle.multiColors.join(', ') : ''}
-                                                onChange={(e) => {
-                                                    const parsed = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                                    onUpdateConfig({ style: { ...chartStyle, multiColors: parsed } });
-                                                }}
-                                                placeholder="#2563EB, #7C3AED, #16A34A"
-                                                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-1.5 px-2 text-[10px] font-bold text-gray-700 dark:text-gray-200"
-                                            />
                                         </div>
                                     )}
                                 </div>
