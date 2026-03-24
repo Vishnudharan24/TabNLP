@@ -1,6 +1,11 @@
 
 // Chart Types - converted from TypeScript enum to plain object
 export const ChartType = {
+  // Consolidated core chart families
+  BAR: 'BAR',
+  LINE: 'LINE',
+  AREA: 'AREA',
+
   // Comparison - Bars
   BAR_CLUSTERED: 'BAR_CLUSTERED',
   BAR_STACKED: 'BAR_STACKED',
@@ -108,7 +113,12 @@ export const ChartType = {
  * @property {string} type
  * @property {string} datasetId
  * @property {string} dimension
+ * @property {string[]} [dimensions]
  * @property {string[]} measures
+ * @property {string} [valueMeasure]
+ * @property {'auto' | 'manual'} [axisMode]
+ * @property {string} [xAxisField]
+ * @property {string} [yAxisField]
  * @property {AggregationType} aggregation
  * @property {LayoutConfig} layout
  * @property {FilterConfig[]} filters

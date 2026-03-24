@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { ChartType } from './types';
 import { useTheme } from './contexts/ThemeContext';
-import { recommendCharts } from './services/chartRecommender';
+import { recommendVisualization } from './services/chartRecommender';
 import { backendApi } from './services/backendApi';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -806,11 +806,13 @@ const App = () => {
         const dataset = datasets.find(d => d.id === selectedDatasetId) || datasets[0];
         if (!dataset || !activePageId) return;
 
-        const dim = dataset.columns.find(c => c.type === 'string')?.name || '';
-        const measure = dataset.columns.find(c => c.type === 'number')?.name || '';
-
-        const recs = recommendCharts(dataset.columns, dim, [measure]);
-        const bestType = recs.length > 0 ? recs[0].type : ChartType.BAR_CLUSTERED;
+        const recommendation = recommendVisualization(dataset.columns, dataset.data, {});
+        const autoConfig = recommendation?.config || {};
+        const bestType = recommendation?.recommendedChart || ChartType.BAR;
+        const dim = autoConfig.dimension || dataset.columns.find(c => c.type === 'string' || c.type === 'date')?.name || dataset.columns[0]?.name || '';
+        const measures = Array.isArray(autoConfig.measures) && autoConfig.measures.length > 0
+            ? autoConfig.measures
+            : (dataset.columns.find(c => c.type === 'number')?.name ? [dataset.columns.find(c => c.type === 'number')?.name] : []);
 
         const newChart = {
             id: Math.random().toString(36).substr(2, 9),
@@ -819,8 +821,15 @@ const App = () => {
             title: name.trim() || 'New Visual',
             type: bestType,
             dimension: dim,
-            measures: [measure],
-            aggregation: 'SUM',
+            measures,
+            axisMode: 'auto',
+            xAxisField: autoConfig.xAxis || '',
+            yAxisField: autoConfig.yAxis || '',
+            aggregation: autoConfig.aggregation || 'SUM',
+            legendField: autoConfig.legend || '',
+            sizeField: autoConfig.size || '',
+            hierarchyFields: Array.isArray(autoConfig.hierarchy) ? autoConfig.hierarchy : [],
+            mode: autoConfig.mode,
             layout: { x: 0, y: Infinity, w: 6, h: 8 },
             filters: [],
             style: {

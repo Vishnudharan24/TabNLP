@@ -19,7 +19,7 @@ export const INITIAL_CHARTS = [
         id: 'viz-1',
         pageId: 'page-1',
         title: 'Comp & Tenure by Dept',
-        type: ChartType.BAR_CLUSTERED,
+        type: ChartType.BAR,
         datasetId: 'sample-employee-data',
         dimension: 'department',
         measures: ['salary', 'tenure'],

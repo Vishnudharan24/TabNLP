@@ -8,7 +8,7 @@ import {
     ScatterChart, Gauge, Radar, Columns3, AreaChart
 } from 'lucide-react';
 import { ChartType } from '../types';
-import { recommendCharts } from '../services/chartRecommender';
+import { recommendCharts, assignRoles } from '../services/chartRecommender';
 
 const CHART_ICON_MAP = {
     BAR: BarChart,
@@ -40,47 +40,20 @@ function getChartIcon(type) {
 }
 
 const CHART_DISPLAY_NAMES = {
-    BAR_CLUSTERED: 'Bar',
-    BAR_STACKED: 'Stacked',
-    BAR_PERCENT: '% Bar',
-    BAR_HORIZONTAL: 'H. Bar',
-    BAR_HORIZONTAL_STACKED: 'H. Stack',
-    BAR_HORIZONTAL_PERCENT: 'H. %',
-    BAR_WATERFALL: 'Waterfall',
-    BAR_RANGE: 'Range',
-    LINE_SMOOTH: 'Smooth',
-    LINE_STEP: 'Stepped',
-    LINE_STRAIGHT: 'Line',
-    LINE_DASHED: 'Dashed',
-    LINE_MULTI_AXIS: 'Multi Axis',
-    LINE_AREA_MIX: 'Area Mix',
-    AREA_SMOOTH: 'Area',
-    AREA_STEP: 'Step Area',
-    AREA_STACKED: 'Stk Area',
-    AREA_PERCENT: '% Area',
-    AREA_GRADIENT: 'Gradient',
-    AREA_REVERSE: 'Reverse',
+    BAR: 'Bar',
+    LINE: 'Line',
+    AREA: 'Area',
     PIE: 'Pie',
     DONUT: 'Donut',
-    PIE_SEMI: 'Half Pie',
-    DONUT_SEMI: 'Half Donut',
-    ROSE: 'Rose',
     SUNBURST: 'Sunburst',
-    RADIAL_BAR: 'Radial',
     RADAR: 'Radar',
     SCATTER: 'Scatter',
     BUBBLE: 'Bubble',
-    SCATTER_LINE: 'Sct Line',
     TREEMAP: 'Treemap',
     HEATMAP: 'Heatmap',
     COMBO_BAR_LINE: 'Combo',
-    COMBO_STACKED_LINE: 'Stk Combo',
-    COMBO_AREA_LINE: 'Area+Line',
     KPI_SINGLE: 'KPI',
-    KPI_PROGRESS: 'Progress',
-    KPI_BULLET: 'Bullet',
     TABLE: 'Table',
-    CARD_LIST: 'Cards',
     GAUGE: 'Gauge',
     SPARKLINE: 'Sparkline',
 };
@@ -89,7 +62,24 @@ function getChartName(type) {
     return CHART_DISPLAY_NAMES[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()).slice(0, 10);
 }
 
-const ALL_CHART_TYPES = Object.values(ChartType);
+const ALL_CHART_TYPES = [
+    ChartType.BAR,
+    ChartType.LINE,
+    ChartType.AREA,
+    ChartType.PIE,
+    ChartType.DONUT,
+    ChartType.SCATTER,
+    ChartType.BUBBLE,
+    ChartType.HEATMAP,
+    ChartType.TREEMAP,
+    ChartType.SUNBURST,
+    ChartType.COMBO_BAR_LINE,
+    ChartType.GAUGE,
+    ChartType.SPARKLINE,
+    ChartType.RADAR,
+    ChartType.KPI_SINGLE,
+    ChartType.TABLE,
+];
 
 const OPERATORS_MAP = {
     string: [
@@ -150,9 +140,36 @@ const DataPanel = ({
         return recommendCharts(
             selectedDataset.columns,
             activeChartConfig?.dimension,
-            activeChartConfig?.measures
+            activeChartConfig?.measures,
+            { rows: selectedDataset.data }
         );
     }, [selectedDataset, activeChartConfig?.dimension, activeChartConfig?.measures]);
+
+    const handleSelectChartType = (type) => {
+        if (!activeChartConfig || !selectedDataset) {
+            onUpdateConfig({ type });
+            return;
+        }
+
+        const auto = assignRoles(type, selectedDataset.columns, selectedDataset.data, {
+            dimension: activeChartConfig.dimension,
+            measures: activeChartConfig.measures,
+        });
+
+        onUpdateConfig({
+            type,
+            dimension: auto.dimension || activeChartConfig.dimension,
+            measures: Array.isArray(auto.measures) && auto.measures.length > 0 ? auto.measures : activeChartConfig.measures,
+            aggregation: auto.aggregation || activeChartConfig.aggregation,
+            axisMode: 'auto',
+            xAxisField: auto.xAxis || '',
+            yAxisField: auto.yAxis || '',
+            legendField: auto.legend || '',
+            sizeField: auto.size || '',
+            hierarchyFields: Array.isArray(auto.hierarchy) ? auto.hierarchy : [],
+            mode: auto.mode,
+        });
+    };
 
     const prioritizedRecommendations = useMemo(() => {
         const starred = recommendations.filter(rec => rec.score >= 85);
@@ -308,7 +325,8 @@ const DataPanel = ({
                                             return (
                                                 <button
                                                     key={rec.type}
-                                                    onClick={() => onUpdateConfig({ type: rec.type })}
+                                                    onClick={() => handleSelectChartType(rec.type)}
+                                                    title={rec.reason || getChartName(rec.type)}
                                                     className={`group/tip py-2 flex flex-col items-center justify-center gap-1 rounded-xl border transition-all relative ${activeChartConfig?.type === rec.type ? 'bg-gray-800 dark:bg-gray-200 border-gray-800 dark:border-gray-200 text-white dark:text-gray-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'}`}
                                                 >
                                                     <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-800 text-[10px] font-medium px-2 py-1 shadow-lg opacity-0 scale-90 group-hover/tip:opacity-100 group-hover/tip:scale-100 transition-all duration-150 z-50">{getChartName(rec.type)}</span>
@@ -339,7 +357,7 @@ const DataPanel = ({
                                             return (
                                                 <button
                                                     key={type}
-                                                    onClick={() => onUpdateConfig({ type })}
+                                                    onClick={() => handleSelectChartType(type)}
                                                     className={`group/tip py-2 flex flex-col items-center justify-center gap-1 rounded-xl border transition-all relative ${activeChartConfig?.type === type ? 'bg-gray-800 dark:bg-gray-200 border-gray-800 dark:border-gray-200 text-white dark:text-gray-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-400'}`}
                                                 >
                                                     <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-800 text-[10px] font-medium px-2 py-1 shadow-lg opacity-0 scale-90 group-hover/tip:opacity-100 group-hover/tip:scale-100 transition-all duration-150 z-50">{getChartName(type)}</span>

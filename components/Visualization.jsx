@@ -148,9 +148,16 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     };
 
     const processData = () => {
-        const { measures, aggregation, type } = config;
+        const { measures, aggregation } = config;
         const dimension = effectiveDimension;
-        if (!dimension || !measures || measures.length === 0) return [];
+        if (!dimension) return [];
+
+        const effectiveMeasures = Array.isArray(measures) && measures.length > 0
+            ? measures
+            : ['__count__'];
+        const effectiveAggregation = (!Array.isArray(measures) || measures.length === 0)
+            ? 'COUNT'
+            : aggregation;
 
         let filteredData = applyGlobalFilters(dataset.data);
         filteredData = applyFilters(filteredData);
@@ -161,32 +168,39 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             const dimVal = String(row[dimension] || 'Unknown');
             if (!groups[dimVal]) groups[dimVal] = {};
 
-            measures.forEach(m => {
+            effectiveMeasures.forEach(m => {
                 if (!groups[dimVal][m]) groups[dimVal][m] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
-                const val = Number(row[m]);
-                if (!isNaN(val)) {
-                    groups[dimVal][m].sum += val;
+                if (m === '__count__') {
                     groups[dimVal][m].count += 1;
-                    groups[dimVal][m].min = Math.min(groups[dimVal][m].min, val);
-                    groups[dimVal][m].max = Math.max(groups[dimVal][m].max, val);
+                    groups[dimVal][m].sum += 1;
+                    groups[dimVal][m].min = 1;
+                    groups[dimVal][m].max = 1;
+                } else {
+                    const val = Number(row[m]);
+                    if (!isNaN(val)) {
+                        groups[dimVal][m].sum += val;
+                        groups[dimVal][m].count += 1;
+                        groups[dimVal][m].min = Math.min(groups[dimVal][m].min, val);
+                        groups[dimVal][m].max = Math.max(groups[dimVal][m].max, val);
+                    }
                 }
             });
         });
 
         let result = Object.entries(groups).map(([name, statsMap]) => {
             const row = { name };
-            measures.forEach(m => {
+            effectiveMeasures.forEach(m => {
                 const s = statsMap[m] || { sum: 0, count: 0, min: 0, max: 0 };
-                if (aggregation === 'AVG') row[m] = s.count > 0 ? s.sum / s.count : 0;
-                else if (aggregation === 'COUNT') row[m] = s.count;
-                else if (aggregation === 'MIN') row[m] = s.min === Infinity ? 0 : s.min;
-                else if (aggregation === 'MAX') row[m] = s.max === -Infinity ? 0 : s.max;
+                if (effectiveAggregation === 'AVG') row[m] = s.count > 0 ? s.sum / s.count : 0;
+                else if (effectiveAggregation === 'COUNT') row[m] = s.count;
+                else if (effectiveAggregation === 'MIN') row[m] = s.min === Infinity ? 0 : s.min;
+                else if (effectiveAggregation === 'MAX') row[m] = s.max === -Infinity ? 0 : s.max;
                 else row[m] = s.sum;
             });
             return row;
         });
 
-        return result.sort((a, b) => (b[measures[0]] || 0) - (a[measures[0]] || 0)).slice(0, 15);
+        return result.sort((a, b) => (b[effectiveMeasures[0]] || 0) - (a[effectiveMeasures[0]] || 0)).slice(0, 15);
     };
 
     const chartData = processData();
@@ -310,7 +324,10 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             </div>
         );
 
-        const { type, measures } = config;
+        const { type } = config;
+        const measures = Array.isArray(config?.measures) && config.measures.length > 0
+            ? config.measures
+            : ['__count__'];
 
         // Table type — keep HTML renderer
         if (type === ChartType.TABLE) {
@@ -366,7 +383,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         let option = buildChartOption(
             type,
             chartData,
-            { ...config, dimension: effectiveDimension, style: exportStyleOverrides },
+            { ...config, dimension: effectiveDimension, measures, style: exportStyleOverrides },
             theme,
             chartClarityMode,
             chartPaletteMode

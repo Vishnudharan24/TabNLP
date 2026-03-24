@@ -1,0 +1,216 @@
+Your task is to redesign and implement a **flexible, intelligent chart recommendation and axis assignment engine**, similar to Power BI — NOT a rigid rule-based validator.
+
+---
+
+## 🎯 GOAL
+
+Replace the current strict chart rules with a **scoring-based, inference-driven system** that:
+
+1. Recommends best charts based on dataset shape
+2. Automatically assigns axes (dimension, measures, legend)
+3. Allows flexible inputs (no hard rejection)
+4. Provides graceful fallbacks
+5. Deprecates redundant or low-value chart types
+
+---
+
+## 🧠 CORE DESIGN PRINCIPLES
+
+* NEVER hard reject a chart unless impossible
+* ALWAYS try to produce a meaningful visualization
+* Use rules as **scoring heuristics**, not validation
+* Prefer fewer, high-quality charts over many redundant ones
+* System should work even with minimal input (e.g., 1 column)
+
+---
+
+## 📊 COLUMN PROFILING
+
+Each column must be classified as:
+
+* "categorical" (string, low cardinality)
+* "numeric"
+* "time" (date/datetime)
+
+Also compute:
+
+* cardinality (unique count)
+* null ratio
+
+---
+
+## 🧠 CHART SCORING ENGINE
+
+Implement a scoring function:
+
+function scoreChart(chartType, profile, selectedFields): number
+
+Use heuristics like:
+
+* If (1 categorical + 1 numeric) → Bar charts score high (85–95)
+* If (1 time + 1 numeric) → Line/Area charts score highest (90–100)
+* If (2 numeric) → Scatter (85)
+* If (3 numeric) → Bubble (90)
+* If (only numeric) → KPI / Gauge (60)
+* If (2 categorical + 1 numeric) → Heatmap (80)
+* If (hierarchical categorical) → Treemap / Sunburst (75–85)
+
+Penalize:
+
+* High-cardinality categorical on axis
+* Too many measures (>5)
+* Missing required structure
+
+Return ranked list of chart types.
+
+---
+
+## 🧩 AXIS AUTO-ASSIGNMENT ENGINE
+
+Implement:
+
+function assignRoles(chartType, columns): ChartConfig
+
+Roles:
+
+* xAxis
+* yAxis
+* legend
+* size (bubble)
+* hierarchy (treemap/sunburst)
+
+Rules:
+
+* Pick lowest-cardinality categorical for X-axis
+* Pick highest variance numeric for Y-axis
+* Use additional categorical as legend
+* For time series → always use time on X-axis
+* For scatter → pick 2 numeric columns
+* For bubble → pick 3 numeric columns
+
+Apply default aggregation:
+
+* numeric → SUM by default
+* allow AVG override later
+
+---
+
+## 🔄 FLEXIBILITY LAYER (CRITICAL)
+
+DO NOT enforce strict requirements like:
+"Bar chart requires 1C + 1N"
+
+Instead:
+
+* If partial match → still allow chart with fallback
+* Example:
+
+  * Only numeric → show KPI or histogram
+  * Only categorical → show count aggregation
+
+---
+
+## ⚠️ DEPRECATE / MERGE REDUNDANT CHARTS
+
+Refactor chart types:
+
+### Merge:
+
+* LINE_SMOOTH, LINE_STRAIGHT, LINE_STEP → single LINE (configurable style)
+* AREA_SMOOTH, AREA_STACKED, AREA_PERCENT → single AREA (mode-based)
+* BAR_CLUSTERED, BAR_STACKED, BAR_PERCENT → single BAR (mode-based)
+
+### Keep:
+
+* BAR
+* LINE
+* AREA
+* PIE
+* DONUT
+* SCATTER
+* BUBBLE
+* HEATMAP
+* TREEMAP
+* SUNBURST
+* COMBO_BAR_LINE
+* GAUGE
+* SPARKLINE
+* RADAR
+
+Remove rarely useful or redundant variants.
+
+---
+
+## 🧠 FALLBACK SYSTEM
+
+If no strong match:
+
+* 1 column numeric → KPI
+* 1 column categorical → Bar (count)
+* 2 numeric → Scatter
+* 1 time + 1 numeric → Line
+
+NEVER return empty result.
+
+---
+
+## 💬 EXPLAINABILITY (IMPORTANT)
+
+Return metadata:
+
+{
+chart: "BAR",
+score: 92,
+reason: "Detected categorical + numeric combination",
+assignments: {
+xAxis: "Department",
+yAxis: "SUM(Salary)"
+}
+}
+
+---
+
+## 🧱 OUTPUT STRUCTURE
+
+Return:
+
+{
+recommendedChart: ChartType,
+rankedCharts: ChartType[],
+config: ChartConfig,
+explanation: string
+}
+
+---
+
+## 🧪 TEST CASES
+
+Ensure system works for:
+
+1. HR dataset (categorical-heavy)
+2. Sales dataset (time + numeric)
+3. Only numeric columns
+4. Mixed 3+ numeric columns
+5. High-cardinality categorical
+
+---
+
+## ⚡ BONUS (IF POSSIBLE)
+
+* Add confidence score (0–1)
+* Add warnings (e.g., "Too many categories for bar chart")
+
+---
+
+## 🚀 EXPECTED RESULT
+
+A Power BI–like intelligent engine that:
+
+* Auto-selects best chart
+* Auto-assigns axes
+* Adapts to imperfect data
+* Minimizes user effort
+
+---
+
+Implement this and refactor existing logic accordingly.

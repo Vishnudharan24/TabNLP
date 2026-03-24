@@ -8,6 +8,20 @@ A desktop-style analytics dashboard built with React, featuring interactive visu
 - **Draggable Grid Layout** – Customizable dashboard panels via React Grid Layout
 - **Modern UI** – Clean interface with Lucide React icons
 
+## Advanced Analytics Features
+
+- **Smart Chart Recommender** – Automatically ranks and suggests chart types from your dataset profile
+- **Drag-and-Drop Builder** – Fast assignment of dimension and measure fields in chart configuration
+- **Drill-Down + Drill-Through** – Click into summarized visuals and open deeper record-level context
+- **Cross-Filtering** – Interactions on one visual can filter linked visuals in the same view
+- **Formatting Controls** – Configure labels, tooltips, fonts, axis labels, and color modes (single/multi)
+- **Export-Ready Rendering** – Improved static readability for export output (labels/legend/axis clarity)
+
+## Product Benchmark
+
+For a current comparison of this app against Microsoft Power BI capabilities,
+see [POWERBI_COMPARISON.md](./POWERBI_COMPARISON.md).
+
 ## Tech Stack
 
 | Category       | Technology              |

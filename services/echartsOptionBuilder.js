@@ -297,7 +297,34 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         return next;
     };
 
-    switch (visualType) {
+    const normalizeVisualType = (type, cfg = {}) => {
+        const preferredMode = String(cfg?.mode || cfg?.variant || '').toLowerCase();
+
+        if (type === ChartType.BAR) {
+            if (preferredMode === 'percent') return ChartType.BAR_PERCENT;
+            if (preferredMode === 'stacked') return ChartType.BAR_STACKED;
+            if (preferredMode === 'horizontal') return ChartType.BAR_HORIZONTAL;
+            return ChartType.BAR_CLUSTERED;
+        }
+
+        if (type === ChartType.LINE) {
+            if (preferredMode === 'step') return ChartType.LINE_STEP;
+            if (preferredMode === 'straight') return ChartType.LINE_STRAIGHT;
+            return ChartType.LINE_SMOOTH;
+        }
+
+        if (type === ChartType.AREA) {
+            if (preferredMode === 'percent') return ChartType.AREA_PERCENT;
+            if (preferredMode === 'stacked') return ChartType.AREA_STACKED;
+            return ChartType.AREA_SMOOTH;
+        }
+
+        return type;
+    };
+
+    const resolvedVisualType = normalizeVisualType(visualType, config);
+
+    switch (resolvedVisualType) {
         // ═══════════════════ BAR CHARTS ═══════════════════
         case ChartType.BAR_CLUSTERED:
             return {
@@ -430,8 +457,8 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             const primaryMeasure = measures[0] || '';
             const primaryValues = processedData.map(d => d[primaryMeasure]);
             const insights = getLineInsights(primaryValues);
-            const smooth = visualType !== ChartType.LINE_STRAIGHT;
-            const step = visualType === ChartType.LINE_STEP;
+            const smooth = resolvedVisualType !== ChartType.LINE_STRAIGHT;
+            const step = resolvedVisualType === ChartType.LINE_STEP;
 
             return {
                 ...base,

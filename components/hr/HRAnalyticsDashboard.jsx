@@ -20,6 +20,78 @@ import {
 
 const sortByValueDesc = (items = []) => [...items].sort((a, b) => b.value - a.value);
 
+const HR_COLOR_PRESETS = {
+    vibrant: ['#2563EB', '#7C3AED', '#EA580C', '#16A34A', '#DC2626', '#0D9488'],
+    cool: ['#1D4ED8', '#0891B2', '#0EA5E9', '#4338CA', '#7C3AED', '#0F766E'],
+    warm: ['#DC2626', '#EA580C', '#D97706', '#CA8A04', '#B45309', '#BE123C'],
+    neutral: ['#334155', '#475569', '#64748B', '#94A3B8', '#1F2937', '#0F172A'],
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const hexToRgb = (hex) => {
+    const normalized = String(hex || '').replace('#', '').trim();
+    if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return null;
+    return {
+        r: parseInt(normalized.slice(0, 2), 16),
+        g: parseInt(normalized.slice(2, 4), 16),
+        b: parseInt(normalized.slice(4, 6), 16),
+    };
+};
+
+const rgbToHsl = ({ r, g, b }) => {
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const delta = max - min;
+
+    let h = 0;
+    if (delta !== 0) {
+        if (max === rn) h = ((gn - bn) / delta) % 6;
+        else if (max === gn) h = (bn - rn) / delta + 2;
+        else h = (rn - gn) / delta + 4;
+        h *= 60;
+        if (h < 0) h += 360;
+    }
+
+    const l = (max + min) / 2;
+    const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+
+    return { h, s, l };
+};
+
+const hslToHex = (h, s, l) => {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+
+    if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+
+    const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+const buildWheelPalette = (baseHex) => {
+    const rgb = hexToRgb(baseHex);
+    if (!rgb) return HR_COLOR_PRESETS.vibrant;
+    const { h, s, l } = rgbToHsl(rgb);
+    const offsets = [0, 28, 56, 180, 208, 236];
+    return offsets.map((offset, idx) => {
+        const hue = (h + offset) % 360;
+        const sat = clamp(s + (idx % 2 === 0 ? 0.06 : -0.04), 0.35, 0.9);
+        const light = clamp(l + (idx < 3 ? 0.02 : -0.02), 0.35, 0.65);
+        return hslToHex(hue, sat, light);
+    });
+};
+
 const buildBaseGrid = (isDark) => ({
     left: 28,
     right: 18,
@@ -30,7 +102,24 @@ const buildBaseGrid = (isDark) => ({
     borderColor: isDark ? '#374151' : '#E5E7EB',
 });
 
-const ALL_CHART_TYPES = Object.values(ChartType);
+const ALL_CHART_TYPES = [
+    ChartType.BAR,
+    ChartType.LINE,
+    ChartType.AREA,
+    ChartType.PIE,
+    ChartType.DONUT,
+    ChartType.SCATTER,
+    ChartType.BUBBLE,
+    ChartType.HEATMAP,
+    ChartType.TREEMAP,
+    ChartType.SUNBURST,
+    ChartType.COMBO_BAR_LINE,
+    ChartType.GAUGE,
+    ChartType.SPARKLINE,
+    ChartType.RADAR,
+    ChartType.KPI_SINGLE,
+    ChartType.TABLE,
+];
 const toLabel = (type) => type.replace(/_/g, ' ');
 
 const getRecommendedChartTypes = ({ columns, dimension, measures = [] }) => {
@@ -79,13 +168,20 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     });
 
     const [chartTypes, setChartTypes] = useState({
-        department: ChartType.BAR_CLUSTERED,
+        department: ChartType.BAR,
         gender: ChartType.PIE,
-        age: ChartType.BAR_CLUSTERED,
-        hiringTrend: ChartType.LINE_SMOOTH,
-        attritionTrend: ChartType.LINE_SMOOTH,
+        age: ChartType.BAR,
+        hiringTrend: ChartType.LINE,
+        attritionTrend: ChartType.LINE,
         attritionByDepartment: ChartType.COMBO_BAR_LINE,
-        education: ChartType.BAR_HORIZONTAL,
+        education: ChartType.BAR,
+    });
+
+    const [chartStyle, setChartStyle] = useState({
+        colorMode: 'multi',
+        singleColor: '#2563EB',
+        multiColors: [],
+        wheelColor: '#2563EB',
     });
 
     const chartTypeRecommendations = useMemo(() => {
@@ -306,9 +402,29 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
             .slice(0, 10);
     }, [filteredEmployees, processed.salaryP95]);
 
-    const chartColors = isDark
+    const baseChartColors = isDark
         ? ['#60A5FA', '#34D399', '#F59E0B', '#F87171', '#A78BFA', '#22D3EE']
         : ['#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED', '#0891B2'];
+
+    const chartColors = useMemo(() => {
+        const mode = chartStyle?.colorMode === 'single' ? 'single' : 'multi';
+        const single = typeof chartStyle?.singleColor === 'string' && chartStyle.singleColor.trim()
+            ? chartStyle.singleColor.trim()
+            : null;
+        const multi = Array.isArray(chartStyle?.multiColors)
+            ? chartStyle.multiColors.map(c => String(c || '').trim()).filter(Boolean)
+            : [];
+
+        if (mode === 'single' && single) return [single];
+        if (mode === 'multi' && multi.length > 0) return multi;
+        return baseChartColors;
+    }, [chartStyle, baseChartColors]);
+
+    const sharedChartStyle = useMemo(() => ({
+        colorMode: chartStyle?.colorMode === 'single' ? 'single' : 'multi',
+        singleColor: chartStyle?.singleColor || '#2563EB',
+        multiColors: Array.isArray(chartStyle?.multiColors) ? chartStyle.multiColors : [],
+    }), [chartStyle]);
 
     const commonAxisStyle = {
         axisLabel: { color: isDark ? '#D1D5DB' : '#4B5563' },
@@ -319,7 +435,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const departmentOption = buildChartOption(
         chartTypes.department,
         departmentDist.map(item => ({ name: item.name, employees: item.value })),
-        { dimension: 'Department', measures: ['employees'], title: 'Employee Distribution by Department' },
+        { dimension: 'Department', measures: ['employees'], title: 'Employee Distribution by Department', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -328,7 +444,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const genderOption = buildChartOption(
         chartTypes.gender,
         genderDist.map(item => ({ name: item.name, employees: item.value })),
-        { dimension: 'Gender', measures: ['employees'], title: 'Gender Distribution' },
+        { dimension: 'Gender', measures: ['employees'], title: 'Gender Distribution', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -337,7 +453,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const ageOption = buildChartOption(
         chartTypes.age,
         ageHistogram.map(item => ({ name: item.name, employees: item.value })),
-        { dimension: 'Age Bucket', measures: ['employees'], title: 'Age Distribution' },
+        { dimension: 'Age Bucket', measures: ['employees'], title: 'Age Distribution', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -346,7 +462,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const hiringOption = buildChartOption(
         chartTypes.hiringTrend,
         hiringTrend.labels.map((label, idx) => ({ name: label, joined: hiringTrend.values[idx] || 0 })),
-        { dimension: 'Join Month', measures: ['joined'], title: 'Hiring Trend Over Time' },
+        { dimension: 'Join Month', measures: ['joined'], title: 'Hiring Trend Over Time', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -355,7 +471,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const attritionTrendOption = buildChartOption(
         chartTypes.attritionTrend,
         attritionTrend.labels.map((label, idx) => ({ name: label, exited: attritionTrend.values[idx] || 0 })),
-        { dimension: 'Exit Month', measures: ['exited'], title: 'Attrition Trend Over Time' },
+        { dimension: 'Exit Month', measures: ['exited'], title: 'Attrition Trend Over Time', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -364,7 +480,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const attritionByDeptOption = buildChartOption(
         chartTypes.attritionByDepartment,
         attritionByDepartment.map(item => ({ name: item.name, rate: Number(item.rate.toFixed(2)), exited: item.exited })),
-        { dimension: 'Department', measures: ['rate', 'exited'], title: 'Attrition by Department' },
+        { dimension: 'Department', measures: ['rate', 'exited'], title: 'Attrition by Department', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -400,7 +516,7 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
     const educationOption = buildChartOption(
         chartTypes.education,
         educationDist.map(item => ({ name: item.name, employees: item.value })),
-        { dimension: 'Education Level', measures: ['employees'], title: 'Education Level Distribution' },
+        { dimension: 'Education Level', measures: ['employees'], title: 'Education Level Distribution', style: sharedChartStyle },
         theme,
         'clear',
         'vibrant'
@@ -677,6 +793,84 @@ const HRAnalyticsDashboard = ({ datasets, selectedDatasetId, setSelectedDatasetI
                     <h3 className={`text-sm font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Chart Controls</h3>
                     <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Recommended via chart recommender</p>
                 </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <label className="space-y-1">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Color Mode</span>
+                        <select
+                            value={chartStyle.colorMode || 'multi'}
+                            onChange={(e) => setChartStyle(prev => ({ ...prev, colorMode: e.target.value }))}
+                            className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}
+                        >
+                            <option value="multi">Multi Color</option>
+                            <option value="single">Single Color</option>
+                        </select>
+                    </label>
+
+                    {(chartStyle.colorMode || 'multi') === 'single' ? (
+                        <label className="space-y-1 md:col-span-2">
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Chart Color</span>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="color"
+                                    value={chartStyle.singleColor || '#2563EB'}
+                                    onChange={(e) => setChartStyle(prev => ({ ...prev, singleColor: e.target.value }))}
+                                    className="h-10 w-12 p-0 border border-gray-300 dark:border-gray-600 rounded"
+                                />
+                                <input
+                                    type="text"
+                                    value={chartStyle.singleColor || '#2563EB'}
+                                    onChange={(e) => setChartStyle(prev => ({ ...prev, singleColor: e.target.value }))}
+                                    className={`w-full px-3 py-2 rounded-xl text-sm border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}
+                                />
+                            </div>
+                        </label>
+                    ) : (
+                        <div className="space-y-2 md:col-span-2">
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Multi Color Palette</span>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="color"
+                                    value={chartStyle.wheelColor || '#2563EB'}
+                                    onChange={(e) => setChartStyle(prev => ({
+                                        ...prev,
+                                        wheelColor: e.target.value,
+                                        multiColors: buildWheelPalette(e.target.value),
+                                    }))}
+                                    className="h-9 w-11 p-0 border border-gray-300 dark:border-gray-600 rounded"
+                                />
+                                <button
+                                    onClick={() => setChartStyle(prev => ({
+                                        ...prev,
+                                        multiColors: buildWheelPalette(prev.wheelColor || '#2563EB'),
+                                    }))}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border ${isDark ? 'border-gray-600 bg-gray-700 text-gray-100' : 'border-gray-300 bg-white text-gray-700'}`}
+                                >
+                                    Apply Color Wheel
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                {Object.entries(HR_COLOR_PRESETS).map(([name, palette]) => (
+                                    <button
+                                        key={name}
+                                        onClick={() => setChartStyle(prev => ({ ...prev, multiColors: palette }))}
+                                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border ${isDark ? 'border-gray-600 bg-gray-700 text-gray-100' : 'border-gray-300 bg-white text-gray-700'}`}
+                                    >
+                                        {name}
+                                    </button>
+                                ))}
+                            </div>
+                            <input
+                                type="text"
+                                value={Array.isArray(chartStyle.multiColors) ? chartStyle.multiColors.join(', ') : ''}
+                                onChange={(e) => setChartStyle(prev => ({ ...prev, multiColors: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                                placeholder="#2563EB, #7C3AED, #16A34A"
+                                className={`w-full px-3 py-2 rounded-xl text-xs border focus:outline-none ${isDark ? 'bg-gray-700 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-800'}`}
+                            />
+                        </div>
+                    )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                     <label className="space-y-1">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Department Dist.</span>
