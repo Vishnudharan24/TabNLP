@@ -1,4 +1,5 @@
 import { ChartType } from '../types';
+import { configFromAssignments, convertOldConfig } from './chartConfigSystem';
 import {
     CHART_COLORS,
     CHART_COLORS_DARK,
@@ -27,7 +28,16 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const borderColor = isDark ? '#334155' : '#e2e8f0';
     const gridBorderColor = isDark ? (isClearMode ? 'rgba(148,163,184,0.24)' : 'rgba(148,163,184,0.14)') : (isClearMode ? 'rgba(148,163,184,0.26)' : 'rgba(148,163,184,0.14)');
 
-    const { measures = [], dimension = '' } = config;
+    const normalizedRoleConfig = Array.isArray(config?.assignments) && config.assignments.length > 0
+        ? configFromAssignments(visualType, config.assignments)
+        : configFromAssignments(visualType, convertOldConfig(config).assignments || []);
+
+    const resolvedConfig = {
+        ...config,
+        ...normalizedRoleConfig,
+    };
+
+    const { measures = [], dimension = '' } = resolvedConfig;
     const style = config?.style || {};
     const colorMode = style.colorMode === 'single' ? 'single' : 'multi';
     const normalizedSingle = typeof style.singleColor === 'string' && style.singleColor.trim() ? style.singleColor.trim() : null;
@@ -295,6 +305,128 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         }
 
         return next;
+    };
+
+    const toNumeric = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+    };
+
+    const cloneHierarchyNode = (node = {}) => ({
+        ...node,
+        value: toNumeric(node.value),
+        children: Array.isArray(node.children)
+            ? node.children.map(cloneHierarchyNode)
+            : undefined,
+    });
+
+    const nodeTotal = (node = {}) => {
+        const own = toNumeric(node.value);
+        const childrenTotal = Array.isArray(node.children)
+            ? node.children.reduce((sum, child) => sum + nodeTotal(child), 0)
+            : 0;
+        return Math.max(own, childrenTotal);
+    };
+
+    const sortNodesByValue = (nodes = []) => {
+        const safe = Array.isArray(nodes) ? nodes : [];
+        return [...safe]
+            .map((node) => ({
+                ...node,
+                value: toNumeric(node.value),
+                children: Array.isArray(node.children)
+                    ? sortNodesByValue(node.children)
+                    : undefined,
+            }))
+            .sort((a, b) => toNumeric(b.value) - toNumeric(a.value));
+    };
+
+    const groupSmallNodes = (nodes = [], totalValue = 0, threshold = 0.03) => {
+        const safe = Array.isArray(nodes) ? nodes : [];
+        if (safe.length === 0) return [];
+
+        const fallbackTotal = safe.reduce((sum, node) => sum + toNumeric(node.value), 0);
+        const levelTotal = toNumeric(totalValue) > 0 ? toNumeric(totalValue) : fallbackTotal;
+
+        const kept = [];
+        let othersValue = 0;
+        let othersChildren = [];
+
+        safe.forEach((node) => {
+            const value = toNumeric(node.value);
+            const groupedChildren = Array.isArray(node.children)
+                ? groupSmallNodes(node.children, value, threshold)
+                : undefined;
+
+            const ratio = levelTotal > 0 ? value / levelTotal : 1;
+            if (ratio < threshold) {
+                othersValue += value;
+                if (Array.isArray(groupedChildren) && groupedChildren.length > 0) {
+                    othersChildren = othersChildren.concat(groupedChildren);
+                }
+            } else {
+                kept.push({
+                    ...node,
+                    value,
+                    children: groupedChildren,
+                });
+            }
+        });
+
+        if (othersValue > 0) {
+            const mergedOtherChildren = othersChildren.length > 0
+                ? groupSmallNodes(othersChildren, othersValue, threshold)
+                : undefined;
+            kept.push({
+                name: 'Others',
+                value: othersValue,
+                children: mergedOtherChildren,
+                itemStyle: { opacity: 0.78 },
+            });
+        }
+
+        return sortNodesByValue(kept);
+    };
+
+    const limitDepth = (nodes = [], maxDepth = 3, depth = 1) => {
+        const safe = Array.isArray(nodes) ? nodes : [];
+        return safe.map((node) => {
+            const value = toNumeric(node.value);
+            if (!Array.isArray(node.children) || node.children.length === 0) {
+                return { ...node, value, children: undefined };
+            }
+
+            if (depth >= maxDepth) {
+                const aggregated = node.children.reduce((sum, child) => sum + nodeTotal(child), 0);
+                return {
+                    ...node,
+                    value: Math.max(value, aggregated),
+                    children: undefined,
+                };
+            }
+
+            return {
+                ...node,
+                value,
+                children: limitDepth(node.children, maxDepth, depth + 1),
+            };
+        });
+    };
+
+    const preprocessSunburstData = (nodes = [], options = {}) => {
+        const {
+            threshold = 0.03,
+            maxDepth = 3,
+        } = options;
+
+        const base = (Array.isArray(nodes) ? nodes : [])
+            .map(cloneHierarchyNode)
+            .map((node) => ({ ...node, value: nodeTotal(node) }));
+        const sorted = sortNodesByValue(base);
+        const total = sorted.reduce((sum, node) => sum + toNumeric(node.value), 0);
+        const grouped = groupSmallNodes(sorted, total, threshold);
+        const depthLimited = limitDepth(grouped, maxDepth);
+        return sortNodesByValue(depthLimited);
     };
 
     const normalizeVisualType = (type, cfg = {}) => {
@@ -653,24 +785,122 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             };
 
         case ChartType.SUNBURST:
-            return {
-                ...base,
-                tooltip: { ...tooltipStyle, trigger: 'item' },
-                series: [{
-                    type: 'sunburst',
-                    data: processedData.map((d, i) => ({
+            {
+                const rawSunburstData = Array.isArray(processedData?.[0]?.__hierarchy)
+                    ? processedData[0].__hierarchy
+                    : processedData.map((d, i) => ({
                         name: d.name,
                         value: d[measures[0]] || 0,
                         children: measures.length > 1 ? measures.slice(1).map(m => ({
                             name: m,
                             value: d[m] || 0,
                         })) : undefined,
-                    })),
-                    radius: ['15%', '80%'],
-                    label: resolveLabel({ fontSize: Math.max(9, fontSize - 2), color: textColor }),
+                    }));
+
+                const sunburstData = preprocessSunburstData(rawSunburstData, {
+                    threshold: 0.03,
+                    maxDepth: 3,
+                });
+
+                const totalSunburst = sunburstData.reduce((sum, node) => sum + toNumeric(node.value), 0);
+
+            return {
+                ...base,
+                tooltip: {
+                    ...tooltipStyle,
+                    trigger: 'item',
+                    formatter: (params) => {
+                        const path = Array.isArray(params?.treePathInfo)
+                            ? params.treePathInfo.slice(1).map(p => p.name).filter(Boolean).join(' ▸ ')
+                            : (params?.name || '');
+                        const value = toNumeric(params?.value);
+                        const pctRaw = totalSunburst > 0 ? ((value / totalSunburst) * 100) : 0;
+                        const pct = Number.isFinite(pctRaw) ? pctRaw.toFixed(2) : '0.00';
+                        return `
+                            <div style="font-weight:700;margin-bottom:6px">${path || params?.name || 'Node'}</div>
+                            <div>Count: ${numberFormatter(value)}</div>
+                            <div>Percentage: ${pct}%</div>
+                        `;
+                    },
+                },
+                series: [{
+                    type: 'sunburst',
+                    data: sunburstData,
+                    radius: ['0%', '90%'],
+                    sort: null,
+                    colorMappingBy: 'index',
+                    nodeClick: 'zoomToNode',
+                    emphasis: { focus: 'ancestor' },
+                    levels: [
+                        {},
+                        {
+                            r0: '0%',
+                            r: '30%',
+                            itemStyle: {
+                                borderWidth: 2,
+                                borderColor: isDark ? '#0f172a' : '#ffffff',
+                            },
+                            label: {
+                                show: false,
+                                rotate: 'tangential',
+                                color: textColor,
+                                fontSize: Math.max(10, fontSize),
+                                overflow: 'truncate',
+                            },
+                        },
+                        {
+                            r0: '30%',
+                            r: '65%',
+                            itemStyle: {
+                                borderWidth: 2,
+                                borderColor: isDark ? '#0f172a' : '#ffffff',
+                            },
+                            label: {
+                                show: false,
+                                rotate: 'radial',
+                                color: textColor,
+                                fontSize: Math.max(9, fontSize - 1),
+                                overflow: 'truncate',
+                            },
+                        },
+                        {
+                            r0: '65%',
+                            r: '90%',
+                            itemStyle: {
+                                borderWidth: 1.5,
+                                borderColor: isDark ? '#0f172a' : '#ffffff',
+                            },
+                            label: {
+                                show: false,
+                            },
+                        },
+                    ],
+                    labelLayout: {
+                        hideOverlap: true,
+                    },
+                    label: resolveLabel({
+                        show: false,
+                        color: textColor,
+                        fontSize: Math.max(10, fontSize),
+                    }),
+                    emphasis: {
+                        focus: 'ancestor',
+                        label: {
+                            show: true,
+                            fontSize: Math.max(14, fontSize + 2),
+                            fontWeight: 700,
+                            color: textColor,
+                            formatter: (params) => {
+                                const name = String(params?.name || '');
+                                const value = toNumeric(params?.value);
+                                return `${name}\n${numberFormatter(value)}`;
+                            },
+                        },
+                    },
                     itemStyle: { borderRadius: 4, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                 }],
             };
+            }
 
         // ═══════════════════ DISTRIBUTION ═══════════════════
         case ChartType.SCATTER:
@@ -750,10 +980,12 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: { ...tooltipStyle, trigger: 'item' },
                 series: [{
                     type: 'treemap',
-                    data: processedData.map((d) => ({
-                        name: d.name,
-                        value: d[measures[0]] || 0,
-                    })),
+                    data: Array.isArray(processedData?.[0]?.__hierarchy)
+                        ? processedData[0].__hierarchy
+                        : processedData.map((d) => ({
+                            name: d.name,
+                            value: d[measures[0]] || 0,
+                        })),
                     label: { fontSize: 11, fontWeight: 'bold', color: '#fff' },
                     upperLabel: resolveLabel({ show: false }),
                     breadcrumb: { show: false },

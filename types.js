@@ -69,6 +69,17 @@ export const ChartType = {
  */
 
 /**
+ * @typedef {'x' | 'y' | 'legend' | 'size' | 'color' | 'hierarchy' | 'time' | 'value'} FieldRole
+ */
+
+/**
+ * @typedef {Object} FieldAssignment
+ * @property {string} field
+ * @property {FieldRole} role
+ * @property {AggregationType} [aggregation]
+ */
+
+/**
  * @typedef {Object} FilterConfig
  * @property {string} id
  * @property {string} column
@@ -116,9 +127,13 @@ export const ChartType = {
  * @property {string[]} [dimensions]
  * @property {string[]} measures
  * @property {string} [valueMeasure]
+ * @property {FieldAssignment[]} [assignments]
  * @property {'auto' | 'manual'} [axisMode]
  * @property {string} [xAxisField]
  * @property {string} [yAxisField]
+ * @property {string} [legendField]
+ * @property {string} [sizeField]
+ * @property {string[]} [hierarchyFields]
  * @property {AggregationType} aggregation
  * @property {LayoutConfig} layout
  * @property {FilterConfig[]} filters

@@ -1,0 +1,210 @@
+You are working on a React + TypeScript analytics application (ChillView) using Apache ECharts.
+
+The Sunburst chart is currently functional but suffers from:
+
+* Too many nodes (high cardinality)
+* Label clutter and unreadable text
+* Repeated "Other" categories
+* Poor hierarchy spacing
+* Lack of aggregation and grouping
+* No drill-down behavior
+
+Your task is to **optimize the Sunburst chart rendering and preprocessing pipeline** to make it clean, readable, and enterprise-grade (similar to Power BI).
+
+---
+
+# 🎯 GOAL
+
+Improve Sunburst visualization by:
+
+1. Reducing clutter
+2. Grouping small values
+3. Improving label behavior
+4. Structuring hierarchy properly
+5. Adding drill-down interaction
+6. Enhancing readability and UX
+
+---
+
+# 🧠 1. PREPROCESSING: GROUP SMALL NODES
+
+Implement a function:
+
+```ts
+function groupSmallNodes(nodes, totalValue, threshold = 0.03)
+```
+
+* If node.value / totalValue < threshold → group into "Others"
+* Apply recursively at EACH hierarchy level
+* Ensure only ONE "Others" node per level
+
+---
+
+# 🧠 2. LIMIT HIERARCHY DEPTH
+
+Implement:
+
+```ts
+function limitDepth(data, maxDepth = 3)
+```
+
+* If hierarchy exceeds maxDepth:
+
+  * Truncate deeper levels
+  * Aggregate values upward
+
+---
+
+# 🧠 3. SORT NODES BY VALUE
+
+Before rendering:
+
+```ts
+children.sort((a, b) => b.value - a.value);
+```
+
+* Largest segments first
+* Improves readability
+
+---
+
+# 🎨 4. LABEL OPTIMIZATION
+
+Update ECharts config:
+
+```ts
+label: {
+  show: false
+},
+emphasis: {
+  label: {
+    show: true,
+    fontSize: 14
+  }
+}
+```
+
+* Hide labels by default
+* Show only on hover
+
+---
+
+# 🎯 5. LEVEL STYLING (CRITICAL)
+
+Add consistent ring sizing:
+
+```ts
+levels: [
+  {},
+  { r0: '0%', r: '30%' },
+  { r0: '30%', r: '65%' },
+  { r0: '65%', r: '90%' }
+]
+```
+
+---
+
+# 🎨 6. COLOR STRATEGY
+
+Replace single color mode with:
+
+```ts
+colorMappingBy: 'index'
+```
+
+OR assign per level:
+
+```ts
+levels: [
+  { itemStyle: { color: '#5A67D8' } },
+  { itemStyle: { color: '#7F9CF5' } },
+  { itemStyle: { color: '#C3DAFE' } }
+]
+```
+
+---
+
+# 💬 7. TOOLTIP IMPROVEMENT
+
+```ts
+tooltip: {
+  formatter: (params) => {
+    return `
+      ${params.name}<br/>
+      Count: ${params.value}<br/>
+      Percentage: ${(params.percent || 0).toFixed(2)}%
+    `;
+  }
+}
+```
+
+---
+
+# 🔥 8. DRILL-DOWN INTERACTION
+
+Enable zoom interaction:
+
+```ts
+nodeClick: 'zoomToNode'
+```
+
+* Clicking a segment zooms into that hierarchy
+* Improves usability for large datasets
+
+---
+
+# ⚠️ 9. CARDINALITY PROTECTION
+
+Before building hierarchy:
+
+* Detect high-cardinality fields (> 50 unique values)
+* Show warning OR auto-replace with better field
+* Prevent using fields like:
+
+  * Full Name
+  * Email
+  * IDs
+
+---
+
+# 🧠 10. AUTO-CLEAN PIPELINE
+
+Before rendering Sunburst:
+
+1. Build hierarchy
+2. Group small nodes
+3. Sort nodes
+4. Limit depth
+5. Apply styling
+
+---
+
+# 🧪 TEST CASES
+
+Ensure system works for:
+
+* HR dataset (Business Unit → Department → Designation)
+* High-cardinality data (auto grouping works)
+* Small dataset (no grouping needed)
+* Deep hierarchy (depth limiting works)
+
+---
+
+# 🚀 EXPECTED RESULT
+
+After implementation:
+
+* Clean, readable Sunburst charts
+* No label clutter
+* No excessive tiny segments
+* Smooth drill-down experience
+* Professional BI-level output
+
+---
+
+Apply this logic inside:
+
+* services/echartsOptionBuilder.ts
+* services/chartRecommender.ts (for warnings)
+
+Ensure code is modular, reusable, and performant.

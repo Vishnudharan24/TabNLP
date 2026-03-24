@@ -1,0 +1,195 @@
+The current "Fields + Field Roles" panel UI is cluttered and relies heavily on dropdowns. Your task is to redesign it into a **clean, modern, Power BI–like field assignment panel** with search and improved UX.
+
+---
+
+# 🎯 GOAL
+
+Refactor the field panel to:
+
+1. Improve visual clarity and spacing
+2. Replace dropdown-heavy UI with chip-based role assignment
+3. Add a searchable field picker
+4. Support hierarchy (multi-field roles)
+5. Make the UI scalable and intuitive
+
+---
+
+# 🧠 1. NEW UI STRUCTURE
+
+Split panel into 2 main sections:
+
+---
+
+## 🔹 SECTION 1: FIELDS LIST
+
+* Add a search bar at the top
+* Group fields into categories (if possible)
+* Show field type icons:
+
+  * categorical → blue icon
+  * numeric → green icon
+  * date → yellow icon
+
+Example:
+
+```tsx
+<SearchInput placeholder="Search fields..." />
+
+<FieldList>
+  <FieldItem name="L1 Leader" type="categorical" />
+  <FieldItem name="Manager Name" type="categorical" />
+  <FieldItem name="Department" type="categorical" />
+  <FieldItem name="Employee ID" type="numeric" />
+</FieldList>
+```
+
+---
+
+## 🔹 SECTION 2: FIELD ROLES (MAIN AREA)
+
+Replace current dropdown UI with chip-based assignment:
+
+```tsx
+<RoleSection title="Hierarchy">
+  <FieldChip field="L1 Leader" role="hierarchy" />
+  <FieldChip field="Manager Name" role="hierarchy" />
+  <FieldChip field="Department" role="hierarchy" />
+  <AddFieldButton role="hierarchy" />
+</RoleSection>
+
+<RoleSection title="Values">
+  <FieldChip field="Employee ID" role="value" aggregation="count" />
+  <AddFieldButton role="value" />
+</RoleSection>
+```
+
+---
+
+# 🔍 2. SEARCHABLE FIELD DROPDOWN (CRITICAL FEATURE)
+
+When user clicks "+ Add Field":
+
+Open a dropdown with:
+
+* Search input at top
+* Filtered list of fields
+* Keyboard navigation support
+
+Example:
+
+```tsx
+function FieldPicker({ fields, onSelect }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = fields.filter(f =>
+    f.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="dropdown">
+      <input
+        placeholder="Search fields..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+
+      <ul>
+        {filtered.map(field => (
+          <li onClick={() => onSelect(field)}>
+            {field.name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+---
+
+# 🧠 3. CHIP-BASED ROLE UI
+
+Create reusable component:
+
+```tsx
+function FieldChip({ field, role, aggregation, onRemove }) {
+  return (
+    <div className="chip">
+      <span>{field}</span>
+      {aggregation && <span className="agg">({aggregation})</span>}
+      <button onClick={onRemove}>×</button>
+    </div>
+  );
+}
+```
+
+---
+
+# 🎨 4. UI IMPROVEMENTS
+
+* Reduce heavy borders → use spacing instead
+* Add section icons:
+
+  * 🧩 Hierarchy
+  * 📊 Values
+  * 🎨 Legend
+* Use consistent padding and spacing
+* Add hover states for interactivity
+
+---
+
+# ⚙️ 5. INTERACTION BEHAVIOR
+
+* Clicking a field → auto-assign to best role
+* Drag & drop (optional enhancement)
+* Prevent duplicate field assignment
+* Allow reordering of hierarchy fields
+
+---
+
+# ⚠️ 6. VALIDATION & UX FEEDBACK
+
+Show inline warnings:
+
+* "Too many hierarchy levels"
+* "High cardinality field selected"
+* "Missing numeric value for chart"
+
+---
+
+# 🚀 7. OPTIONAL ENHANCEMENTS
+
+* Auto-suggest fields based on chart type
+* Highlight recommended fields
+* Show field usage hints
+
+---
+
+# 🧪 8. TEST CASES
+
+Ensure:
+
+* Search filters fields correctly
+* Field selection updates roles instantly
+* Multiple hierarchy fields supported
+* Works with large datasets (100+ columns)
+
+---
+
+# 🎯 FINAL EXPECTATION
+
+After refactor:
+
+* UI is clean and minimal
+* Field assignment is intuitive
+* Dropdowns are replaced with searchable pickers
+* Hierarchy (multi-field) is fully supported
+* UX matches modern BI tools (Power BI/Tableau style)
+
+---
+
+Implement using:
+
+* React functional components
+* Tailwind CSS
+* Clean component separation (FieldList, RoleSection, FieldPicker, FieldChip)

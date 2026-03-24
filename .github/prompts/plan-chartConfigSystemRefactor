@@ -1,0 +1,241 @@
+You are working on a React + TypeScript analytics application (ChillView) that uses ECharts.
+
+The current chart configuration system is too limited:
+
+* It supports only a single `dimension` and multiple `measures`
+* It does NOT support hierarchical charts (Sunburst, Treemap)
+* It does NOT support flexible chart roles (like X, Y, Legend, Size, etc.)
+
+Your task is to **refactor the entire chart configuration system** into a flexible, role-based architecture similar to Power BI.
+
+---
+
+# 🎯 GOAL
+
+Replace the current rigid config:
+
+```ts
+{
+  dimension: string;
+  measures: string[];
+}
+```
+
+With a **universal, role-based chart config system** that works for ALL chart types.
+
+---
+
+# 🧠 NEW CONFIG DESIGN
+
+Define a new type:
+
+```ts
+type FieldRole =
+  | "x"
+  | "y"
+  | "legend"
+  | "size"
+  | "color"
+  | "hierarchy"
+  | "time"
+  | "value";
+
+type FieldAssignment = {
+  field: string;
+  role: FieldRole;
+  aggregation?: "sum" | "avg" | "count" | "min" | "max";
+};
+
+type ChartConfig = {
+  chartType: ChartType;
+  assignments: FieldAssignment[];
+};
+```
+
+---
+
+# 📊 ROLE DEFINITIONS
+
+Each chart type uses different roles:
+
+### Bar / Line / Area
+
+* x → categorical or time
+* y → numeric
+* legend → optional grouping
+
+### Scatter
+
+* x → numeric
+* y → numeric
+* color → optional categorical
+
+### Bubble
+
+* x → numeric
+* y → numeric
+* size → numeric
+
+### Pie / Donut
+
+* legend → categorical
+* value → numeric
+
+### Sunburst / Treemap
+
+* hierarchy → multiple categorical fields (ORDER MATTERS)
+* value → numeric (default = count)
+
+### Heatmap
+
+* x → categorical
+* y → categorical
+* value → numeric
+
+### KPI / Gauge
+
+* value → numeric
+
+### Radar
+
+* legend → categorical
+* multiple y → numeric
+
+---
+
+# 🔧 HIERARCHY SUPPORT (CRITICAL)
+
+For hierarchical charts:
+
+* Allow MULTIPLE fields with role = "hierarchy"
+* Preserve order of fields (level1 → level2 → level3)
+
+Example:
+
+```ts
+assignments: [
+  { field: "Business Unit", role: "hierarchy" },
+  { field: "Department", role: "hierarchy" },
+  { field: "Designation", role: "hierarchy" },
+  { field: "Employee ID", role: "value", aggregation: "count" }
+]
+```
+
+---
+
+# ⚙️ DATA TRANSFORMATION LAYER
+
+Implement a utility:
+
+```ts
+function buildHierarchy(data, hierarchyFields, valueField)
+```
+
+This should convert flat rows into nested tree structure for:
+
+* Sunburst
+* Treemap
+
+---
+
+# 🔄 BACKWARD COMPATIBILITY
+
+Create an adapter:
+
+```ts
+function convertOldConfig(oldConfig): ChartConfig
+```
+
+So existing charts still work.
+
+---
+
+# 🎯 AUTO ASSIGNMENT ENGINE
+
+Implement:
+
+```ts
+function autoAssignFields(columns, chartType): FieldAssignment[]
+```
+
+Rules:
+
+* Pick lowest-cardinality categorical → x or hierarchy
+* Pick numeric → y or value
+* Pick second categorical → legend
+* Pick time → x (if line/area)
+* Pick 3rd numeric → size (bubble)
+
+---
+
+# 🧠 VALIDATION (SOFT, NOT STRICT)
+
+Implement:
+
+```ts
+function validateConfig(config): ValidationResult
+```
+
+* Do NOT block rendering
+* Return warnings instead:
+
+  * "Too many categories for bar chart"
+  * "Missing numeric field, using count instead"
+
+---
+
+# 🎨 UPDATE OPTION BUILDER
+
+Refactor:
+
+services/echartsOptionBuilder.ts
+
+So it reads from:
+
+```ts
+config.assignments
+```
+
+instead of:
+
+```ts
+dimension + measures
+```
+
+---
+
+# 🧪 TEST CASES
+
+Ensure support for:
+
+1. Bar chart with legend
+2. Line chart with time axis
+3. Scatter (2 numeric)
+4. Bubble (3 numeric)
+5. Sunburst (3-level hierarchy)
+6. Treemap hierarchy
+7. KPI (single numeric)
+8. Only categorical → fallback to count
+
+---
+
+# 🚀 FINAL EXPECTATION
+
+After refactor:
+
+* ANY chart can be configured using roles
+* Sunburst & Treemap support multiple hierarchy levels
+* System becomes flexible like Power BI
+* No chart is restricted by rigid rules
+* Easy to extend for future charts
+
+---
+
+Implement this refactor cleanly across:
+
+* types/
+* services/chartRecommender.ts
+* services/echartsOptionBuilder.ts
+* UI field assignment panel
+
+Ensure type safety and minimal breaking changes.

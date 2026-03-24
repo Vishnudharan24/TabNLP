@@ -829,6 +829,7 @@ const App = () => {
             legendField: autoConfig.legend || '',
             sizeField: autoConfig.size || '',
             hierarchyFields: Array.isArray(autoConfig.hierarchy) ? autoConfig.hierarchy : [],
+            assignments: Array.isArray(autoConfig.assignments) ? autoConfig.assignments : [],
             mode: autoConfig.mode,
             layout: { x: 0, y: Infinity, w: 6, h: 8 },
             filters: [],

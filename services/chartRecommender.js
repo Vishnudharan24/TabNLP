@@ -1,4 +1,10 @@
 import { ChartType } from '../types';
+import {
+    autoAssignFields,
+    configFromAssignments,
+    convertOldConfig,
+    validateConfig as validateRoleConfig,
+} from './chartConfigSystem';
 
 const SUPPORTED_RECOMMENDATION_CHARTS = [
     ChartType.BAR,
@@ -38,6 +44,9 @@ const CHART_ALIASES = {
 };
 
 const toCanonicalChart = (chartType) => CHART_ALIASES[chartType] || chartType;
+
+const HIERARCHY_RISKY_FIELD_REGEX = /(\b(id|employee\s*id|emp\s*id|email|mail|name|full\s*name|first\s*name|last\s*name)\b)/i;
+const isRiskyHierarchyField = (fieldName = '') => HIERARCHY_RISKY_FIELD_REGEX.test(String(fieldName || ''));
 
 const normalizeColType = (type) => {
     if (type === 'number') return 'numeric';
@@ -335,10 +344,40 @@ export function assignRoles(chartType, columns, rows = [], selectedFields = {}) 
     }
 
     if (type === ChartType.TREEMAP || type === ChartType.SUNBURST) {
-        assignments.hierarchy = [catX, secondCategorical].filter(Boolean);
+        const sortedCategorical = [...profile.categorical]
+            .sort((a, b) => (a.cardinality || 999999) - (b.cardinality || 999999));
+
+        const saferHierarchy = sortedCategorical
+            .filter((c) => !isRiskyHierarchyField(c.name) && (c.cardinality || 0) <= 50)
+            .map(c => c.name);
+
+        const fallbackHierarchy = sortedCategorical
+            .filter((c) => !isRiskyHierarchyField(c.name))
+            .map(c => c.name);
+
+        const pickedHierarchy = (saferHierarchy.length > 0 ? saferHierarchy : fallbackHierarchy)
+            .slice(0, 3);
+
+        assignments.hierarchy = pickedHierarchy.length > 0
+            ? pickedHierarchy
+            : [catX, secondCategorical].filter(Boolean);
         assignments.yAxis = fallbackMeasure;
         if (assignments.hierarchy.length < 2) {
             assignments.warnings.push('Shallow hierarchy detected. Using single-level grouping.');
+        }
+
+        const riskySelected = [catX, secondCategorical]
+            .filter(Boolean)
+            .filter((field) => isRiskyHierarchyField(field));
+        if (riskySelected.length > 0) {
+            assignments.warnings.push('Detected ID/name/email-like hierarchy fields. Replaced with safer lower-cardinality hierarchy fields.');
+        }
+
+        const highCardHierarchy = sortedCategorical
+            .filter((c) => assignments.hierarchy.includes(c.name) && (c.cardinality || 0) > 50)
+            .map(c => `${c.name} (${c.cardinality})`);
+        if (highCardHierarchy.length > 0) {
+            assignments.warnings.push(`High-cardinality hierarchy fields detected: ${highCardHierarchy.join(', ')}. Small nodes may be grouped into Others.`);
         }
     }
 
@@ -372,8 +411,12 @@ export function assignRoles(chartType, columns, rows = [], selectedFields = {}) 
         });
     }
 
+    const autoAssignments = autoAssignFields(columnProfiles, type);
+    const assignmentConfig = configFromAssignments(type, autoAssignments);
+
     return {
         chartType: type,
+        type,
         dimension: assignments.xAxis || catX || '',
         measures,
         xAxis: assignments.xAxis,
@@ -385,6 +428,8 @@ export function assignRoles(chartType, columns, rows = [], selectedFields = {}) 
         axisMode: 'auto',
         mode: resolveChartMode(type, profile),
         warnings: assignments.warnings,
+        assignments: autoAssignments,
+        ...assignmentConfig,
     };
 }
 
@@ -456,6 +501,7 @@ export function recommendVisualization(columns, rows = [], selectedFields = {}) 
     const config = assignRoles(recommendedChart, columns, rows, selectedFields);
     const top = rankedRecommendations[0] || { score: 50, confidence: 0.5, reason: 'Fallback recommendation' };
 
+    const validation = validateRoleConfig({ chartType: recommendedChart, assignments: config.assignments || [] }, columns);
     const explanation = top.reason
         ? `${top.reason}. Auto-assigned ${config.xAxis || 'fallback dimension'} on X and ${config.yAxis || 'count aggregation'} on Y.`
         : 'Recommended a fallback chart and assigned default axis roles.';
@@ -468,7 +514,9 @@ export function recommendVisualization(columns, rows = [], selectedFields = {}) 
         explanation,
         score: top.score,
         confidence: top.confidence,
-        warnings: config.warnings || [],
+        warnings: [...(config.warnings || []), ...(validation.warnings || [])],
         profile: profileColumns(columns, rows),
     };
 }
+
+    export { autoAssignFields, convertOldConfig, validateRoleConfig as validateConfig };

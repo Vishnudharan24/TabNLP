@@ -4,6 +4,7 @@ import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import { ChartType } from '../types';
 import { buildChartOption } from '../services/echartsOptionBuilder';
+import { buildHierarchy, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
@@ -21,6 +22,18 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     }, [onChartInstanceChange, config.id]);
 
     if (!dataset) return null;
+
+    const normalizedConfig = useMemo(() => {
+        const assignments = Array.isArray(config?.assignments) && config.assignments.length > 0
+            ? config.assignments
+            : (convertOldConfig(config).assignments || []);
+
+        return {
+            ...config,
+            ...configFromAssignments(config.type, assignments),
+            assignments,
+        };
+    }, [config]);
 
     // Apply global filters (cross-dataset filtering)
     const applyGlobalFilters = (data) => {
@@ -52,12 +65,12 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     // Get effective dimension considering drill-down
     const getEffectiveDimension = () => {
-        if (drillPath.length === 0) return config.dimension;
-        const usedDims = [config.dimension, ...drillPath.map(d => d.dimensionCol)];
+        if (drillPath.length === 0) return normalizedConfig.dimension;
+        const usedDims = [normalizedConfig.dimension, ...drillPath.map(d => d.dimensionCol)];
         const stringCols = dataset.columns.filter(c =>
             (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
         );
-        return stringCols.length > 0 ? stringCols[0].name : config.dimension;
+        return stringCols.length > 0 ? stringCols[0].name : normalizedConfig.dimension;
     };
 
     const effectiveDimension = getEffectiveDimension();
@@ -73,7 +86,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         const isGeneric = !configured || /^new visual$/i.test(configured) || /^analytics card$/i.test(configured);
         if (!isGeneric) return configured;
 
-        const firstMeasure = config?.measures?.[0] ? toTitleCase(config.measures[0]) : 'Value';
+        const firstMeasure = normalizedConfig?.measures?.[0] ? toTitleCase(normalizedConfig.measures[0]) : 'Value';
         const dim = effectiveDimension ? toTitleCase(effectiveDimension) : 'Category';
         return `${firstMeasure} by ${dim}`;
     })();
@@ -82,14 +95,14 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         ? `Grouped by ${toTitleCase(effectiveDimension)}`
         : toTitleCase(config.type.replace(/_/g, ' '));
 
-    const valueFieldsText = Array.isArray(config?.measures) && config.measures.length > 0
-        ? config.measures.map(toTitleCase).join(', ')
+    const valueFieldsText = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
+        ? normalizedConfig.measures.map(toTitleCase).join(', ')
         : 'None';
 
-    const aggregationText = config?.aggregation ? toTitleCase(config.aggregation) : 'N/A';
+    const aggregationText = normalizedConfig?.aggregation ? toTitleCase(normalizedConfig.aggregation) : 'N/A';
 
     const applyFilters = (data) => {
-        if (!config.filters || config.filters.length === 0) return data;
+        if (!normalizedConfig.filters || normalizedConfig.filters.length === 0) return data;
 
         const columnTypeMap = new Map((dataset?.columns || []).map(col => [col.name, col.type]));
         const toComparable = (raw, typeHint) => {
@@ -112,7 +125,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         };
 
         return data.filter(row => {
-            return config.filters.every(f => {
+            return normalizedConfig.filters.every(f => {
                 const val = row[f.column];
                 const target = f.value;
                 const targetSec = f.valueSecondary;
@@ -148,20 +161,36 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     };
 
     const processData = () => {
-        const { measures, aggregation } = config;
+        const { measures, aggregation, assignments = [], type } = normalizedConfig;
         const dimension = effectiveDimension;
-        if (!dimension) return [];
+
+        const hierarchyFields = assignments
+            .filter(a => a?.role === FieldRoles.HIERARCHY)
+            .map(a => a.field)
+            .filter(Boolean);
+        const valueAssignment = assignments.find(a => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
 
         const effectiveMeasures = Array.isArray(measures) && measures.length > 0
             ? measures
             : ['__count__'];
-        const effectiveAggregation = (!Array.isArray(measures) || measures.length === 0)
-            ? 'COUNT'
-            : aggregation;
+        const effectiveAggregation = toTitleCase(valueAssignment?.aggregation || aggregation || '').toUpperCase() || (!Array.isArray(measures) || measures.length === 0 ? 'COUNT' : aggregation);
 
         let filteredData = applyGlobalFilters(dataset.data);
         filteredData = applyFilters(filteredData);
         filteredData = applyDrillFilters(filteredData);
+
+        if ((type === ChartType.SUNBURST || type === ChartType.TREEMAP) && hierarchyFields.length > 0) {
+            const hierarchy = buildHierarchy(
+                filteredData,
+                hierarchyFields,
+                valueAssignment?.field || effectiveMeasures[0] || '__count__',
+                valueAssignment?.aggregation || effectiveAggregation || 'COUNT'
+            );
+            return hierarchy.length > 0 ? [{ __hierarchy: hierarchy }] : [];
+        }
+
+        if (!dimension) return [];
+
         const groups = {};
 
         filteredData.forEach(row => {
@@ -208,11 +237,11 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     // Can we drill further?
     const canDrill = useMemo(() => {
-        const usedDims = [config.dimension, ...drillPath.map(d => d.dimensionCol)];
+        const usedDims = [normalizedConfig.dimension, ...drillPath.map(d => d.dimensionCol)];
         return dataset.columns.some(c =>
             (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
         );
-    }, [config.dimension, drillPath, dataset.columns]);
+    }, [normalizedConfig.dimension, drillPath, dataset.columns]);
 
     const handleDrillDown = useCallback((params) => {
         if (!canDrill || !params.name) return;
@@ -324,9 +353,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             </div>
         );
 
-        const { type } = config;
-        const measures = Array.isArray(config?.measures) && config.measures.length > 0
-            ? config.measures
+        const { type } = normalizedConfig;
+        const measures = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
+            ? normalizedConfig.measures
             : ['__count__'];
 
         // Table type — keep HTML renderer
@@ -336,7 +365,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="border-b border-gray-200 dark:border-gray-700">
-                                <th className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{config.dimension}</th>
+                                <th className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{normalizedConfig.dimension}</th>
                                 {measures.map(m => <th key={m} className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{m}</th>)}
                             </tr>
                         </thead>
@@ -373,17 +402,17 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         // All other types — render via ECharts
         const exportStyleOverrides = isExportRenderMode
             ? {
-                ...(config.style || {}),
+                ...(normalizedConfig.style || {}),
                 labelMode: 'show',
                 tooltipEnabled: false,
-                fontSize: Math.max(Number(config?.style?.fontSize || 11), 12),
+                fontSize: Math.max(Number(normalizedConfig?.style?.fontSize || 11), 12),
             }
-            : (config.style || {});
+            : (normalizedConfig.style || {});
 
         let option = buildChartOption(
             type,
             chartData,
-            { ...config, dimension: effectiveDimension, measures, style: exportStyleOverrides },
+            { ...normalizedConfig, dimension: effectiveDimension, measures, style: exportStyleOverrides },
             theme,
             chartClarityMode,
             chartPaletteMode
@@ -415,7 +444,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                         <h3 className="text-[13px] font-bold text-gray-800 dark:text-gray-200 tracking-tight leading-none truncate">{semanticTitle}</h3>
                         <div className="flex items-center gap-2 mt-1">
                             <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{semanticContext}</p>
-                            {config.filters.length > 0 && <Filter size={8} className="text-blue-500" />}
+                            {normalizedConfig.filters?.length > 0 && <Filter size={8} className="text-blue-500" />}
                             {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
                             {!canDrill && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
                         </div>

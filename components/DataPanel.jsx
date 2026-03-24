@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { ChartType } from '../types';
 import { recommendCharts, assignRoles } from '../services/chartRecommender';
+import { autoAssignFields, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
 
 const CHART_ICON_MAP = {
     BAR: BarChart,
@@ -81,6 +82,19 @@ const ALL_CHART_TYPES = [
     ChartType.TABLE,
 ];
 
+const FIELD_ROLE_OPTIONS = [
+    { value: FieldRoles.X, label: 'X' },
+    { value: FieldRoles.Y, label: 'Y' },
+    { value: FieldRoles.LEGEND, label: 'Legend' },
+    { value: FieldRoles.SIZE, label: 'Size' },
+    { value: FieldRoles.COLOR, label: 'Color' },
+    { value: FieldRoles.HIERARCHY, label: 'Hierarchy' },
+    { value: FieldRoles.TIME, label: 'Time' },
+    { value: FieldRoles.VALUE, label: 'Value' },
+];
+
+const AGG_OPTIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+
 const OPERATORS_MAP = {
     string: [
         { label: 'Equals', value: 'EQUALS' },
@@ -145,6 +159,29 @@ const DataPanel = ({
         );
     }, [selectedDataset, activeChartConfig?.dimension, activeChartConfig?.measures]);
 
+    const effectiveAssignments = useMemo(() => {
+        if (!activeChartConfig) return [];
+        return convertOldConfig(activeChartConfig).assignments || [];
+    }, [activeChartConfig]);
+
+    const syncConfigFromAssignments = (nextAssignments = [], nextType) => {
+        if (!activeChartConfig) return;
+        const merged = configFromAssignments(nextType || activeChartConfig.type, nextAssignments);
+        onUpdateConfig({
+            type: nextType || activeChartConfig.type,
+            assignments: nextAssignments,
+            dimension: merged.dimension,
+            measures: merged.measures,
+            aggregation: merged.aggregation,
+            xAxisField: merged.xAxisField,
+            yAxisField: merged.yAxisField,
+            legendField: merged.legendField,
+            sizeField: merged.sizeField,
+            hierarchyFields: merged.hierarchyFields,
+            axisMode: 'auto',
+        });
+    };
+
     const handleSelectChartType = (type) => {
         if (!activeChartConfig || !selectedDataset) {
             onUpdateConfig({ type });
@@ -155,20 +192,12 @@ const DataPanel = ({
             dimension: activeChartConfig.dimension,
             measures: activeChartConfig.measures,
         });
+        const roleAssignments = (auto.assignments && auto.assignments.length > 0)
+            ? auto.assignments
+            : autoAssignFields(selectedDataset.columns, type);
 
-        onUpdateConfig({
-            type,
-            dimension: auto.dimension || activeChartConfig.dimension,
-            measures: Array.isArray(auto.measures) && auto.measures.length > 0 ? auto.measures : activeChartConfig.measures,
-            aggregation: auto.aggregation || activeChartConfig.aggregation,
-            axisMode: 'auto',
-            xAxisField: auto.xAxis || '',
-            yAxisField: auto.yAxis || '',
-            legendField: auto.legend || '',
-            sizeField: auto.size || '',
-            hierarchyFields: Array.isArray(auto.hierarchy) ? auto.hierarchy : [],
-            mode: auto.mode,
-        });
+        syncConfigFromAssignments(roleAssignments, type);
+        onUpdateConfig({ mode: auto.mode });
     };
 
     const prioritizedRecommendations = useMemo(() => {
@@ -213,16 +242,20 @@ const DataPanel = ({
     const handleFieldClick = (col) => {
         if (!activeChartConfig) return;
 
+        const currentAssignments = [...effectiveAssignments];
+
         if (col.type === 'string' || col.type === 'date') {
-            // Assign as dimension
-            onUpdateConfig({ dimension: col.name });
+            const filtered = currentAssignments.filter(a => a.role !== FieldRoles.X && a.role !== FieldRoles.TIME && a.role !== FieldRoles.LEGEND);
+            filtered.unshift({ field: col.name, role: col.type === 'date' ? FieldRoles.TIME : FieldRoles.X });
+            syncConfigFromAssignments(filtered);
         } else if (col.type === 'number') {
-            // Toggle in measures
-            const currentMeasures = activeChartConfig.measures || [];
-            if (currentMeasures.includes(col.name)) {
-                onUpdateConfig({ measures: currentMeasures.filter(m => m !== col.name) });
+            const idx = currentAssignments.findIndex(a => (a.role === FieldRoles.Y || a.role === FieldRoles.VALUE) && a.field === col.name);
+            if (idx >= 0) {
+                const next = currentAssignments.filter((a, i) => i !== idx);
+                syncConfigFromAssignments(next);
             } else {
-                onUpdateConfig({ measures: [...currentMeasures, col.name] });
+                const next = [...currentAssignments, { field: col.name, role: FieldRoles.Y, aggregation: activeChartConfig.aggregation || 'SUM' }];
+                syncConfigFromAssignments(next);
             }
         }
     };
@@ -240,7 +273,9 @@ const DataPanel = ({
         try {
             const payload = JSON.parse(event.dataTransfer.getData('text/plain'));
             if (payload?.type === 'string' || payload?.type === 'date') {
-                onUpdateConfig({ dimension: payload.name });
+                const next = effectiveAssignments.filter(a => a.role !== FieldRoles.X && a.role !== FieldRoles.TIME && a.role !== FieldRoles.LEGEND);
+                next.unshift({ field: payload.name, role: payload.type === 'date' ? FieldRoles.TIME : FieldRoles.X });
+                syncConfigFromAssignments(next);
             }
         } catch {
             // ignore invalid drag payload
@@ -253,14 +288,20 @@ const DataPanel = ({
         try {
             const payload = JSON.parse(event.dataTransfer.getData('text/plain'));
             if (payload?.type !== 'number') return;
-            const currentMeasures = activeChartConfig.measures || [];
-            if (!currentMeasures.includes(payload.name)) {
-                onUpdateConfig({ measures: [...currentMeasures, payload.name] });
+            const exists = effectiveAssignments.some(a => (a.role === FieldRoles.Y || a.role === FieldRoles.VALUE) && a.field === payload.name);
+            if (!exists) {
+                const next = [...effectiveAssignments, { field: payload.name, role: FieldRoles.Y, aggregation: activeChartConfig.aggregation || 'SUM' }];
+                syncConfigFromAssignments(next);
             }
         } catch {
             // ignore invalid drag payload
         }
     };
+
+    const roleDerivedConfig = useMemo(() => {
+        if (!activeChartConfig) return null;
+        return configFromAssignments(activeChartConfig.type, effectiveAssignments);
+    }, [activeChartConfig, effectiveAssignments]);
 
     const preventDropDefault = (event) => {
         event.preventDefault();
@@ -471,7 +512,7 @@ const DataPanel = ({
                                             className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800"
                                         >
                                             <p className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase mb-1">Dimension (category)</p>
-                                            <p className="text-[11px] font-bold text-blue-800 dark:text-blue-200">{activeChartConfig.dimension || '—'}</p>
+                                            <p className="text-[11px] font-bold text-blue-800 dark:text-blue-200">{roleDerivedConfig?.dimension || activeChartConfig.dimension || '—'}</p>
                                         </div>
                                         <div
                                             onDragOver={preventDropDefault}
@@ -479,13 +520,16 @@ const DataPanel = ({
                                             className="p-2.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800"
                                         >
                                             <p className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-1">Measures (values)</p>
-                                            {activeChartConfig.measures?.length ? (
+                                            {roleDerivedConfig?.measures?.length ? (
                                                 <div className="flex flex-wrap gap-1.5">
-                                                    {activeChartConfig.measures.map((measure) => (
+                                                    {roleDerivedConfig.measures.map((measure) => (
                                                         <span key={measure} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-200">
                                                             {measure}
                                                             <button
-                                                                onClick={() => onUpdateConfig({ measures: activeChartConfig.measures.filter(m => m !== measure) })}
+                                                                onClick={() => {
+                                                                    const next = effectiveAssignments.filter(a => a.field !== measure);
+                                                                    syncConfigFromAssignments(next);
+                                                                }}
                                                                 className="text-emerald-700/70 dark:text-emerald-200/80 hover:text-rose-500"
                                                             >
                                                                 <X size={10} />
@@ -499,11 +543,106 @@ const DataPanel = ({
                                         </div>
                                     </div>
                                 )}
+
+                                {activeChartConfig && (
+                                    <div className="space-y-2 mb-2">
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Field Roles</p>
+                                            <button
+                                                onClick={() => {
+                                                    const next = [...effectiveAssignments, { field: selectedDataset?.columns?.[0]?.name || '', role: FieldRoles.X }];
+                                                    syncConfigFromAssignments(next);
+                                                }}
+                                                className="p-1 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                                title="Add assignment"
+                                            >
+                                                <Plus size={12} />
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            {effectiveAssignments.map((assignment, idx) => (
+                                                <div key={`${assignment.field}-${assignment.role}-${idx}`} className="grid grid-cols-12 gap-1.5 items-center">
+                                                    <select
+                                                        value={assignment.field}
+                                                        onChange={(e) => {
+                                                            const next = [...effectiveAssignments];
+                                                            next[idx] = { ...next[idx], field: e.target.value };
+                                                            syncConfigFromAssignments(next);
+                                                        }}
+                                                        className="col-span-5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-medium text-gray-700 dark:text-gray-200"
+                                                    >
+                                                        {(selectedDataset?.columns || []).map((c) => (
+                                                            <option key={c.name} value={c.name}>{c.name}</option>
+                                                        ))}
+                                                        {assignment.field === '__count__' && <option value="__count__">__count__</option>}
+                                                    </select>
+                                                    <select
+                                                        value={assignment.role}
+                                                        onChange={(e) => {
+                                                            const next = [...effectiveAssignments];
+                                                            next[idx] = { ...next[idx], role: e.target.value };
+                                                            syncConfigFromAssignments(next);
+                                                        }}
+                                                        className="col-span-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-medium text-gray-700 dark:text-gray-200"
+                                                    >
+                                                        {FIELD_ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                                                    </select>
+                                                    <select
+                                                        value={assignment.aggregation || 'SUM'}
+                                                        onChange={(e) => {
+                                                            const next = [...effectiveAssignments];
+                                                            next[idx] = { ...next[idx], aggregation: e.target.value };
+                                                            syncConfigFromAssignments(next);
+                                                        }}
+                                                        className="col-span-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-medium text-gray-700 dark:text-gray-200"
+                                                    >
+                                                        {AGG_OPTIONS.map((agg) => <option key={agg} value={agg}>{agg}</option>)}
+                                                    </select>
+                                                    <button
+                                                        onClick={() => {
+                                                            const next = effectiveAssignments.filter((_, i) => i !== idx);
+                                                            syncConfigFromAssignments(next);
+                                                        }}
+                                                        className="col-span-1 p-1 rounded text-gray-500 dark:text-gray-400 hover:text-rose-500"
+                                                        title="Remove"
+                                                    >
+                                                        <X size={11} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Search Fields</label>
+                                    <div className="relative">
+                                        <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                                        <input
+                                            type="text"
+                                            value={fieldSearch}
+                                            onChange={(e) => setFieldSearch(e.target.value)}
+                                            placeholder="Search columns..."
+                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 pl-8 pr-8 text-[11px] font-medium text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                                        />
+                                        {fieldSearch && (
+                                            <button
+                                                onClick={() => setFieldSearch('')}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                                                title="Clear"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
                                 <p className="text-[9px] text-gray-400 dark:text-gray-500 italic">Click or drag text/date fields into Dimension and number fields into Measures.</p>
                                 <div className="space-y-1">
                                     {filteredColumns.map(col => {
-                                        const isDimension = activeChartConfig?.dimension === col.name;
-                                        const isMeasure = activeChartConfig?.measures?.includes(col.name);
+                                        const isDimension = roleDerivedConfig?.dimension === col.name;
+                                        const isMeasure = roleDerivedConfig?.measures?.includes(col.name);
                                         const isSelected = isDimension || isMeasure;
                                         return (
                                             <div
@@ -520,6 +659,11 @@ const DataPanel = ({
                                             </div>
                                         );
                                     })}
+                                    {filteredColumns.length === 0 && (
+                                        <div className="text-center py-4 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 text-[10px] font-semibold text-gray-400 dark:text-gray-500">
+                                            No fields match your search.
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -531,7 +675,15 @@ const DataPanel = ({
                                         {['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'].map(agg => (
                                             <button
                                                 key={agg}
-                                                onClick={() => onUpdateConfig({ aggregation: agg })}
+                                                onClick={() => {
+                                                    const nextAssignments = effectiveAssignments.map((a) => (
+                                                        [FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)
+                                                            ? { ...a, aggregation: agg }
+                                                            : a
+                                                    ));
+                                                    syncConfigFromAssignments(nextAssignments);
+                                                    onUpdateConfig({ aggregation: agg });
+                                                }}
                                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${activeChartConfig.aggregation === agg ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 border-gray-800 dark:border-gray-200' : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-400'}`}
                                             >
                                                 {agg}
