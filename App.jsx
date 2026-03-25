@@ -17,6 +17,7 @@ import RelationshipDiagram from './components/RelationshipDiagram';
 import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
 import AuthScreen from './components/AuthScreen';
 import HRAnalyticsDashboard from './components/hr/HRAnalyticsDashboard';
+import OrgChartPage from './pages/OrgChartPage.jsx';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -194,6 +195,16 @@ const App = () => {
     const [authUser, setAuthUser] = useState(() => readStorageJson(STORAGE_KEY_AUTH_USER, null));
     const [isAuthLoading, setIsAuthLoading] = useState(true);
     const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+    const [routePath, setRoutePath] = useState(() => window.location.pathname || '/');
+    const [orgExplorerChartId, setOrgExplorerChartId] = useState(null);
+
+    const navigatePath = (path) => {
+        const target = path || '/';
+        if (window.location.pathname !== target) {
+            window.history.pushState({}, '', target);
+        }
+        setRoutePath(target);
+    };
 
     const applyAuthSession = (token, user) => {
         setAuthToken(token || '');
@@ -237,6 +248,14 @@ const App = () => {
         return () => {
             isMounted = false;
         };
+    }, []);
+
+    useEffect(() => {
+        const onPopState = () => {
+            setRoutePath(window.location.pathname || '/');
+        };
+        window.addEventListener('popstate', onPopState);
+        return () => window.removeEventListener('popstate', onPopState);
     }, []);
 
     const handleLogin = async (payload) => {
@@ -967,6 +986,7 @@ const App = () => {
     };
 
     const currentPageCharts = useMemo(() => charts.filter(c => c.pageId === activePageId), [charts, activePageId]);
+    const currentPageOrgCharts = useMemo(() => currentPageCharts.filter(c => c.type === ChartType.ORG_CHART), [currentPageCharts]);
     const gridLayouts = useMemo(() => currentPageCharts.map(c => ({ i: c.id, ...c.layout })), [currentPageCharts]);
     const exportableVisualCount = useMemo(() => {
         if (exportScope === 'all') return charts.length;
@@ -1007,9 +1027,22 @@ const App = () => {
         return <AuthScreen onLogin={handleLogin} onSignUp={handleSignUp} isLoading={isAuthSubmitting} />;
     }
 
+    if (routePath === '/org-chart') {
+        return (
+            <OrgChartPage
+                datasets={datasets}
+                charts={charts}
+                selectedDatasetId={selectedDatasetId}
+                globalFilters={globalFilters}
+                initialChartId={orgExplorerChartId}
+                onBack={() => navigatePath('/')}
+            />
+        );
+    }
+
     return (
         <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
-            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => setView('data')} />
+            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { setView('data'); navigatePath('/'); }} />
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar setView={setView} currentView={view} />
                 <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
@@ -1134,6 +1167,19 @@ const App = () => {
                                         {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
                                         <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
                                     </button>
+                                    {currentPageOrgCharts.length > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                const pick = currentPageOrgCharts.find(c => c.id === activeChartId) || currentPageOrgCharts[0];
+                                                setOrgExplorerChartId(pick?.id || null);
+                                                navigatePath('/org-chart');
+                                            }}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${theme === 'dark' ? 'bg-indigo-900/40 text-indigo-100 border-indigo-700 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}
+                                        >
+                                            <Eye size={16} />
+                                            <span>Expand Org Chart</span>
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => setShowShareExportPopup(true)}
                                         disabled={exportableVisualCount === 0 || isExportingPdf || isExportingPpt || isPreparingExport}

@@ -436,6 +436,9 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
 
         const colorField = resolvedConfig?.colorField || null;
         const categoryColors = new Map();
+        const levelColors = isDark
+            ? ['#1e293b', '#334155', '#475569', '#64748b', '#94a3b8']
+            : ['#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd'];
         const colorFor = (value) => {
             const key = String(value || '').trim();
             if (!key) return null;
@@ -450,17 +453,27 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             const nodeColorValue = colorField
                 ? (node?.meta?.colorValue || node?.colorValue || null)
                 : (node?.colorValue || null);
-            const nodeColor = colorFor(nodeColorValue);
+            const nodeColor = colorFor(nodeColorValue) || levelColors[Math.min(depth, levelColors.length - 1)];
 
             const children = Array.isArray(node?.children)
                 ? node.children.map((child) => visit(child, depth + 1))
                 : [];
+
+            const designation = node?.meta?.labelValue || node?.label || '';
+            const department = node?.meta?.colorValue || node?.colorValue || '';
+            const directReports = Number(node?.directReports || 0);
+            const teamSize = Number(node?.teamSize || 1);
 
             return {
                 ...node,
                 id,
                 key: id,
                 name: String(node?.name || node?.label || id || 'Unknown'),
+                designation,
+                department,
+                directReports,
+                teamSize,
+                __depth: depth,
                 itemStyle: {
                     ...(node?.itemStyle || {}),
                     ...(nodeColor ? { color: nodeColor } : {}),
@@ -472,6 +485,79 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     color: isDark ? 'rgba(148,163,184,0.45)' : 'rgba(100,116,139,0.5)',
                     width: 1.15,
                 },
+                children: children.length > 0 ? children : undefined,
+            };
+        };
+
+        return visit(rootNode, 0);
+    };
+
+    const applyOrgSelectionState = (rootNode = null, selectedPathIds = [], selectedNodeId = '') => {
+        if (!rootNode || typeof rootNode !== 'object') return rootNode;
+
+        const pathSet = new Set((Array.isArray(selectedPathIds) ? selectedPathIds : []).filter(Boolean).map(String));
+        const selectedId = String(selectedNodeId || (selectedPathIds?.[selectedPathIds.length - 1] || '')).trim();
+        if (!selectedId && pathSet.size === 0) return rootNode;
+
+        const visit = (node) => {
+            const id = String(toOrgNodeId(node));
+            const children = Array.isArray(node?.children) ? node.children.map(visit) : [];
+            const hasSelectedDescendant = children.some((child) => child.__hasSelected);
+            const isSelected = selectedId ? id === selectedId : false;
+            const isPathNode = pathSet.has(id);
+            const isRelated = isSelected || isPathNode || hasSelectedDescendant;
+
+            const next = {
+                ...node,
+                itemStyle: {
+                    ...(node?.itemStyle || {}),
+                    opacity: isRelated ? 1 : 0.24,
+                    ...(isSelected ? { borderColor: '#dc2626', borderWidth: 3 } : {}),
+                    ...(!isSelected && isPathNode ? { borderColor: '#2563eb', borderWidth: 2.4 } : {}),
+                },
+                lineStyle: {
+                    ...(node?.lineStyle || {}),
+                    opacity: isRelated ? 1 : 0.2,
+                    ...(isPathNode ? { color: '#2563eb', width: 1.8 } : {}),
+                },
+                children: children.length > 0 ? children.map((child) => {
+                    const { __hasSelected, ...rest } = child;
+                    return rest;
+                }) : undefined,
+                __hasSelected: isSelected || isPathNode || hasSelectedDescendant,
+            };
+
+            return next;
+        };
+
+        const withMeta = visit(rootNode);
+        const { __hasSelected, ...clean } = withMeta;
+        return clean;
+    };
+
+    const applyOrgExpandMode = (rootNode = null, mode = 'default', collapseDepth = 1) => {
+        if (!rootNode || typeof rootNode !== 'object') return rootNode;
+        const normalizedMode = String(mode || 'default').toLowerCase();
+        const maxVisibleDepth = Number.isFinite(Number(collapseDepth))
+            ? Math.max(1, Number(collapseDepth))
+            : 1;
+
+        if (normalizedMode !== 'collapse-all' && normalizedMode !== 'expand-all') {
+            return rootNode;
+        }
+
+        const visit = (node, depth = 0) => {
+            const children = Array.isArray(node?.children)
+                ? node.children.map((child) => visit(child, depth + 1))
+                : [];
+
+            const collapsed = normalizedMode === 'expand-all'
+                ? false
+                : depth >= maxVisibleDepth;
+
+            return {
+                ...node,
+                collapsed,
                 children: children.length > 0 ? children : undefined,
             };
         };
@@ -1112,8 +1198,23 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         case ChartType.ORG_CHART: {
             const orgRoot = processedData?.[0]?.__orgTree || { name: 'Organization', children: [] };
             const orgSearchQuery = String(resolvedConfig?.orgSearchQuery || '').trim();
+            const selectedPathIds = Array.isArray(resolvedConfig?.orgSelectedPathIds) ? resolvedConfig.orgSelectedPathIds : [];
+            const selectedNodeId = String(resolvedConfig?.orgSelectedNodeId || '').trim();
+            const orgTreeExpandMode = String(resolvedConfig?.orgTreeExpandMode || 'default');
+            const orgCollapseDepth = Number.isFinite(Number(resolvedConfig?.orgCollapseDepth))
+                ? Number(resolvedConfig.orgCollapseDepth)
+                : 1;
             const colorizedTree = colorizeOrgTree(orgRoot);
             const { node: searchableTree, search } = applyOrgSearchState(colorizedTree, orgSearchQuery);
+            const expandModeTree = applyOrgExpandMode(searchableTree, orgTreeExpandMode, orgCollapseDepth);
+            const selectedTree = applyOrgSelectionState(expandModeTree, selectedPathIds, selectedNodeId);
+
+            const cardBg = isDark ? '#0f172a' : '#ffffff';
+            const cardBorder = isDark ? '#334155' : '#d1d5db';
+            const cardText = isDark ? '#f8fafc' : '#111827';
+            const cardSub = isDark ? '#cbd5e1' : '#374151';
+            const cardBadge = isDark ? '#1d4ed8' : '#dbeafe';
+            const cardBadgeText = isDark ? '#dbeafe' : '#1e3a8a';
 
             return {
                 ...base,
@@ -1128,22 +1229,24 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         const data = params?.data || {};
                         const meta = data?.meta || {};
                         const name = data?.name || meta?.labelValue || meta?.nodeValue || 'Unknown';
-                        const designation = meta?.labelValue || data?.label || 'N/A';
-                        const department = meta?.colorValue || data?.colorValue || 'N/A';
+                        const designation = data?.designation || meta?.labelValue || data?.label || 'N/A';
+                        const department = data?.department || meta?.colorValue || data?.colorValue || 'N/A';
                         const directReports = Number(data?.directReports || 0);
+                        const teamSize = Number(data?.teamSize || 1);
 
                         return `
                             <div style="font-weight:700;margin-bottom:6px">${name}</div>
                             <div>Designation: ${designation}</div>
                             <div>Department: ${department}</div>
                             <div>Direct Reports: ${directReports}</div>
+                            <div>Team Size: ${teamSize}</div>
                         `;
                     },
                 },
                 series: [
                     {
                         type: 'tree',
-                        data: [searchableTree],
+                        data: [selectedTree],
                         top: '5%',
                         left: '15%',
                         bottom: '5%',
@@ -1159,24 +1262,70 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         initialTreeDepth: 2,
                         nodeClick: 'expandAndCollapse',
                         animationDurationUpdate: 750,
-                        emphasis: { focus: 'ancestor' },
                         label: {
                             position: 'left',
                             verticalAlign: 'middle',
                             align: 'right',
-                            fontSize: Math.max(fontSize, 11),
-                            color: textColor,
+                            formatter: (params) => {
+                                const d = params?.data || {};
+                                const name = String(d?.name || 'Unknown');
+                                const designation = String(d?.designation || '');
+                                const department = String(d?.department || '');
+                                const directReports = Number(d?.directReports || 0);
+                                return [
+                                    `{name|${name}}`,
+                                    designation ? `{meta|${designation}}` : '',
+                                    department ? `{meta|${department}}` : '',
+                                    `{badge|👥 ${directReports} reports}`,
+                                ].filter(Boolean).join('\n');
+                            },
+                            backgroundColor: cardBg,
+                            borderColor: cardBorder,
+                            borderWidth: 1,
+                            borderRadius: 8,
+                            padding: [6, 8, 6, 8],
+                            lineHeight: 16,
+                            rich: {
+                                name: {
+                                    color: cardText,
+                                    fontWeight: 700,
+                                    fontSize: Math.max(11, fontSize),
+                                    lineHeight: 18,
+                                },
+                                meta: {
+                                    color: cardSub,
+                                    fontWeight: 500,
+                                    fontSize: Math.max(10, fontSize - 1),
+                                    lineHeight: 15,
+                                },
+                                badge: {
+                                    color: cardBadgeText,
+                                    backgroundColor: cardBadge,
+                                    padding: [2, 5, 2, 5],
+                                    borderRadius: 5,
+                                    fontSize: Math.max(9, fontSize - 2),
+                                    fontWeight: 700,
+                                    lineHeight: 15,
+                                },
+                            },
                         },
                         leaves: {
                             label: {
                                 position: 'right',
                                 align: 'left',
-                                color: subTextColor,
+                                color: textColor,
                             },
                         },
                         lineStyle: {
                             width: 1.2,
                             curveness: 0.45,
+                        },
+                        emphasis: {
+                            focus: 'ancestor',
+                            itemStyle: {
+                                shadowBlur: 12,
+                                shadowColor: isDark ? 'rgba(59,130,246,0.35)' : 'rgba(37,99,235,0.26)',
+                            },
                         },
                     },
                 ],

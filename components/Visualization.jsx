@@ -12,6 +12,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const { theme } = useTheme();
     const [drillPath, setDrillPath] = useState([]);
     const [orgSearchQuery, setOrgSearchQuery] = useState('');
+    const [orgSelectedPathIds, setOrgSelectedPathIds] = useState([]);
+    const [orgSelectedPathNames, setOrgSelectedPathNames] = useState([]);
+    const [orgSelectedNodeId, setOrgSelectedNodeId] = useState('');
     const chartRef = useRef(null);
 
     useEffect(() => {
@@ -25,6 +28,15 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     useEffect(() => {
         if (config?.type === ChartType.ORG_CHART) {
             setDrillPath([]);
+        }
+    }, [config?.type]);
+
+    useEffect(() => {
+        if (config?.type !== ChartType.ORG_CHART) {
+            setOrgSearchQuery('');
+            setOrgSelectedPathIds([]);
+            setOrgSelectedPathNames([]);
+            setOrgSelectedNodeId('');
         }
     }, [config?.type]);
 
@@ -278,6 +290,21 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
         const isOrgChart = normalizedConfig?.type === ChartType.ORG_CHART;
 
+        if (isOrgChart) {
+            const info = Array.isArray(params?.treePathInfo) ? params.treePathInfo : [];
+            const nextNames = info
+                .map((entry) => entry?.name)
+                .filter(Boolean);
+            const nextIds = info
+                .map((entry) => String(entry?.data?.id || entry?.data?.key || entry?.name || '').trim())
+                .filter(Boolean);
+            const clickedId = String(params?.data?.id || params?.data?.key || params?.name || '').trim();
+
+            setOrgSelectedPathNames(nextNames);
+            setOrgSelectedPathIds(nextIds);
+            setOrgSelectedNodeId(clickedId || nextIds[nextIds.length - 1] || '');
+        }
+
         if (onDataPointClick) {
             onDataPointClick({
                 chartId: config.id,
@@ -446,6 +473,8 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 dimension: effectiveDimension,
                 measures,
                 orgSearchQuery: type === ChartType.ORG_CHART ? orgSearchQuery : '',
+                orgSelectedPathIds: type === ChartType.ORG_CHART ? orgSelectedPathIds : [],
+                orgSelectedNodeId: type === ChartType.ORG_CHART ? orgSelectedNodeId : '',
                 style: exportStyleOverrides,
             },
             theme,
@@ -481,7 +510,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                             <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{semanticContext}</p>
                             {normalizedConfig.filters?.length > 0 && <Filter size={8} className="text-blue-500" />}
                             {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
-                            {!canDrill && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
+                            {!canDrill && normalizedConfig.type !== ChartType.ORG_CHART && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
                         </div>
                         <div className="flex flex-wrap items-start gap-2 mt-1.5 min-w-0">
                             <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-semibold whitespace-normal break-all max-w-full" title={`Dimension: ${effectiveDimension || 'N/A'}`}>
@@ -511,6 +540,16 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                                         Clear
                                     </button>
                                 )}
+                            </div>
+                        )}
+                        {normalizedConfig.type === ChartType.ORG_CHART && orgSelectedPathNames.length > 0 && (
+                            <div className={`mt-2 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold overflow-x-auto ${isDark ? 'bg-gray-700/60 text-gray-200' : 'bg-gray-50 text-gray-700'}`}>
+                                {orgSelectedPathNames.map((part, idx) => (
+                                    <React.Fragment key={`${part}-${idx}`}>
+                                        {idx > 0 && <ChevronRight size={9} className={isDark ? 'text-gray-400' : 'text-gray-400'} />}
+                                        <span className={`${idx === orgSelectedPathNames.length - 1 ? 'text-blue-500' : ''}`}>{part}</span>
+                                    </React.Fragment>
+                                ))}
                             </div>
                         )}
                     </div>

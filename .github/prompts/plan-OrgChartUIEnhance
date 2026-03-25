@@ -1,0 +1,245 @@
+You are working on a React + TypeScript analytics platform (ChillView) using Tailwind CSS and Apache ECharts.
+
+The app already supports an Org Chart (tree chart), but it is currently embedded inside a dashboard and is hard to explore due to space and density issues.
+
+Your task is to build a **full-page Org Chart Explore view** with modern UI/UX similar to Power BI Focus Mode or OrgVue.
+
+---
+
+# 🎯 GOAL
+
+Create a dedicated page `/org-chart` that provides:
+
+1. Full-screen org chart visualization
+2. Search and highlight functionality
+3. Zoom and pan controls
+4. Expand/collapse controls
+5. Filters (Department, Location, Role)
+6. Breadcrumb navigation
+7. Clean layout and spacing
+
+---
+
+# 🧩 1. PAGE LAYOUT
+
+Create a new page:
+
+```tsx
+/pages/OrgChartPage.tsx
+```
+
+---
+
+## Layout structure:
+
+```tsx
+<div className="flex flex-col h-screen bg-gray-950 text-white">
+
+  {/* Top Bar */}
+  <div className="flex items-center justify-between p-3 border-b border-gray-800">
+    <h1 className="text-lg font-semibold">Org Chart Explorer</h1>
+
+    <div className="flex gap-2">
+      <button>Reset</button>
+      <button>Collapse All</button>
+      <button>Expand All</button>
+    </div>
+  </div>
+
+  {/* Controls */}
+  <div className="flex items-center gap-4 p-3 border-b border-gray-800">
+
+    <input
+      placeholder="Search employee..."
+      className="px-3 py-2 bg-gray-800 rounded-md w-64"
+    />
+
+    <select>Department</select>
+    <select>Location</select>
+    <select>Role</select>
+
+  </div>
+
+  {/* Chart Area */}
+  <div className="flex-1 relative">
+    <OrgChart />
+  </div>
+
+  {/* Breadcrumb */}
+  <div className="p-2 border-t border-gray-800 text-sm">
+    Organization / Department / Manager / Team
+  </div>
+
+</div>
+```
+
+---
+
+# 🔍 2. SEARCH FUNCTIONALITY
+
+Implement search behavior:
+
+* User types employee name
+* Find matching node
+* Expand all parent nodes
+* Highlight the node
+* Center/zoom to that node
+
+```ts
+function handleSearch(query: string) {
+  // traverse tree
+  // expand path
+  // mark node as highlighted
+}
+```
+
+---
+
+# 🧭 3. BREADCRUMB NAVIGATION
+
+* Update breadcrumb when user clicks a node
+* Show full path from root to selected node
+
+```ts
+function getPath(node) {
+  // return [Org, Dept, Manager, Employee]
+}
+```
+
+---
+
+# 🔄 4. EXPAND / COLLAPSE CONTROLS
+
+Add controls:
+
+* Collapse All → show only root + 1 level
+* Expand All → expand entire tree (with caution)
+
+```ts
+function collapseAll(tree) {}
+function expandAll(tree) {}
+```
+
+---
+
+# 🔍 5. ZOOM & PAN (CRITICAL)
+
+Enable:
+
+```ts
+series: [{
+  roam: true
+}]
+```
+
+---
+
+# 🎨 6. IMPROVED NODE DESIGN
+
+Use card-style nodes:
+
+* Name
+* Designation
+* Department
+* Team size
+
+```ts
+label: {
+  formatter: (params) => {
+    const d = params.data;
+    return `
+${d.name}
+${d.designation}
+👥 ${d.teamSize} reports
+`;
+  }
+}
+```
+
+---
+
+# 🎯 7. COLOR CODING
+
+Color nodes based on department:
+
+```ts
+itemStyle: {
+  color: getColorByDepartment(data.department)
+}
+```
+
+---
+
+# ⚡ 8. PERFORMANCE OPTIMIZATION
+
+* Set initial depth:
+
+```ts
+initialTreeDepth: 2
+```
+
+* Avoid rendering full tree initially
+* Memoize tree data
+
+---
+
+# 🎛️ 9. FILTERING SYSTEM
+
+Filters should update the dataset before rendering:
+
+* Department filter
+* Location filter
+* Role filter
+
+```ts
+function applyFilters(data, filters) {
+  return data.filter(row => {
+    // filter logic
+  });
+}
+```
+
+---
+
+# 🔗 10. INTEGRATION
+
+From dashboard:
+
+Add button:
+
+```tsx
+<button onClick={() => navigate('/org-chart')}>
+  Expand Org Chart
+</button>
+```
+
+Pass:
+
+* dataset
+* field mappings (node, parent, label)
+
+---
+
+# 🧪 11. TEST CASES
+
+Ensure:
+
+* Works with 1000+ nodes
+* Search is fast and accurate
+* No UI overlap
+* Smooth zoom/pan
+* Expand/collapse works correctly
+
+---
+
+# 🚀 FINAL EXPECTATION
+
+After implementation:
+
+* Org chart is easy to explore
+* UI is clean and professional
+* Users can navigate large hierarchies
+* Matches enterprise BI tool experience
+
+---
+
