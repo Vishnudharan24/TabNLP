@@ -54,6 +54,31 @@ const SHARE_QUERY_PARAM = 'reportShare';
 const SHARE_SCHEMA_VERSION = 1;
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
+const APP_BASE_URL = (() => {
+    const raw = String(import.meta.env.BASE_URL || '/').trim() || '/';
+    const withLeading = raw.startsWith('/') ? raw : `/${raw}`;
+    return withLeading.endsWith('/') ? withLeading : `${withLeading}/`;
+})();
+
+const normalizeRoutePath = (pathname) => {
+    const raw = String(pathname || '/').trim() || '/';
+    if (APP_BASE_URL !== '/' && raw.startsWith(APP_BASE_URL)) {
+        const suffix = raw.slice(APP_BASE_URL.length);
+        return suffix ? `/${suffix.replace(/^\/+/, '')}` : '/';
+    }
+    return raw;
+};
+
+const toBrowserRoutePath = (internalPath) => {
+    const internal = String(internalPath || '/').trim() || '/';
+    const normalized = internal.startsWith('/') ? internal : `/${internal}`;
+    if (APP_BASE_URL === '/') return normalized;
+    const baseNoTrailing = APP_BASE_URL.replace(/\/$/, '');
+    return normalized === '/'
+        ? `${baseNoTrailing}/`
+        : `${baseNoTrailing}${normalized}`;
+};
+
 const readStorageJson = (key, fallback) => {
     try {
         const raw = localStorage.getItem(key);
@@ -195,15 +220,16 @@ const App = () => {
     const [authUser, setAuthUser] = useState(() => readStorageJson(STORAGE_KEY_AUTH_USER, null));
     const [isAuthLoading, setIsAuthLoading] = useState(true);
     const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
-    const [routePath, setRoutePath] = useState(() => window.location.pathname || '/');
+    const [routePath, setRoutePath] = useState(() => normalizeRoutePath(window.location.pathname || '/'));
     const [orgExplorerChartId, setOrgExplorerChartId] = useState(null);
 
     const navigatePath = (path) => {
-        const target = path || '/';
-        if (window.location.pathname !== target) {
-            window.history.pushState({}, '', target);
+        const internalTarget = path || '/';
+        const browserTarget = toBrowserRoutePath(internalTarget);
+        if (window.location.pathname !== browserTarget) {
+            window.history.pushState({}, '', browserTarget);
         }
-        setRoutePath(target);
+        setRoutePath(normalizeRoutePath(internalTarget));
     };
 
     const applyAuthSession = (token, user) => {
@@ -252,7 +278,7 @@ const App = () => {
 
     useEffect(() => {
         const onPopState = () => {
-            setRoutePath(window.location.pathname || '/');
+            setRoutePath(normalizeRoutePath(window.location.pathname || '/'));
         };
         window.addEventListener('popstate', onPopState);
         return () => window.removeEventListener('popstate', onPopState);

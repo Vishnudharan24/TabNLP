@@ -22,7 +22,10 @@ const inferField = (columns = [], regexList = []) => {
     return '';
 };
 
-const applyGlobalAndLocalFilters = (rows = [], globalFilters = [], localFilters = {}, fields = {}) => {
+const toKey = (value) => String(value ?? '').trim();
+const toNorm = (value) => String(value ?? '').trim().toLowerCase();
+
+const applyGlobalFilters = (rows = [], globalFilters = []) => {
     let scoped = Array.isArray(rows) ? rows : [];
 
     if (Array.isArray(globalFilters) && globalFilters.length > 0) {
@@ -41,20 +44,68 @@ const applyGlobalAndLocalFilters = (rows = [], globalFilters = [], localFilters 
         }));
     }
 
+    return scoped;
+};
+
+const applyLocalFilters = (rows = [], localFilters = {}, fields = {}) => {
+    let scoped = Array.isArray(rows) ? rows : [];
+
     const { department, location, role } = localFilters || {};
     const { departmentField, locationField, roleField } = fields || {};
 
     if (department && departmentField) {
-        scoped = scoped.filter((row) => String(row?.[departmentField] || '') === String(department));
+        const expected = toNorm(department);
+        scoped = scoped.filter((row) => toNorm(row?.[departmentField]) === expected);
     }
     if (location && locationField) {
-        scoped = scoped.filter((row) => String(row?.[locationField] || '') === String(location));
+        const expected = toNorm(location);
+        scoped = scoped.filter((row) => toNorm(row?.[locationField]) === expected);
     }
     if (role && roleField) {
-        scoped = scoped.filter((row) => String(row?.[roleField] || '') === String(role));
+        const expected = toNorm(role);
+        scoped = scoped.filter((row) => toNorm(row?.[roleField]) === expected);
     }
 
     return scoped;
+};
+
+const includeAncestorRows = (allRows = [], matchedRows = [], nodeField = '', parentField = '') => {
+    const nodeCol = String(nodeField || '').trim();
+    const parentCol = String(parentField || '').trim();
+    if (!nodeCol || !parentCol) return matchedRows;
+
+    const baseRows = Array.isArray(allRows) ? allRows : [];
+    const filteredRows = Array.isArray(matchedRows) ? matchedRows : [];
+
+    const rowByNode = new Map();
+    baseRows.forEach((row) => {
+        const key = toKey(row?.[nodeCol]);
+        if (key && !rowByNode.has(key)) {
+            rowByNode.set(key, row);
+        }
+    });
+
+    const includedNodeKeys = new Set();
+    filteredRows.forEach((row) => {
+        const key = toKey(row?.[nodeCol]);
+        if (key) includedNodeKeys.add(key);
+    });
+
+    const queue = [...includedNodeKeys];
+    while (queue.length > 0) {
+        const nodeKey = queue.pop();
+        const row = rowByNode.get(nodeKey);
+        if (!row) continue;
+
+        const parentKey = toKey(row?.[parentCol]);
+        if (!parentKey || includedNodeKeys.has(parentKey)) continue;
+        if (!rowByNode.has(parentKey)) continue;
+
+        includedNodeKeys.add(parentKey);
+        queue.push(parentKey);
+    }
+
+    return baseRows.filter((row) => includedNodeKeys.has(toKey(row?.[nodeCol])));
 };
 
 const uniqueValues = (rows = [], field = '') => {
@@ -155,9 +206,75 @@ const OrgChartPage = ({
         return { departmentField, locationField, roleField };
     }, [dataset?.columns, mapping.colorField, mapping.labelField]);
 
+    const globalScopedRows = useMemo(() => {
+        return applyGlobalFilters(dataset?.data || [], globalFilters);
+    }, [dataset?.data, globalFilters]);
+
     const filteredRows = useMemo(() => {
-        return applyGlobalAndLocalFilters(dataset?.data || [], globalFilters, filters, auxiliaryFields);
-    }, [dataset?.data, globalFilters, filters, auxiliaryFields]);
+        const localMatchedRows = applyLocalFilters(globalScopedRows, filters, auxiliaryFields);
+        return includeAncestorRows(globalScopedRows, localMatchedRows, mapping.nodeField, mapping.parentField);
+    }, [globalScopedRows, filters, auxiliaryFields, mapping.nodeField, mapping.parentField]);
+
+    const isFilterActive = useMemo(
+        () => Boolean(filters.department || filters.location || filters.role),
+        [filters.department, filters.location, filters.role]
+    );
+
+    const effectiveOrgTreeExpandMode = useMemo(() => {
+        if (searchQuery.trim()) return 'expand-all';
+        return orgTreeExpandMode;
+    }, [searchQuery, orgTreeExpandMode]);
+
+    const effectiveOrgCollapseDepth = useMemo(() => {
+        if (effectiveOrgTreeExpandMode === 'expand-all') return -1;
+        if (isFilterActive) return 3;
+        return 1;
+    }, [effectiveOrgTreeExpandMode, isFilterActive]);
+
+    const orgDisableAnimation = useMemo(
+        () => Boolean(isFilterActive || searchQuery.trim()),
+        [isFilterActive, searchQuery]
+    );
+
+    const chartRenderKey = useMemo(() => {
+        const parts = [
+            activeOrgChartId || 'org',
+            filters.department || '-',
+            filters.location || '-',
+            filters.role || '-',
+            searchQuery || '-',
+            String(filteredRows.length),
+            effectiveOrgTreeExpandMode,
+            String(effectiveOrgCollapseDepth),
+        ];
+        return parts.join('|');
+    }, [
+        activeOrgChartId,
+        filters.department,
+        filters.location,
+        filters.role,
+        searchQuery,
+        filteredRows.length,
+        effectiveOrgTreeExpandMode,
+        effectiveOrgCollapseDepth,
+    ]);
+
+    useEffect(() => {
+        const instance = chartRef.current;
+        if (!instance) return;
+        instance.dispatchAction({ type: 'restore' });
+        setZoomPct(100);
+    }, [activeOrgChartId, filters.department, filters.location, filters.role]);
+
+    useEffect(() => {
+        const visibleIds = new Set(filteredRows.map((row) => toKey(row?.[mapping.nodeField])).filter(Boolean));
+        const hasSelected = selectedNodeId && visibleIds.has(toKey(selectedNodeId));
+        if (!hasSelected) {
+            if (selectedNodeId) setSelectedNodeId('');
+            if (selectedPathIds.length > 0) setSelectedPathIds([]);
+            if (selectedPathNames.length > 0) setSelectedPathNames([]);
+        }
+    }, [filteredRows, mapping.nodeField, selectedNodeId, selectedPathIds, selectedPathNames]);
 
     const treePayload = useMemo(() => {
         if (!mapping.nodeField || !mapping.parentField) {
@@ -188,8 +305,9 @@ const OrgChartPage = ({
                 orgSearchQuery: searchQuery,
                 orgSelectedPathIds: selectedPathIds,
                 orgSelectedNodeId: selectedNodeId,
-                orgTreeExpandMode,
-                orgCollapseDepth: 1,
+                orgTreeExpandMode: effectiveOrgTreeExpandMode,
+                orgCollapseDepth: effectiveOrgCollapseDepth,
+                orgDisableAnimation,
                 style: {
                     ...(resolvedConfig?.style || {}),
                     labelMode: 'show',
@@ -207,7 +325,9 @@ const OrgChartPage = ({
         searchQuery,
         selectedPathIds,
         selectedNodeId,
-        orgTreeExpandMode,
+        effectiveOrgTreeExpandMode,
+        effectiveOrgCollapseDepth,
+        orgDisableAnimation,
         isDark,
     ]);
 
@@ -255,9 +375,22 @@ const OrgChartPage = ({
         }
     };
 
-    const departmentOptions = useMemo(() => uniqueValues(dataset?.data || [], auxiliaryFields.departmentField), [dataset?.data, auxiliaryFields.departmentField]);
-    const locationOptions = useMemo(() => uniqueValues(dataset?.data || [], auxiliaryFields.locationField), [dataset?.data, auxiliaryFields.locationField]);
-    const roleOptions = useMemo(() => uniqueValues(dataset?.data || [], auxiliaryFields.roleField), [dataset?.data, auxiliaryFields.roleField]);
+    const departmentOptions = useMemo(
+        () => uniqueValues(globalScopedRows, auxiliaryFields.departmentField),
+        [globalScopedRows, auxiliaryFields.departmentField]
+    );
+
+    const locationOptions = useMemo(() => {
+        if (!auxiliaryFields.locationField) return [];
+        const scoped = applyLocalFilters(globalScopedRows, { department: filters.department }, auxiliaryFields);
+        return uniqueValues(scoped, auxiliaryFields.locationField);
+    }, [globalScopedRows, filters.department, auxiliaryFields]);
+
+    const roleOptions = useMemo(() => {
+        if (!auxiliaryFields.roleField) return [];
+        const scoped = applyLocalFilters(globalScopedRows, { department: filters.department, location: filters.location }, auxiliaryFields);
+        return uniqueValues(scoped, auxiliaryFields.roleField);
+    }, [globalScopedRows, filters.department, filters.location, auxiliaryFields]);
 
     if (!dataset) {
         return (
@@ -352,6 +485,7 @@ const OrgChartPage = ({
 
             <div className="flex-1 relative">
                 <ReactECharts
+                    key={chartRenderKey}
                     option={option}
                     style={{ height: '100%', width: '100%' }}
                     opts={{ renderer: 'canvas' }}
@@ -362,6 +496,13 @@ const OrgChartPage = ({
                         chartRef.current = instance;
                     }}
                 />
+                {isFilterActive && filteredRows.length === 0 && (
+                    <div className={`absolute inset-0 flex items-center justify-center pointer-events-none ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                        <div className={`px-4 py-2 rounded-lg text-sm font-medium ${isDark ? 'bg-gray-900/90 border border-gray-700' : 'bg-white/90 border border-gray-200'}`}>
+                            No employees match current filters
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className={`p-2 border-t text-sm ${isDark ? 'border-gray-800 text-gray-300' : 'border-gray-200 text-gray-700 bg-white'}`}>
@@ -369,7 +510,7 @@ const OrgChartPage = ({
                     ? selectedPathNames.join(' / ')
                     : 'Organization'}
                 <span className={`ml-3 text-xs ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                    {`${toLabel(mapping.nodeField)} → ${toLabel(mapping.parentField)} • ${treePayload?.meta?.totalNodes || 0} nodes`}
+                    {`${toLabel(mapping.nodeField)} → ${toLabel(mapping.parentField)} • ${filteredRows.length}/${globalScopedRows.length} rows • ${treePayload?.meta?.totalNodes || 0} nodes`}
                 </span>
             </div>
         </div>

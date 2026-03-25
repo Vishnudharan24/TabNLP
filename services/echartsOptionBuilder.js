@@ -1204,6 +1204,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             const orgCollapseDepth = Number.isFinite(Number(resolvedConfig?.orgCollapseDepth))
                 ? Number(resolvedConfig.orgCollapseDepth)
                 : 1;
+            const orgDisableAnimation = Boolean(resolvedConfig?.orgDisableAnimation);
             const colorizedTree = colorizeOrgTree(orgRoot);
             const { node: searchableTree, search } = applyOrgSearchState(colorizedTree, orgSearchQuery);
             const expandModeTree = applyOrgExpandMode(searchableTree, orgTreeExpandMode, orgCollapseDepth);
@@ -1261,7 +1262,9 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         expandAndCollapse: true,
                         initialTreeDepth: 2,
                         nodeClick: 'expandAndCollapse',
-                        animationDurationUpdate: 750,
+                        animationDuration: orgDisableAnimation ? 0 : 500,
+                        animationDurationUpdate: orgDisableAnimation ? 0 : 750,
+                        animationEasingUpdate: orgDisableAnimation ? 'linear' : 'cubicOut',
                         label: {
                             position: 'left',
                             verticalAlign: 'middle',

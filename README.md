@@ -1,148 +1,94 @@
-# ChillView
+# PowerAnalytics Desktop
 
-A desktop-style analytics dashboard built with React, featuring interactive visualizations with ECharts and a customizable grid layout.
+PowerAnalytics Desktop is a React + FastAPI analytics workspace for ingesting data (API/SFTP), profiling datasets, and building interactive dashboards with ECharts.
 
-## Features
+## What is included
 
-- **Interactive Charts** – Built with ECharts for rich, responsive visualizations
-- **Draggable Grid Layout** – Customizable dashboard panels via React Grid Layout
-- **Modern UI** – Clean interface with Lucide React icons
+- React frontend (Vite)
+- FastAPI backend for ingestion + auth
+- MongoDB-backed dataset and source-config storage
+- Smart chart recommendation + configurable ECharts visuals
+- HR analytics dashboard modules
 
-## Advanced Analytics Features
+## Tech stack
 
-- **Smart Chart Recommender** – Automatically ranks and suggests chart types from your dataset profile
-- **Drag-and-Drop Builder** – Fast assignment of dimension and measure fields in chart configuration
-- **Drill-Down + Drill-Through** – Click into summarized visuals and open deeper record-level context
-- **Cross-Filtering** – Interactions on one visual can filter linked visuals in the same view
-- **Formatting Controls** – Configure labels, tooltips, fonts, axis labels, and color modes (single/multi)
-- **Export-Ready Rendering** – Improved static readability for export output (labels/legend/axis clarity)
-
-## Product Benchmark
-
-For a current comparison of this app against Microsoft Power BI capabilities,
-see [POWERBI_COMPARISON.md](./POWERBI_COMPARISON.md).
-
-## Tech Stack
-
-| Category       | Technology              |
-| -------------- | ----------------------- |
-| Framework      | React 19                |
-| Build Tool     | Vite 6                  |
-| Charts         | ECharts 6               |
-| Layout         | React Grid Layout       |
-| Icons          | Lucide React            |
-| Deployment     | GitHub Pages             |
-
-## Supported Chart Types
-
-The application ships with **43 chart types** across 7 categories, all rendered using Apache ECharts.
-
-| Category | Charts |
+| Layer | Technology |
 |---|---|
-| **Bar Charts** | Clustered Bar · Stacked Bar · 100% Stacked Bar · Horizontal Bar · Horizontal Stacked · Horizontal 100% · Waterfall · Range Bar |
-| **Line Charts** | Smooth Line · Straight Line · Step Line · Dashed Line · Multi-Axis Line · Area-Line Mix |
-| **Area Charts** | Smooth Area · Step Area · Stacked Area · 100% Stacked Area · Gradient Area · Reverse Area |
-| **Circular / Part-to-Whole** | Pie · Donut · Semi Pie · Semi Donut · Rose (Nightingale) · Sunburst · Radial Bar · Radar |
-| **Distribution & Correlation** | Scatter · Bubble · Scatter + Line · Treemap · Heatmap |
-| **Combo Charts** | Bar + Line · Stacked Bar + Line · Area + Line |
-| **Indicators** | KPI Single · KPI Progress · KPI Bullet · Table · Card List · Gauge · Sparkline |
+| Frontend | React 19, Vite 6 |
+| Visualization | Apache ECharts, echarts-for-react |
+| Data grid/export | AG Grid, html2canvas, jsPDF, PptxGenJS |
+| Backend | FastAPI, Uvicorn |
+| Data processing | pandas, openpyxl, httpx, paramiko |
+| Database | MongoDB (motor/pymongo) |
 
-## Dynamic Chart Recommendation Logic
+## Quick start
 
-Instead of manually picking a chart, the app **automatically recommends the best chart type** based on the shape of your data. The recommendation engine lives in `services/chartRecommender.js`.
+### 1) Frontend setup
 
-### How It Works
-
-1. **Column profiling** — Every column in the dataset is classified as `number`, `string` (categorical), or `date`.
-2. **Scoring** — A set of heuristic rules generates a score (0–100) for each chart type based on how many numeric, categorical, and date columns are present, along with the currently assigned dimension and measures.
-3. **De-duplication** — If a chart type is matched by multiple rules only the highest score is kept.
-4. **Ranking** — Results are sorted by score descending; the top result is auto-selected.
-
-### Recommendation Rules (summary)
-
-| Data Shape | Recommended Charts | Top Score |
-|---|---|---|
-| 1 categorical + 1+ numeric | Clustered Bar, Horizontal Bar, Stacked Bar, 100% Bar | 90 |
-| 1+ date + 1+ numeric | Smooth Line, Straight Line, Smooth Area, Stacked Area | 95 |
-| 2+ numeric | Scatter, Bubble (3+ numeric) | 85 |
-| 1 categorical + 2+ numeric | Combo Bar+Line, Combo Area+Line | 82 |
-| 1 categorical + 3+ numeric | Radar, Radial Bar | 72 |
-| 1 categorical + 1 numeric | Pie, Donut, Treemap, Rose, Sunburst | 75 |
-| 2+ categorical + 1 numeric | Heatmap | 75 |
-| Any numeric | KPI Single, Gauge, Sparkline | 60 |
-| Always | Table | 40 |
-
-### Example Flow
-
-```
-User loads CSV ──▶ Column profiling detects:
-                     • "Department" → string (categorical)
-                     • "Revenue"    → number
-                     • "Profit"     → number
-
-Recommender scores:
-  Clustered Bar     90
-  Stacked Bar       85
-  Scatter           85
-  Combo Bar+Line    82
-  Horizontal Bar    82
-  …
-
-Top pick → Clustered Bar (auto-rendered)
-User can override with any other chart from the ranked list.
-```
-
-### Chart Option Builder
-
-Once a chart type is selected, `services/echartsOptionBuilder.js` converts the visual type, processed data, config (dimension + measures), and theme (`light` / `dark`) into a ready-to-use ECharts option object. Each chart type has a dedicated branch in a `switch` statement that produces fully themed, responsive chart options — including tooltips, legends, axis styles, animations, and dark-mode support.
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js (v18 or later recommended)
-- npm
-
-### Installation
+Install dependencies:
 
 ```bash
-git clone https://github.com/Vishnudharan24/TabNLP.git
-cd TabNLP/poweranalytics-desktop
 npm install
 ```
 
-### Development
+Run development server:
 
 ```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:5173`.
+Default frontend URL: http://localhost:3000
 
-### Build
+> In development, `/api` is proxied to `http://localhost:8000` by Vite.
 
-```bash
-npm run build
-```
+### 2) Backend setup
 
-### Preview Production Build
+From the `backend` folder, install Python dependencies and run the API:
 
 ```bash
-npm run preview
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Deploy to GitHub Pages
+## Environment variables
 
-```bash
-npm run deploy
-```
+### Frontend
 
-This builds the project and publishes the `dist` folder to GitHub Pages.
+- `VITE_BACKEND_BASE_URL` (optional): API base URL used by the client (default `/api`)
+- `VITE_BACKEND_PROXY_TARGET` (optional): Vite proxy target (default `http://localhost:8000`)
 
-## Live Demo
+### Backend
+
+- `AUTH_SECRET` (**required**): token signing secret
+- `AUTH_TOKEN_DAYS` (optional, default `7`): auth token expiry in days
+- `FRONTEND_ORIGINS` (optional): comma-separated allowed CORS origins
+- `MONGODB_URI` (optional, default `mongodb://localhost:27017`)
+- `MONGODB_DB_NAME` (optional, default `ingestion_db`)
+
+## Available frontend scripts
+
+- `npm run dev` — start dev server
+- `npm run build` — production build
+- `npm run preview` — preview production build locally
+- `npm run deploy` — publish `dist` to GitHub Pages
+
+## Backend API overview
+
+- Auth: `/auth/signup`, `/auth/login`, `/auth/me`
+- Ingestion: `/ingest`, `/ingest/source/{source_id}`
+- Source configs: `/source-config` (+ `GET`, `POST`, `PATCH`)
+- Dataset retrieval: `/datasets`, `/datasets/latest`, `/datasets/{document_id}`
+- Test helpers: `/test/*` endpoints for local Excel/SFTP flows
+
+## Project references
+
+- Backend architecture notes: [backend/BACKEND_ARCHITECTURE.md](./backend/BACKEND_ARCHITECTURE.md)
+- Product benchmark vs Power BI: [POWERBI_COMPARISON.md](./POWERBI_COMPARISON.md)
+
+## Live demo
 
 [https://Vishnudharan24.github.io/TabNLP](https://Vishnudharan24.github.io/TabNLP)
 
 ## License
 
-This project is private.
+Private project.
