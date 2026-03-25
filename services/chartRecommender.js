@@ -15,6 +15,7 @@ const SUPPORTED_RECOMMENDATION_CHARTS = [
     ChartType.SCATTER,
     ChartType.BUBBLE,
     ChartType.HEATMAP,
+    ChartType.ORG_CHART,
     ChartType.TREEMAP,
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
@@ -47,6 +48,7 @@ const toCanonicalChart = (chartType) => CHART_ALIASES[chartType] || chartType;
 
 const HIERARCHY_RISKY_FIELD_REGEX = /(\b(id|employee\s*id|emp\s*id|email|mail|name|full\s*name|first\s*name|last\s*name)\b)/i;
 const isRiskyHierarchyField = (fieldName = '') => HIERARCHY_RISKY_FIELD_REGEX.test(String(fieldName || ''));
+const ORG_HINT_REGEX = /(employee|emp|manager|supervisor|report|reports\s*to|parent|org|designation|title|department|dept)/i;
 
 const normalizeColType = (type) => {
     if (type === 'number') return 'numeric';
@@ -191,6 +193,13 @@ export function scoreChart(chartType, profile, selectedFields = {}) {
             if (profile.categoricalCount >= 2 && profile.hasNumeric) add(48, 'Hierarchical categorical structure detected');
             else if (profile.hasCategorical) add(26, 'Treemap can still group a single category dimension');
             break;
+        case ChartType.ORG_CHART: {
+            const orgHintFields = profile.columns.filter((c) => ORG_HINT_REGEX.test(String(c?.name || '')));
+            if (orgHintFields.length >= 2) add(58, 'Detected reporting hierarchy signals (employee/manager/department columns)');
+            else if (profile.categoricalCount >= 2) add(32, 'Org chart can use two categorical fields as node-parent mapping');
+            else add(8, 'Org chart requires stronger hierarchy signals');
+            break;
+        }
         case ChartType.SUNBURST:
             if (profile.categoricalCount >= 2 && profile.hasNumeric) add(46, 'Hierarchical composition is a strong sunburst fit');
             else if (profile.hasCategorical) add(24, 'Sunburst can fallback to shallow hierarchy');
@@ -241,6 +250,10 @@ export function scoreChart(chartType, profile, selectedFields = {}) {
     if (!profile.hasNumeric && ![ChartType.BAR, ChartType.PIE, ChartType.DONUT, ChartType.TABLE].includes(type)) {
         score -= 18;
         reasons.push('No numeric measure available; heavy fallback required');
+    }
+    if (type === ChartType.ORG_CHART && profile.categoricalCount < 2) {
+        score -= 20;
+        reasons.push('Org chart needs at least two categorical fields for node-parent mapping');
     }
 
     return {
@@ -379,6 +392,66 @@ export function assignRoles(chartType, columns, rows = [], selectedFields = {}) 
         if (highCardHierarchy.length > 0) {
             assignments.warnings.push(`High-cardinality hierarchy fields detected: ${highCardHierarchy.join(', ')}. Small nodes may be grouped into Others.`);
         }
+    }
+
+    if (type === ChartType.ORG_CHART) {
+        const sortedCategorical = [...profile.categorical]
+            .sort((a, b) => (a.cardinality || 999999) - (b.cardinality || 999999));
+
+        const byNameLower = sortedCategorical.map((c) => ({
+            ...c,
+            lower: String(c.name || '').toLowerCase(),
+        }));
+
+        const firstByRegex = (regex) => byNameLower.find((c) => regex.test(c.lower))?.name;
+
+        const nodeField = firstByRegex(/(^|\b)(employee\s*id|emp\s*id|employee|staff\s*id|person\s*id|full\s*name|employee\s*name|name)(\b|$)/)
+            || sortedCategorical[0]?.name
+            || null;
+        const parentField = firstByRegex(/(^|\b)(manager\s*id|mgr\s*id|manager|parent\s*id|supervisor\s*id|reports\s*to|lead\s*id)(\b|$)/)
+            || sortedCategorical.find((c) => c.name !== nodeField)?.name
+            || null;
+        const labelField = firstByRegex(/(^|\b)(designation|title|role|position|full\s*name|name)(\b|$)/)
+            || sortedCategorical.find((c) => c.name !== nodeField && c.name !== parentField)?.name
+            || null;
+        const colorField = firstByRegex(/(^|\b)(department|dept|business\s*unit|team|division|function)(\b|$)/)
+            || sortedCategorical.find((c) => ![nodeField, parentField, labelField].includes(c.name))?.name
+            || null;
+
+        assignments.xAxis = nodeField;
+        assignments.yAxis = parentField;
+        assignments.legend = colorField;
+        assignments.hierarchy = [nodeField, parentField].filter(Boolean);
+        assignments.aggregation = 'COUNT';
+
+        if (!nodeField || !parentField) {
+            assignments.warnings.push('Org chart requires node and parent fields. Please map both roles.');
+        }
+
+        const orgAssignments = [];
+        if (nodeField) orgAssignments.push({ field: nodeField, role: 'node' });
+        if (parentField) orgAssignments.push({ field: parentField, role: 'parent' });
+        if (labelField) orgAssignments.push({ field: labelField, role: 'label' });
+        if (colorField) orgAssignments.push({ field: colorField, role: 'color' });
+
+        const assignmentConfig = configFromAssignments(type, orgAssignments);
+        return {
+            chartType: type,
+            type,
+            dimension: nodeField || '',
+            measures: ['__count__'],
+            xAxis: nodeField,
+            yAxis: parentField,
+            legend: colorField,
+            size: null,
+            hierarchy: assignments.hierarchy,
+            aggregation: 'COUNT',
+            axisMode: 'auto',
+            mode: resolveChartMode(type, profile),
+            warnings: assignments.warnings,
+            assignments: orgAssignments,
+            ...assignmentConfig,
+        };
     }
 
     if (type === ChartType.GAUGE || type === ChartType.KPI_SINGLE) {

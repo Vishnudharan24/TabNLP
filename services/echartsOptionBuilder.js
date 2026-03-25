@@ -1,5 +1,5 @@
 import { ChartType } from '../types';
-import { configFromAssignments, convertOldConfig } from './chartConfigSystem';
+import { configFromAssignments, convertOldConfig, searchNode } from './chartConfigSystem';
 import {
     CHART_COLORS,
     CHART_COLORS_DARK,
@@ -427,6 +427,115 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         const grouped = groupSmallNodes(sorted, total, threshold);
         const depthLimited = limitDepth(grouped, maxDepth);
         return sortNodesByValue(depthLimited);
+    };
+
+    const toOrgNodeId = (node = {}, fallback = '') => String(node.id || node.key || node.name || fallback || '').trim();
+
+    const colorizeOrgTree = (rootNode = null) => {
+        if (!rootNode || typeof rootNode !== 'object') return rootNode;
+
+        const colorField = resolvedConfig?.colorField || null;
+        const categoryColors = new Map();
+        const colorFor = (value) => {
+            const key = String(value || '').trim();
+            if (!key) return null;
+            if (!categoryColors.has(key)) {
+                categoryColors.set(key, colors[categoryColors.size % colors.length]);
+            }
+            return categoryColors.get(key);
+        };
+
+        const visit = (node, depth = 0) => {
+            const id = toOrgNodeId(node, `org-${depth}`);
+            const nodeColorValue = colorField
+                ? (node?.meta?.colorValue || node?.colorValue || null)
+                : (node?.colorValue || null);
+            const nodeColor = colorFor(nodeColorValue);
+
+            const children = Array.isArray(node?.children)
+                ? node.children.map((child) => visit(child, depth + 1))
+                : [];
+
+            return {
+                ...node,
+                id,
+                key: id,
+                name: String(node?.name || node?.label || id || 'Unknown'),
+                itemStyle: {
+                    ...(node?.itemStyle || {}),
+                    ...(nodeColor ? { color: nodeColor } : {}),
+                    borderColor: isDark ? '#0f172a' : '#ffffff',
+                    borderWidth: 1.25,
+                },
+                lineStyle: {
+                    ...(node?.lineStyle || {}),
+                    color: isDark ? 'rgba(148,163,184,0.45)' : 'rgba(100,116,139,0.5)',
+                    width: 1.15,
+                },
+                children: children.length > 0 ? children : undefined,
+            };
+        };
+
+        return visit(rootNode, 0);
+    };
+
+    const applyOrgSearchState = (rootNode = null, searchQuery = '') => {
+        if (!rootNode || typeof rootNode !== 'object') {
+            return {
+                node: rootNode,
+                search: {
+                    found: false,
+                    matchedNodeIds: [],
+                    expandedNodeIds: [],
+                    firstMatchPath: [],
+                },
+            };
+        }
+
+        const result = searchNode(rootNode, searchQuery);
+        const expanded = new Set(result.expandedNodeIds || []);
+        const matched = new Set(result.matchedNodeIds || []);
+        const highlighted = new Set(result.firstMatchPath || []);
+
+        const visit = (node) => {
+            const id = toOrgNodeId(node);
+            const children = Array.isArray(node?.children)
+                ? node.children.map(visit)
+                : [];
+
+            const isMatched = matched.has(id);
+            const isOnPath = highlighted.has(id);
+            const shouldExpand = !searchQuery || expanded.has(id);
+
+            const emphasisColor = isMatched
+                ? '#dc2626'
+                : isOnPath
+                    ? '#2563eb'
+                    : undefined;
+
+            return {
+                ...node,
+                collapsed: !shouldExpand,
+                itemStyle: {
+                    ...(node?.itemStyle || {}),
+                    ...(emphasisColor ? { borderColor: emphasisColor, borderWidth: 2.5 } : {}),
+                },
+                lineStyle: {
+                    ...(node?.lineStyle || {}),
+                    ...(isOnPath ? { color: '#2563eb', width: 1.8 } : {}),
+                },
+                label: {
+                    ...(node?.label || {}),
+                    ...(isMatched ? { color: '#dc2626', fontWeight: 800 } : {}),
+                },
+                children: children.length > 0 ? children : undefined,
+            };
+        };
+
+        return {
+            node: visit(rootNode),
+            search: result,
+        };
     };
 
     const normalizeVisualType = (type, cfg = {}) => {
@@ -999,6 +1108,94 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     }],
                 }],
             };
+
+        case ChartType.ORG_CHART: {
+            const orgRoot = processedData?.[0]?.__orgTree || { name: 'Organization', children: [] };
+            const orgSearchQuery = String(resolvedConfig?.orgSearchQuery || '').trim();
+            const colorizedTree = colorizeOrgTree(orgRoot);
+            const { node: searchableTree, search } = applyOrgSearchState(colorizedTree, orgSearchQuery);
+
+            return {
+                ...base,
+                tooltip: {
+                    trigger: 'item',
+                    triggerOn: 'mousemove',
+                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                    borderColor: isDark ? '#334155' : '#e2e8f0',
+                    textStyle: { color: textColor, fontSize, fontFamily },
+                    borderWidth: 1,
+                    formatter: (params) => {
+                        const data = params?.data || {};
+                        const meta = data?.meta || {};
+                        const name = data?.name || meta?.labelValue || meta?.nodeValue || 'Unknown';
+                        const designation = meta?.labelValue || data?.label || 'N/A';
+                        const department = meta?.colorValue || data?.colorValue || 'N/A';
+                        const directReports = Number(data?.directReports || 0);
+
+                        return `
+                            <div style="font-weight:700;margin-bottom:6px">${name}</div>
+                            <div>Designation: ${designation}</div>
+                            <div>Department: ${department}</div>
+                            <div>Direct Reports: ${directReports}</div>
+                        `;
+                    },
+                },
+                series: [
+                    {
+                        type: 'tree',
+                        data: [searchableTree],
+                        top: '5%',
+                        left: '15%',
+                        bottom: '5%',
+                        right: '15%',
+                        symbol: 'circle',
+                        symbolSize: (value, params) => {
+                            const teamSize = Number(params?.data?.teamSize || 1);
+                            return Math.max(9, Math.min(20, 8 + Math.log2(teamSize + 1) * 3));
+                        },
+                        orient: 'LR',
+                        roam: true,
+                        expandAndCollapse: true,
+                        initialTreeDepth: 2,
+                        nodeClick: 'expandAndCollapse',
+                        animationDurationUpdate: 750,
+                        emphasis: { focus: 'ancestor' },
+                        label: {
+                            position: 'left',
+                            verticalAlign: 'middle',
+                            align: 'right',
+                            fontSize: Math.max(fontSize, 11),
+                            color: textColor,
+                        },
+                        leaves: {
+                            label: {
+                                position: 'right',
+                                align: 'left',
+                                color: subTextColor,
+                            },
+                        },
+                        lineStyle: {
+                            width: 1.2,
+                            curveness: 0.45,
+                        },
+                    },
+                ],
+                graphic: orgSearchQuery && !search?.found
+                    ? [{
+                        type: 'text',
+                        left: 16,
+                        top: 8,
+                        style: {
+                            text: `No results found for "${orgSearchQuery}"`,
+                            fill: isDark ? '#fca5a5' : '#b91c1c',
+                            fontSize: Math.max(fontSize, 11),
+                            fontFamily,
+                            fontWeight: 700,
+                        },
+                    }]
+                    : undefined,
+            };
+        }
 
         // ═══════════════════ COMBOS ═══════════════════
         case ChartType.COMBO_BAR_LINE:

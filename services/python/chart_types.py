@@ -68,6 +68,7 @@ class ChartType(str, Enum):
     SCATTER_LINE = "SCATTER_LINE"
     TREEMAP = "TREEMAP"
     HEATMAP = "HEATMAP"
+    ORG_CHART = "ORG_CHART"
 
     # ── Combinations ───────────────────────────────────────────────
     COMBO_BAR_LINE = "COMBO_BAR_LINE"

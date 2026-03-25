@@ -9,6 +9,9 @@ export const FieldRoles = {
     HIERARCHY: 'hierarchy',
     TIME: 'time',
     VALUE: 'value',
+    NODE: 'node',
+    PARENT: 'parent',
+    LABEL: 'label',
 };
 
 const NUMERIC_TYPES = new Set(['number']);
@@ -25,6 +28,288 @@ const normalizeChartType = (type) => {
     if (type === ChartType.AREA_SMOOTH || type === ChartType.AREA_STACKED || type === ChartType.AREA_PERCENT || type === ChartType.AREA_STEP) return ChartType.AREA;
     return type;
 };
+
+const isEmpty = (value) => value === null || value === undefined || String(value).trim() === '';
+
+const safeNodeKey = (value) => String(value ?? '').trim();
+
+const hasCycle = (nodeKey, parentKey, parentByNode) => {
+    let cursor = parentKey;
+    const guard = new Set([nodeKey]);
+
+    while (cursor && !guard.has(cursor)) {
+        guard.add(cursor);
+        cursor = parentByNode.get(cursor);
+    }
+
+    return cursor === nodeKey;
+};
+
+const toNodeTitle = (node = {}) => {
+    if (!isEmpty(node.label)) return String(node.label);
+    if (!isEmpty(node.name)) return String(node.name);
+    return String(node.id || 'Unknown');
+};
+
+const decorateOrgTree = (roots = []) => {
+    const withSizes = (node) => {
+        const children = Array.isArray(node.children) ? node.children.map(withSizes) : [];
+        const teamSize = children.reduce((sum, child) => sum + child.teamSize, 0);
+        const directReports = children.length;
+
+        return {
+            ...node,
+            name: toNodeTitle(node),
+            directReports,
+            teamSize: Math.max(1, teamSize + 1),
+            children: children.length > 0 ? children : undefined,
+        };
+    };
+
+    return (Array.isArray(roots) ? roots : []).map(withSizes);
+};
+
+export function buildOrgTree(data = [], nodeField, parentField, labelField, colorField) {
+    const rows = Array.isArray(data) ? data : [];
+    const nodeCol = String(nodeField || '').trim();
+    const parentCol = String(parentField || '').trim();
+
+    if (!nodeCol || !parentCol) {
+        return {
+            treeData: { name: 'Organization', children: [] },
+            meta: { totalNodes: 0, roots: 0, cycleBreaks: 0, missingParents: 0 },
+        };
+    }
+
+    const nodeMap = new Map();
+    const parentByNode = new Map();
+    const missingParentKeys = new Set();
+
+    rows.forEach((row, idx) => {
+        const nodeKey = safeNodeKey(row?.[nodeCol]);
+        if (!nodeKey) return;
+
+        const parentKey = safeNodeKey(row?.[parentCol]);
+        const labelValue = labelField ? row?.[labelField] : undefined;
+        const colorValue = colorField ? row?.[colorField] : undefined;
+
+        if (!nodeMap.has(nodeKey)) {
+            nodeMap.set(nodeKey, {
+                id: nodeKey,
+                key: nodeKey,
+                name: nodeKey,
+                label: !isEmpty(labelValue) ? String(labelValue) : undefined,
+                colorValue: !isEmpty(colorValue) ? String(colorValue) : undefined,
+                sourceIndex: idx,
+                children: [],
+                meta: {
+                    nodeField: nodeCol,
+                    parentField: parentCol,
+                    labelField: labelField || null,
+                    colorField: colorField || null,
+                    nodeValue: nodeKey,
+                    parentValue: parentKey || null,
+                    labelValue: !isEmpty(labelValue) ? String(labelValue) : null,
+                    colorValue: !isEmpty(colorValue) ? String(colorValue) : null,
+                },
+            });
+        } else {
+            const existing = nodeMap.get(nodeKey);
+            if (isEmpty(existing.label) && !isEmpty(labelValue)) existing.label = String(labelValue);
+            if (isEmpty(existing.colorValue) && !isEmpty(colorValue)) existing.colorValue = String(colorValue);
+            existing.meta = {
+                ...existing.meta,
+                labelValue: existing.meta?.labelValue || (!isEmpty(labelValue) ? String(labelValue) : null),
+                colorValue: existing.meta?.colorValue || (!isEmpty(colorValue) ? String(colorValue) : null),
+            };
+        }
+
+        parentByNode.set(nodeKey, parentKey || null);
+        if (parentKey && !nodeMap.has(parentKey)) {
+            missingParentKeys.add(parentKey);
+        }
+    });
+
+    const childrenByParent = new Map();
+    const roots = [];
+    let cycleBreaks = 0;
+    let missingParents = 0;
+
+    const attachToParent = (parentKey, nodeKey) => {
+        if (!childrenByParent.has(parentKey)) childrenByParent.set(parentKey, []);
+        childrenByParent.get(parentKey).push(nodeKey);
+    };
+
+    nodeMap.forEach((node, nodeKey) => {
+        const rawParent = parentByNode.get(nodeKey);
+
+        if (!rawParent) {
+            roots.push(nodeKey);
+            return;
+        }
+
+        if (rawParent === nodeKey || hasCycle(nodeKey, rawParent, parentByNode)) {
+            cycleBreaks += 1;
+            roots.push(nodeKey);
+            return;
+        }
+
+        if (!nodeMap.has(rawParent)) {
+            missingParents += 1;
+            attachToParent('__unknown__', nodeKey);
+            return;
+        }
+
+        attachToParent(rawParent, nodeKey);
+    });
+
+    const toTreeNode = (nodeKey, ancestry = new Set()) => {
+        if (ancestry.has(nodeKey)) {
+            cycleBreaks += 1;
+            return null;
+        }
+
+        const nextAncestry = new Set(ancestry);
+        nextAncestry.add(nodeKey);
+
+        const node = nodeMap.get(nodeKey);
+        if (!node) return null;
+
+        const childKeys = childrenByParent.get(nodeKey) || [];
+        const children = childKeys
+            .map((childKey) => toTreeNode(childKey, nextAncestry))
+            .filter(Boolean);
+
+        return {
+            ...node,
+            name: toNodeTitle(node),
+            children,
+        };
+    };
+
+    const rootNodes = roots.map((rootKey) => toTreeNode(rootKey)).filter(Boolean);
+
+    const unknownChildren = (childrenByParent.get('__unknown__') || [])
+        .map((childKey) => toTreeNode(childKey))
+        .filter(Boolean);
+
+    if (unknownChildren.length > 0) {
+        rootNodes.push({
+            id: '__unknown__',
+            key: '__unknown__',
+            name: 'Unknown',
+            label: 'Unknown',
+            children: unknownChildren,
+            meta: {
+                nodeField: nodeCol,
+                parentField: parentCol,
+                labelField: labelField || null,
+                colorField: colorField || null,
+                nodeValue: '__unknown__',
+                parentValue: null,
+                labelValue: 'Unknown',
+                colorValue: null,
+                missingParentCount: unknownChildren.length,
+            },
+        });
+    }
+
+    const normalizedRoots = decorateOrgTree(rootNodes);
+    const treeData = normalizedRoots.length <= 1
+        ? (normalizedRoots[0] || { name: 'Organization', children: [] })
+        : {
+            id: '__organization__',
+            key: '__organization__',
+            name: 'Organization',
+            label: 'Organization',
+            children: normalizedRoots,
+            meta: {
+                nodeField: nodeCol,
+                parentField: parentCol,
+                labelField: labelField || null,
+                colorField: colorField || null,
+                nodeValue: '__organization__',
+                parentValue: null,
+                labelValue: 'Organization',
+                colorValue: null,
+            },
+            directReports: normalizedRoots.length,
+            teamSize: normalizedRoots.reduce((sum, node) => sum + Number(node.teamSize || 1), 1),
+        };
+
+    return {
+        treeData,
+        meta: {
+            totalNodes: nodeMap.size,
+            roots: normalizedRoots.length,
+            cycleBreaks,
+            missingParents,
+            distinctMissingParentValues: missingParentKeys.size,
+        },
+    };
+}
+
+export function searchNode(tree, query = '') {
+    const q = String(query || '').trim().toLowerCase();
+    if (!tree || !q) {
+        return {
+            matchedNodeIds: [],
+            expandedNodeIds: [],
+            firstMatchPath: [],
+            found: false,
+        };
+    }
+
+    const matched = new Set();
+    const expanded = new Set();
+    let firstPath = [];
+
+    const walk = (node, path = []) => {
+        if (!node) return false;
+        const id = String(node.id || node.key || node.name || '').trim() || `node-${path.length}`;
+        const nextPath = [...path, id];
+
+        const haystack = [
+            node.name,
+            node.label,
+            node.meta?.nodeValue,
+            node.meta?.labelValue,
+            node.meta?.colorValue,
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+        const nodeMatches = haystack.includes(q);
+        let hasDescendantMatch = false;
+
+        const children = Array.isArray(node.children) ? node.children : [];
+        children.forEach((child) => {
+            if (walk(child, nextPath)) hasDescendantMatch = true;
+        });
+
+        if (nodeMatches) {
+            matched.add(id);
+            if (firstPath.length === 0) firstPath = nextPath;
+        }
+
+        if (nodeMatches || hasDescendantMatch) {
+            nextPath.forEach((pathId) => expanded.add(pathId));
+            return true;
+        }
+
+        return false;
+    };
+
+    walk(tree, []);
+
+    return {
+        matchedNodeIds: Array.from(matched),
+        expandedNodeIds: Array.from(expanded),
+        firstMatchPath: firstPath,
+        found: matched.size > 0,
+    };
+}
 
 export function convertOldConfig(oldConfig = {}) {
     if (Array.isArray(oldConfig.assignments) && oldConfig.assignments.length > 0) {
@@ -49,6 +334,20 @@ export function convertOldConfig(oldConfig = {}) {
         hierarchyFields.forEach((field) => assignments.push({ field, role: FieldRoles.HIERARCHY }));
         if (measures[0]) assignments.push({ field: measures[0], role: FieldRoles.VALUE, aggregation: agg });
         else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        return { chartType, assignments };
+    }
+
+    if (normalizedType === ChartType.ORG_CHART) {
+        const nodeField = oldConfig.nodeField || oldConfig.dimension || oldConfig.xAxisField || '';
+        const parentField = oldConfig.parentField || oldConfig.yAxisField || '';
+        const labelField = oldConfig.labelField || oldConfig.legendField || '';
+        const colorField = oldConfig.colorField || '';
+
+        if (nodeField) assignments.push({ field: nodeField, role: FieldRoles.NODE });
+        if (parentField) assignments.push({ field: parentField, role: FieldRoles.PARENT });
+        if (labelField) assignments.push({ field: labelField, role: FieldRoles.LABEL });
+        if (colorField) assignments.push({ field: colorField, role: FieldRoles.COLOR });
+
         return { chartType, assignments };
     }
 
@@ -102,6 +401,10 @@ export function configFromAssignments(chartType, assignments = []) {
     const list = (role) => safe.filter(a => a.role === role && a.field).map(a => a.field);
 
     const hierarchy = list(FieldRoles.HIERARCHY);
+    const orgNode = first(FieldRoles.NODE);
+    const orgParent = first(FieldRoles.PARENT);
+    const orgLabel = first(FieldRoles.LABEL);
+    const orgColor = first(FieldRoles.COLOR);
     const yFields = list(FieldRoles.Y);
     const valueFields = list(FieldRoles.VALUE);
     const x = first(FieldRoles.TIME) || first(FieldRoles.X) || first(FieldRoles.LEGEND) || hierarchy[0] || '';
@@ -114,6 +417,25 @@ export function configFromAssignments(chartType, assignments = []) {
         });
 
     const agg = toUpperAgg(safe.find(a => ['y', 'value', 'size', 'x'].includes(a.role) && a.aggregation)?.aggregation) || 'SUM';
+
+    if (chartType === ChartType.ORG_CHART) {
+        return {
+            type: chartType,
+            dimension: orgNode || '',
+            measures: ['__count__'],
+            aggregation: 'COUNT',
+            xAxisField: orgNode || '',
+            yAxisField: orgParent || '',
+            legendField: orgColor || '',
+            sizeField: '',
+            hierarchyFields: [],
+            nodeField: orgNode || '',
+            parentField: orgParent || '',
+            labelField: orgLabel || '',
+            colorField: orgColor || '',
+            assignments: safe,
+        };
+    }
 
     return {
         type: chartType,
@@ -236,6 +558,31 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
 
     const assignments = [];
 
+    if (type === ChartType.ORG_CHART) {
+        const byName = safeColumns.map(c => ({ ...c, lower: String(c?.name || '').toLowerCase() }));
+        const firstByRegex = (regex, pool = byName) => pool.find(c => regex.test(c.lower))?.name;
+
+        const nodeField = firstByRegex(/(^|\b)(employee\s*id|emp\s*id|employee|staff\s*id|person\s*id|user\s*id)(\b|$)/)
+            || firstByRegex(/(^|\b)(full\s*name|employee\s*name|name)(\b|$)/)
+            || sortedCategorical[0]?.name;
+
+        const parentField = firstByRegex(/(^|\b)(manager\s*id|mgr\s*id|manager|parent\s*id|supervisor\s*id|reports\s*to|lead\s*id)(\b|$)/)
+            || sortedCategorical.find(c => c.name !== nodeField)?.name;
+
+        const labelField = firstByRegex(/(^|\b)(designation|title|role|position|full\s*name|name)(\b|$)/)
+            || sortedCategorical.find(c => c.name !== nodeField && c.name !== parentField)?.name;
+
+        const colorField = firstByRegex(/(^|\b)(department|dept|business\s*unit|team|division|function)(\b|$)/)
+            || sortedCategorical.find(c => ![nodeField, parentField, labelField].includes(c.name))?.name;
+
+        if (nodeField) assignments.push({ field: nodeField, role: FieldRoles.NODE });
+        if (parentField) assignments.push({ field: parentField, role: FieldRoles.PARENT });
+        if (labelField && labelField !== nodeField) assignments.push({ field: labelField, role: FieldRoles.LABEL });
+        if (colorField && ![nodeField, parentField, labelField].includes(colorField)) assignments.push({ field: colorField, role: FieldRoles.COLOR });
+
+        return assignments;
+    }
+
     if (type === ChartType.PIE || type === ChartType.DONUT) {
         if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.LEGEND });
         if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE, aggregation: 'SUM' });
@@ -319,6 +666,13 @@ export function validateConfig(config = {}, columns = []) {
     const hierarchyCount = assignments.filter(a => a.role === FieldRoles.HIERARCHY).length;
     if ([ChartType.SUNBURST, ChartType.TREEMAP].includes(normalizeChartType(normalized.chartType)) && hierarchyCount === 0) {
         warnings.push('Hierarchy chart has no hierarchy fields; using fallback grouping.');
+    }
+
+    if (normalizeChartType(normalized.chartType) === ChartType.ORG_CHART) {
+        const nodeCount = assignments.filter(a => a.role === FieldRoles.NODE).length;
+        const parentCount = assignments.filter(a => a.role === FieldRoles.PARENT).length;
+        if (nodeCount === 0) warnings.push('Org chart needs a Node field.');
+        if (parentCount === 0) warnings.push('Org chart needs a Parent field.');
     }
 
     if (!hasNumericRole && !hasCountFallback) {

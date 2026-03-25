@@ -4,13 +4,14 @@ import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import { ChartType } from '../types';
 import { buildChartOption } from '../services/echartsOptionBuilder';
-import { buildHierarchy, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
+import { buildHierarchy, buildOrgTree, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
 const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant', onDataPointClick, isExportRenderMode = false }) => {
     const { theme } = useTheme();
     const [drillPath, setDrillPath] = useState([]);
+    const [orgSearchQuery, setOrgSearchQuery] = useState('');
     const chartRef = useRef(null);
 
     useEffect(() => {
@@ -20,6 +21,12 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             }
         };
     }, [onChartInstanceChange, config.id]);
+
+    useEffect(() => {
+        if (config?.type === ChartType.ORG_CHART) {
+            setDrillPath([]);
+        }
+    }, [config?.type]);
 
     if (!dataset) return null;
 
@@ -168,6 +175,10 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             .filter(a => a?.role === FieldRoles.HIERARCHY)
             .map(a => a.field)
             .filter(Boolean);
+        const nodeField = assignments.find(a => a?.role === FieldRoles.NODE)?.field;
+        const parentField = assignments.find(a => a?.role === FieldRoles.PARENT)?.field;
+        const labelField = assignments.find(a => a?.role === FieldRoles.LABEL)?.field;
+        const colorField = assignments.find(a => a?.role === FieldRoles.COLOR)?.field;
         const valueAssignment = assignments.find(a => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
 
         const effectiveMeasures = Array.isArray(measures) && measures.length > 0
@@ -187,6 +198,12 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 valueAssignment?.aggregation || effectiveAggregation || 'COUNT'
             );
             return hierarchy.length > 0 ? [{ __hierarchy: hierarchy }] : [];
+        }
+
+        if (type === ChartType.ORG_CHART) {
+            if (!nodeField || !parentField) return [];
+            const { treeData, meta } = buildOrgTree(filteredData, nodeField, parentField, labelField, colorField);
+            return [{ __orgTree: treeData, __orgMeta: meta || {} }];
         }
 
         if (!dimension) return [];
@@ -232,16 +249,24 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         return result.sort((a, b) => (b[effectiveMeasures[0]] || 0) - (a[effectiveMeasures[0]] || 0)).slice(0, 15);
     };
 
-    const chartData = processData();
+    const chartData = useMemo(() => processData(), [
+        normalizedConfig,
+        effectiveDimension,
+        dataset?.data,
+        dataset?.columns,
+        drillPath,
+        globalFilters,
+    ]);
     const isDark = theme === 'dark';
 
     // Can we drill further?
     const canDrill = useMemo(() => {
+        if (normalizedConfig.type === ChartType.ORG_CHART) return false;
         const usedDims = [normalizedConfig.dimension, ...drillPath.map(d => d.dimensionCol)];
         return dataset.columns.some(c =>
             (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
         );
-    }, [normalizedConfig.dimension, drillPath, dataset.columns]);
+    }, [normalizedConfig.dimension, normalizedConfig.type, drillPath, dataset.columns]);
 
     const handleDrillDown = useCallback((params) => {
         if (!canDrill || !params.name) return;
@@ -251,21 +276,25 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const handlePointClick = useCallback((params) => {
         if (!params?.name) return;
 
+        const isOrgChart = normalizedConfig?.type === ChartType.ORG_CHART;
+
         if (onDataPointClick) {
             onDataPointClick({
                 chartId: config.id,
                 chartTitle: config.title,
                 datasetId: config.datasetId,
-                dimension: effectiveDimension,
+                dimension: isOrgChart ? (normalizedConfig?.nodeField || effectiveDimension) : effectiveDimension,
                 value: params.name,
                 params,
             });
         }
 
+        if (isOrgChart) return;
+
         if (canDrill) {
             handleDrillDown(params);
         }
-    }, [onDataPointClick, config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown]);
+    }, [onDataPointClick, config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown, normalizedConfig?.type, normalizedConfig?.nodeField]);
 
     const handleDrillUp = (index) => {
         setDrillPath(prev => prev.slice(0, index));
@@ -412,7 +441,13 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         let option = buildChartOption(
             type,
             chartData,
-            { ...normalizedConfig, dimension: effectiveDimension, measures, style: exportStyleOverrides },
+            {
+                ...normalizedConfig,
+                dimension: effectiveDimension,
+                measures,
+                orgSearchQuery: type === ChartType.ORG_CHART ? orgSearchQuery : '',
+                style: exportStyleOverrides,
+            },
             theme,
             chartClarityMode,
             chartPaletteMode
@@ -459,6 +494,25 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                                 {`Aggregation: ${aggregationText}`}
                             </span>
                         </div>
+                        {normalizedConfig.type === ChartType.ORG_CHART && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    value={orgSearchQuery}
+                                    onChange={(e) => setOrgSearchQuery(e.target.value)}
+                                    placeholder="Search employee / title / department"
+                                    className="w-full max-w-[260px] bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1 text-[10px] font-semibold text-gray-700 dark:text-gray-200"
+                                />
+                                {orgSearchQuery && (
+                                    <button
+                                        onClick={() => setOrgSearchQuery('')}
+                                        className="text-[10px] font-bold px-1.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-300"
+                                    >
+                                        Clear
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
 

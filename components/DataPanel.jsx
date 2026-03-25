@@ -23,6 +23,7 @@ const CHART_ICON_MAP = {
     BUBBLE: ScatterChart,
     HEATMAP: Grid3X3,
     TREEMAP: LayoutGrid,
+    ORG_CHART: Layers,
     COMBO: TrendingUp,
     RADAR: Radar,
     RADIAL: Radar,
@@ -51,6 +52,7 @@ const CHART_DISPLAY_NAMES = {
     SCATTER: 'Scatter',
     BUBBLE: 'Bubble',
     TREEMAP: 'Treemap',
+    ORG_CHART: 'Org Chart',
     HEATMAP: 'Heatmap',
     COMBO_BAR_LINE: 'Combo',
     KPI_SINGLE: 'KPI',
@@ -73,6 +75,7 @@ const ALL_CHART_TYPES = [
     ChartType.BUBBLE,
     ChartType.HEATMAP,
     ChartType.TREEMAP,
+    ChartType.ORG_CHART,
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
     ChartType.GAUGE,
@@ -90,6 +93,13 @@ const ROLE_SECTION_DEFS = [
     { key: 'axis', title: 'Axis', icon: Columns3, roles: [FieldRoles.TIME, FieldRoles.X], emoji: '🧭', multi: false },
     { key: 'legend', title: 'Legend / Color', icon: PieIcon, roles: [FieldRoles.LEGEND, FieldRoles.COLOR], emoji: '🎨', multi: false },
     { key: 'size', title: 'Size', icon: Maximize2, roles: [FieldRoles.SIZE], emoji: '📐', multi: false },
+];
+
+const ORG_ROLE_SECTION_DEFS = [
+    { key: 'node', title: 'Node', icon: Layers, roles: [FieldRoles.NODE], emoji: '👤', multi: false },
+    { key: 'parent', title: 'Parent', icon: ArrowRight, roles: [FieldRoles.PARENT], emoji: '🧭', multi: false },
+    { key: 'label', title: 'Label', icon: Type, roles: [FieldRoles.LABEL], emoji: '🏷️', multi: false },
+    { key: 'color', title: 'Color Group', icon: PieIcon, roles: [FieldRoles.COLOR], emoji: '🎨', multi: false },
 ];
 
 const getFieldTypeMeta = (type) => {
@@ -315,6 +325,25 @@ const DataPanel = ({
 
         const type = activeChartConfig.type;
 
+        if (type === ChartType.ORG_CHART) {
+            if (col.type === 'number') return;
+
+            let orgRole = FieldRoles.NODE;
+            if (!hasRole(FieldRoles.NODE)) orgRole = FieldRoles.NODE;
+            else if (!hasRole(FieldRoles.PARENT)) orgRole = FieldRoles.PARENT;
+            else if (!hasRole(FieldRoles.LABEL)) orgRole = FieldRoles.LABEL;
+            else if (!hasRole(FieldRoles.COLOR)) orgRole = FieldRoles.COLOR;
+            else return;
+
+            const next = [...currentAssignments, {
+                field: col.name,
+                role: orgRole,
+                aggregation: undefined,
+            }];
+            syncConfigFromAssignments(next);
+            return;
+        }
+
         let nextRole = FieldRoles.X;
         if (col.type === 'number') {
             nextRole = hasRole(FieldRoles.VALUE) || hasRole(FieldRoles.Y) ? FieldRoles.Y : FieldRoles.VALUE;
@@ -377,6 +406,10 @@ const DataPanel = ({
 
         return Array.from(new Set(warnings));
     }, [selectedDataset, activeChartConfig, roleDerivedConfig?.dimension, roleDerivedConfig?.measures, effectiveAssignments]);
+    const activeRoleSections = useMemo(() => {
+        if (activeChartConfig?.type === ChartType.ORG_CHART) return ORG_ROLE_SECTION_DEFS;
+        return ROLE_SECTION_DEFS;
+    }, [activeChartConfig?.type]);
 
     const openFieldPicker = (role) => {
         setPickerRole(role);
@@ -396,6 +429,9 @@ const DataPanel = ({
         const includeCount = ['y', 'value', 'x', 'size'].includes(pickerRole);
 
         const allowed = selectedDataset.columns.filter((col) => {
+            if (pickerRole === FieldRoles.NODE || pickerRole === FieldRoles.PARENT || pickerRole === FieldRoles.LABEL) {
+                return col.type !== 'number';
+            }
             if (pickerRole === FieldRoles.HIERARCHY || pickerRole === FieldRoles.LEGEND || pickerRole === FieldRoles.COLOR || pickerRole === FieldRoles.X) {
                 return col.type !== 'number';
             }
@@ -734,7 +770,7 @@ const DataPanel = ({
                                     <div className="space-y-3">
                                         <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Field Roles</h4>
 
-                                        {ROLE_SECTION_DEFS.map((section) => {
+                                        {activeRoleSections.map((section) => {
                                             const chips = effectiveAssignments
                                                 .map((a, idx) => ({ ...a, idx }))
                                                 .filter((a) => section.roles.includes(a.role));
@@ -767,7 +803,7 @@ const DataPanel = ({
                                                                         onRemove={() => removeAssignment(chip.idx)}
                                                                     />
                                                                 </div>
-                                                                {['y', 'value', 'x', 'size'].includes(chip.role) && (
+                                                                {['y', 'value', 'x', 'size'].includes(chip.role) && activeChartConfig?.type !== ChartType.ORG_CHART && (
                                                                     <select
                                                                         value={chip.aggregation || 'SUM'}
                                                                         onChange={(e) => updateAssignment(chip.idx, { aggregation: e.target.value })}
@@ -856,7 +892,7 @@ const DataPanel = ({
                             </div>
 
                             {/* Aggregation selector */}
-                            {activeChartConfig && (
+                            {activeChartConfig && activeChartConfig.type !== ChartType.ORG_CHART && (
                                 <div className="space-y-3">
                                     <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Aggregation</h4>
                                     <div className="flex flex-wrap gap-1.5">

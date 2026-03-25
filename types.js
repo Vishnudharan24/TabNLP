@@ -48,6 +48,7 @@ export const ChartType = {
   SCATTER_LINE: 'SCATTER_LINE',
   TREEMAP: 'TREEMAP',
   HEATMAP: 'HEATMAP',
+  ORG_CHART: 'ORG_CHART',
 
   // Combinations
   COMBO_BAR_LINE: 'COMBO_BAR_LINE',
@@ -69,7 +70,7 @@ export const ChartType = {
  */
 
 /**
- * @typedef {'x' | 'y' | 'legend' | 'size' | 'color' | 'hierarchy' | 'time' | 'value'} FieldRole
+ * @typedef {'x' | 'y' | 'legend' | 'size' | 'color' | 'hierarchy' | 'time' | 'value' | 'node' | 'parent' | 'label'} FieldRole
  */
 
 /**
