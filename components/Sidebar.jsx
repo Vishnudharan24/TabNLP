@@ -8,7 +8,8 @@ import {
     Merge,
     GitBranch,
     Server,
-    BriefcaseBusiness
+    BriefcaseBusiness,
+    LayoutTemplate
 } from 'lucide-react';
 
 const SidebarItem = ({
@@ -28,7 +29,18 @@ const SidebarItem = ({
     </div>
 );
 
-const Sidebar = ({ setView, currentView }) => {
+const Sidebar = ({ setView, currentView, onNavigatePath }) => {
+    const handleViewChange = (nextView) => {
+        setView(nextView);
+        if (typeof onNavigatePath === 'function') {
+            if (nextView === 'templates') {
+                onNavigatePath('/templates');
+            } else {
+                onNavigatePath('/');
+            }
+        }
+    };
+
     return (
         <aside className="w-20 hover:w-64 glass-panel border-r border-gray-200 dark:border-gray-700 flex flex-col h-full transition-all duration-500 ease-in-out group z-40 relative">
             <div className="flex-1 py-10 overflow-x-hidden">
@@ -37,49 +49,56 @@ const Sidebar = ({ setView, currentView }) => {
                     icon={Layers}
                     label="Data Hub"
                     active={currentView === 'data'}
-                    onClick={() => setView('data')}
+                    onClick={() => handleViewChange('data')}
                 />
 
                 <SidebarItem
                     icon={Server}
                     label="Source Config"
                     active={currentView === 'source-config'}
-                    onClick={() => setView('source-config')}
+                    onClick={() => handleViewChange('source-config')}
                 />
 
                 <SidebarItem
                     icon={PieChart}
                     label="Report View"
                     active={currentView === 'report'}
-                    onClick={() => setView('report')}
+                    onClick={() => handleViewChange('report')}
+                />
+
+                <SidebarItem
+                    icon={LayoutTemplate}
+                    label="Templates"
+                    active={currentView === 'templates'}
+                    onClick={() => handleViewChange('templates')}
                 />
 
                 <SidebarItem
                     icon={BriefcaseBusiness}
                     label="HR Data Visualization"
                     active={currentView === 'hr-analytics'}
-                    onClick={() => setView('hr-analytics')}
+                    onClick={() => handleViewChange('hr-analytics')}
                 />
 
                 <SidebarItem
                     icon={Merge}
                     label="Merge Data"
                     active={currentView === 'merge'}
-                    onClick={() => setView('merge')}
+                    onClick={() => handleViewChange('merge')}
                 />
 
                 <SidebarItem
                     icon={GitBranch}
                     label="Relationships"
                     active={currentView === 'relationships'}
-                    onClick={() => setView('relationships')}
+                    onClick={() => handleViewChange('relationships')}
                 />
 
                 <SidebarItem
                     icon={BarChart2}
                     label="Profiler"
                     active={currentView === 'profiler'}
-                    onClick={() => setView('profiler')}
+                    onClick={() => handleViewChange('profiler')}
                 />
 
                 

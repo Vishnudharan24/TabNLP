@@ -18,6 +18,7 @@ import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
 import AuthScreen from './components/AuthScreen';
 import HRAnalyticsDashboard from './components/hr/HRAnalyticsDashboard';
 import OrgChartPage from './pages/OrgChartPage.jsx';
+import TemplateRoutes from './pages/TemplateRoutes';
 import {
     Plus,
     BarChart as BarChartIcon,
@@ -283,6 +284,12 @@ const App = () => {
         window.addEventListener('popstate', onPopState);
         return () => window.removeEventListener('popstate', onPopState);
     }, []);
+
+    useEffect(() => {
+        if (routePath.startsWith('/templates')) {
+            setView('templates');
+        }
+    }, [routePath]);
 
     const handleLogin = async (payload) => {
         setIsAuthSubmitting(true);
@@ -1070,9 +1077,11 @@ const App = () => {
         <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
             <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { setView('data'); navigatePath('/'); }} />
             <div className="flex flex-1 overflow-hidden">
-                <Sidebar setView={setView} currentView={view} />
+                <Sidebar setView={setView} currentView={view} onNavigatePath={navigatePath} />
                 <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                    {view === 'data' ? (
+                    {view === 'templates' ? (
+                        <TemplateRoutes datasetColumns={selectedDataset?.columns ?? []} />
+                    ) : view === 'data' ? (
                         <DataSourceView
                             datasets={datasets}
                             companies={companies}
