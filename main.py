@@ -15,11 +15,12 @@ from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 from pathlib import Path
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from services.data_services.ingestion_service import run_ingestion
+from services.hr.hr_analytics_service import compute_module
 from db.db_store import (
     upsert_source_config,
     ensure_indexes,
@@ -101,6 +102,11 @@ class SignUpRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class HrAnalyticsRequest(BaseModel):
+    data: list[dict[str, Any]]
+    mapping: dict[str, str]
 
 
 def _serialize_source_config(source_config: dict):
@@ -540,6 +546,88 @@ async def get_dataset_document(document_id: str, _current_user: dict = Depends(_
         raise
     except Exception as e:
         _raise_internal_error("Failed to fetch dataset", e)
+
+
+async def _run_hr_analytics_module(module: str, payload: HrAnalyticsRequest):
+    try:
+        return {
+            "status": "success",
+            **compute_module(module=module, data=payload.data, mapping=payload.mapping),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _raise_internal_error(f"Failed to compute HR analytics module: {module}", e)
+
+
+@app.post("/hr/analytics/summary")
+async def hr_analytics_summary(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("summary", payload)
+
+
+@app.post("/hr/analytics/demographics")
+async def hr_analytics_demographics(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("demographics", payload)
+
+
+@app.post("/hr/analytics/hiring")
+async def hr_analytics_hiring(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("hiring", payload)
+
+
+@app.post("/hr/analytics/attrition")
+async def hr_analytics_attrition(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("attrition", payload)
+
+
+@app.post("/hr/analytics/experience")
+async def hr_analytics_experience(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("experience", payload)
+
+
+@app.post("/hr/analytics/org")
+async def hr_analytics_org(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("org", payload)
+
+
+@app.post("/hr/analytics/payroll")
+async def hr_analytics_payroll(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("payroll", payload)
+
+
+@app.post("/hr/analytics/education")
+async def hr_analytics_education(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("education", payload)
+
+
+@app.post("/hr/analytics/location")
+async def hr_analytics_location(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("location", payload)
+
+
+@app.post("/hr/analytics/department")
+async def hr_analytics_department(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("department", payload)
+
+
+@app.post("/hr/analytics/lifecycle")
+async def hr_analytics_lifecycle(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("lifecycle", payload)
+
+
+@app.post("/hr/analytics/compliance")
+async def hr_analytics_compliance(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("compliance", payload)
+
+
+@app.post("/hr/analytics/contact")
+async def hr_analytics_contact(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("contact", payload)
+
+
+@app.post("/hr/analytics/data-quality")
+async def hr_analytics_data_quality(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+    return await _run_hr_analytics_module("data-quality", payload)
 
 
 #The below endpoints are added for testiing
