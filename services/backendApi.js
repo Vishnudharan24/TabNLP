@@ -193,6 +193,69 @@ export const backendApi = {
         return request(`/datasets/${encodeURIComponent(documentId)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
+    getHrAnalytics(moduleName, payload, baseUrl, requestConfig) {
+        return request(`/hr/analytics/${encodeURIComponent(moduleName)}`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsSummary(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('summary', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsDemographics(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('demographics', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsHiring(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('hiring', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsAttrition(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('attrition', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsExperience(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('experience', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsOrg(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('org', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsPayroll(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('payroll', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsEducation(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('education', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsLocation(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('location', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsDepartment(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('department', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsLifecycle(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('lifecycle', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsCompliance(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('compliance', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsContact(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('contact', payload, baseUrl, requestConfig);
+    },
+
+    getHrAnalyticsDataQuality(payload, baseUrl, requestConfig) {
+        return this.getHrAnalytics('data-quality', payload, baseUrl, requestConfig);
+    },
+
     getTestExcel(baseUrl, requestConfig) {
         return request('/test/file', { method: 'GET' }, baseUrl, requestConfig);
     },

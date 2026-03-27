@@ -5,14 +5,17 @@ export const ANALYTICS_TEMPLATES = [
         description: 'Track employee performance, compensation, and department-level insights.',
         requiredFields: [
             { name: 'Employee_ID', type: 'string' },
-            { name: 'Employee_Name', type: 'string' },
+            { name: 'Employment_Status', type: 'string' },
             { name: 'Department', type: 'string' },
-            { name: 'Salary', type: 'number' },
-            { name: 'Hire_Date', type: 'date' },
+            { name: 'Business_Unit', type: 'string' },
+            { name: 'Location', type: 'string' },
+            { name: 'Workforce_Category', type: 'string' },
+            { name: 'Gender', type: 'string' },
+            { name: 'Marital_Status', type: 'string' },
         ],
         charts: [
-            { type: 'bar', x: 'Department', y: 'Salary' },
-            { type: 'line', x: 'Hire_Date', y: 'Employee_ID' },
+            { type: 'bar', x: 'Department', y: 'Employee_ID' },
+            { type: 'pie', x: 'Gender', y: 'Employee_ID' },
         ],
     },
     {

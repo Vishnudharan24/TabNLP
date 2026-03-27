@@ -318,16 +318,15 @@ const DataPanel = ({
         if (!activeChartConfig) return;
 
         const currentAssignments = [...effectiveAssignments];
+        const isOrgChart = activeChartConfig.type === ChartType.ORG_CHART;
 
         const hasRole = (role) => currentAssignments.some(a => a.role === role);
         const hasField = (field) => currentAssignments.some(a => a.field === field);
-        if (hasField(col.name)) return;
+        if (!isOrgChart && hasField(col.name)) return;
 
         const type = activeChartConfig.type;
 
         if (type === ChartType.ORG_CHART) {
-            if (col.type === 'number') return;
-
             let orgRole = FieldRoles.NODE;
             if (!hasRole(FieldRoles.NODE)) orgRole = FieldRoles.NODE;
             else if (!hasRole(FieldRoles.PARENT)) orgRole = FieldRoles.PARENT;
@@ -425,10 +424,16 @@ const DataPanel = ({
 
     const candidateFieldsForRole = useMemo(() => {
         if (!pickerRole || !selectedDataset) return [];
-        const used = new Set(effectiveAssignments.map(a => a.field));
+        const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART;
+        const used = isOrgChart
+            ? new Set(effectiveAssignments.filter(a => a.role === pickerRole).map(a => a.field))
+            : new Set(effectiveAssignments.map(a => a.field));
         const includeCount = ['y', 'value', 'x', 'size'].includes(pickerRole);
 
         const allowed = selectedDataset.columns.filter((col) => {
+            if (isOrgChart && [FieldRoles.NODE, FieldRoles.PARENT, FieldRoles.LABEL, FieldRoles.COLOR].includes(pickerRole)) {
+                return true;
+            }
             if (pickerRole === FieldRoles.NODE || pickerRole === FieldRoles.PARENT || pickerRole === FieldRoles.LABEL) {
                 return col.type !== 'number';
             }
@@ -444,13 +449,20 @@ const DataPanel = ({
             .filter(col => !used.has(col.name))
             .filter(col => col.name.toLowerCase().includes(pickerSearch.toLowerCase()))
             .concat(includeCount && !used.has('__count__') ? [{ name: '__count__', type: 'number' }] : []);
-    }, [pickerRole, selectedDataset, effectiveAssignments, pickerSearch]);
+    }, [pickerRole, selectedDataset, effectiveAssignments, pickerSearch, activeChartConfig?.type]);
 
     const handlePickFieldForRole = (fieldName, role = pickerRole) => {
         if (!role || !fieldName) return;
         if (effectiveAssignments.some(a => a.field === fieldName && a.role === role)) return;
 
-        const next = [...effectiveAssignments, {
+        const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART;
+        const isOrgSingleRole = isOrgChart && [FieldRoles.NODE, FieldRoles.PARENT, FieldRoles.LABEL, FieldRoles.COLOR].includes(role);
+
+        const base = isOrgSingleRole
+            ? effectiveAssignments.filter(a => a.role !== role)
+            : [...effectiveAssignments];
+
+        const next = [...base, {
             field: fieldName,
             role,
             aggregation: ['y', 'value', 'x', 'size'].includes(role) ? (activeChartConfig?.aggregation || 'SUM') : undefined,

@@ -139,6 +139,30 @@ const inferColumnType = (values = []) => {
     const sample = values.filter(v => v !== null && v !== undefined && v !== '').slice(0, 50);
     if (sample.length === 0) return 'string';
 
+    const toExperienceMonths = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        if (typeof value === 'number' && Number.isFinite(value)) return value * 12;
+
+        const text = String(value).toLowerCase().trim();
+        if (!text) return null;
+
+        const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yr|year\(s\))/);
+        const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:months?|mos?|mo|month\(s\))/);
+
+        if (yearMatch || monthMatch) {
+            const years = yearMatch ? Number(yearMatch[1]) : 0;
+            const months = monthMatch ? Number(monthMatch[1]) : 0;
+            const total = years * 12 + months;
+            return Number.isFinite(total) ? total : null;
+        }
+
+        const numeric = Number(text.replace(/[^0-9.-]/g, ''));
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const allExperienceLike = sample.every(v => toExperienceMonths(v) !== null);
+    if (allExperienceLike) return 'number';
+
     const allNumbers = sample.every(v => typeof v === 'number' || (!Number.isNaN(Number(v)) && `${v}`.trim() !== ''));
     if (allNumbers) return 'number';
 
@@ -229,6 +253,7 @@ const App = () => {
         const browserTarget = toBrowserRoutePath(internalTarget);
         if (window.location.pathname !== browserTarget) {
             window.history.pushState({}, '', browserTarget);
+            window.dispatchEvent(new PopStateEvent('popstate'));
         }
         setRoutePath(normalizeRoutePath(internalTarget));
     };
@@ -1078,9 +1103,12 @@ const App = () => {
             <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { setView('data'); navigatePath('/'); }} />
             <div className="flex flex-1 overflow-hidden">
                 <Sidebar setView={setView} currentView={view} onNavigatePath={navigatePath} />
-                <main className={`flex-1 flex flex-col min-w-0 overflow-hidden ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                <main className={`flex-1 flex flex-col min-w-0 ${view === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
                     {view === 'templates' ? (
-                        <TemplateRoutes datasetColumns={selectedDataset?.columns ?? []} />
+                        <TemplateRoutes
+                            datasetColumns={selectedDataset?.columns ?? []}
+                            datasetData={selectedDataset?.data ?? []}
+                        />
                     ) : view === 'data' ? (
                         <DataSourceView
                             datasets={datasets}

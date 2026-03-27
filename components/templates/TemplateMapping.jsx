@@ -70,7 +70,53 @@ const buildAutoMapping = (requiredFields, datasetColumns) => {
     return mapping;
 };
 
-const TemplateMapping = ({ templates = [], datasetColumns, onGenerateDashboard }) => {
+const parseExperienceToMonths = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value * 12;
+
+    const text = String(value).toLowerCase().trim();
+    if (!text) return null;
+
+    const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yr|year\(s\))/);
+    const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:months?|mos?|mo|month\(s\))/);
+
+    if (yearMatch || monthMatch) {
+        const years = yearMatch ? Number(yearMatch[1]) : 0;
+        const months = monthMatch ? Number(monthMatch[1]) : 0;
+        const total = years * 12 + months;
+        return Number.isFinite(total) ? total : null;
+    }
+
+    const fallback = Number(text.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(fallback) ? fallback : null;
+};
+
+const parseNumberLike = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+
+    const cleaned = String(value).replace(/[^0-9.-]/g, '').trim();
+    if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === '-.') return null;
+
+    const numeric = Number(cleaned);
+    return Number.isFinite(numeric) ? numeric : null;
+};
+
+const isSampleTypeCompatible = (samples = [], expectedType, fieldName = '') => {
+    if (!Array.isArray(samples) || samples.length === 0) return true;
+    if (expectedType !== 'number') return true;
+
+    const normalizedField = normalizeFieldName(fieldName);
+    const isExperienceField = normalizedField.includes('experience');
+
+    return samples.every((value) => {
+        if (value === null || value === undefined || value === '') return true;
+        if (isExperienceField) return parseExperienceToMonths(value) !== null;
+        return parseNumberLike(value) !== null;
+    });
+};
+
+const TemplateMapping = ({ templates = [], datasetColumns, datasetData = [], onGenerateDashboard }) => {
     const { id } = useParams();
     const navigate = useNavigate();
     const { theme } = useTheme();
@@ -127,8 +173,16 @@ const TemplateMapping = ({ templates = [], datasetColumns, onGenerateDashboard }
 
             const selectedColumn = normalizedColumns.find((column) => column.name === selectedColumnName);
             const selectedType = selectedColumn?.type || 'string';
+            const sampleValues = Array.isArray(datasetData)
+                ? datasetData
+                    .map((row) => row?.[selectedColumnName])
+                    .filter((value) => value !== null && value !== undefined && value !== '')
+                    .slice(0, 40)
+                : [];
 
-            if (field.type !== selectedType) {
+            const sampleCompatible = isSampleTypeCompatible(sampleValues, field.type, field.name);
+
+            if (field.type !== selectedType && !sampleCompatible) {
                 mismatches.push({
                     field: field.name,
                     expected: field.type,
@@ -138,7 +192,19 @@ const TemplateMapping = ({ templates = [], datasetColumns, onGenerateDashboard }
         });
 
         return { missing, mismatches };
-    }, [template, mapping, normalizedColumns]);
+    }, [template, mapping, normalizedColumns, datasetData]);
+
+    const uploadedColumnLines = useMemo(() => {
+        const names = normalizedColumns.map((column) => column.name).filter(Boolean);
+        if (names.length === 0) return [];
+
+        const maxPerLine = 8;
+        const lines = [];
+        for (let i = 0; i < names.length; i += maxPerLine) {
+            lines.push(names.slice(i, i + maxPerLine).join(', '));
+        }
+        return lines;
+    }, [normalizedColumns]);
 
     const handleChangeMapping = (fieldName, columnName) => {
         setMapping((prev) => ({
@@ -307,14 +373,14 @@ const TemplateMapping = ({ templates = [], datasetColumns, onGenerateDashboard }
 
                     <div className="cv-mapping-panel">
                         <h2>Uploaded Dataset Columns</h2>
-                        <ul className="cv-column-list">
-                            {normalizedColumns.map((column) => (
-                                <li key={column.name}>
-                                    <span>{column.name}</span>
-                                    <span className="cv-tag">{column.type}</span>
-                                </li>
+                        <div className="cv-column-list-compact">
+                            {uploadedColumnLines.map((line, index) => (
+                                <p key={`${line}-${index}`}>
+                                    {line}
+                                    {index < uploadedColumnLines.length - 1 ? ',' : ''}
+                                </p>
                             ))}
-                        </ul>
+                        </div>
                     </div>
                 </div>
             )}

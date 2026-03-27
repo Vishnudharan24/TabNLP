@@ -1,0 +1,114 @@
+Create a new chart type called "Org Chart (Hierarchy)" 
+
+----------------------------------------
+🔷 REQUIREMENTS
+----------------------------------------
+
+1. Chart Type:
+- Name: "Org Chart (Hierarchy)"
+- Category: Organizational / Hierarchical
+
+2. Data Input:
+The chart will receive processed hierarchical data in this format:
+
+{
+  name: "CEO",
+  children: [
+    {
+      name: "Manager 1",
+      children: [
+        { name: "Employee A" },
+        { name: "Employee B" }
+      ]
+    },
+    {
+      name: "Manager 2",
+      children: [
+        { name: "Employee C" }
+      ]
+    }
+  ]
+}
+
+----------------------------------------
+🔷 DATA GENERATION (IMPORTANT)
+----------------------------------------
+
+Write a utility function to transform flat employee data into hierarchy:
+
+Input:
+- Employee_ID
+- Employee_Name
+- Manager_ID
+
+Steps:
+1. Create a map of Employee_ID → node
+2. Assign each employee under their Manager_ID
+3. Root node = employee with no manager
+
+----------------------------------------
+🔷 ECHARTS CONFIGURATION
+----------------------------------------
+
+Use ECharts "tree" series.
+
+Requirements:
+- Layout: vertical (top → down)
+- Node shape: rectangular cards
+- Show:
+  - Employee Name
+  - Optional: Designation
+
+Example config:
+
+{
+  series: [
+    {
+      type: "tree",
+      data: [hierarchyData],
+      top: "5%",
+      left: "10%",
+      bottom: "5%",
+      right: "10%",
+      symbol: "roundRect",
+      symbolSize: [160, 60],
+
+      label: {
+        position: "inside",
+        verticalAlign: "middle",
+        align: "center",
+        fontSize: 12,
+        formatter: "{b}"
+      },
+
+      lineStyle: {
+        width: 2,
+        color: "#aaa"
+      },
+
+      expandAndCollapse: true,
+      initialTreeDepth: 3,
+
+      animationDuration: 550,
+      animationDurationUpdate: 750
+    }
+  ]
+}
+
+----------------------------------------
+🔷 UI REQUIREMENTS
+----------------------------------------
+
+- in expand org chart give this as one more org chart viewing typw
+
+----------------------------------------
+🔷 STYLING (IMPORTANT)
+----------------------------------------
+
+- Clean rectangular cards
+- No images
+- Optional color based on level:
+  - Level 1 → blue
+  - Level 2 → green
+  - Level 3 → orange
+
