@@ -220,6 +220,13 @@ def _build_record(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any
     employment_status_raw = _to_text(_row_get(row, mapping, "Employment_Status", "Employment Status", "Status", "Employee_Status", "Employee Status"))
     department = _to_text(_row_get(row, mapping, "Department", "Dept")) or "Unknown"
     location = _to_text(_row_get(row, mapping, "Location", "Office_Location", "Work_Location")) or "Unknown"
+    city = _to_text(_row_get(row, mapping, "City"))
+    state = _to_text(_row_get(row, mapping, "State"))
+
+    if location == "Unknown":
+        location = city or state or "Unknown"
+
+    manager_name = _to_text(_row_get(row, mapping, "Manager_Name", "Manager Name", "Manager", "Reporting_Manager")) or "Unassigned"
 
     return {
         "employee_id": employee_id,
@@ -231,8 +238,9 @@ def _build_record(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any
         "gender": _to_text(_row_get(row, mapping, "Gender", "Sex")) or "Unknown",
         "marital_status": _to_text(_row_get(row, mapping, "Marital_Status", "Marital Status")) or "Unknown",
         "nationality": _to_text(_row_get(row, mapping, "Nationality")) or "Unknown",
-        "manager": _to_text(_row_get(row, mapping, "Manager", "Manager_Name", "Reporting_Manager")) or "Unassigned",
-        "manager_id": _to_text(_row_get(row, mapping, "Manager_ID")),
+        "manager": manager_name,
+        "manager_name": manager_name,
+        "manager_id": _to_text(_row_get(row, mapping, "Manager_ID", "Manager ID")),
         "join_date": join_date,
         "resignation_date": resignation_date,
         "dob": dob,
@@ -241,13 +249,22 @@ def _build_record(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any
         "experience_months": normalized_experience_months,
         "payment_mode": _to_text(_row_get(row, mapping, "Payment_Mode", "Payroll_Mode")) or "Unknown",
         "bank_name": _to_text(_row_get(row, mapping, "Bank_Name", "Bank")) or "Unknown",
+        "ifsc_code": _to_text(_row_get(row, mapping, "IFSC_Code", "IFSC Code")) or "Unknown",
         "qualification": _to_text(_row_get(row, mapping, "Qualification", "Highest_Qualification")) or "Unknown",
         "specialization": _to_text(_row_get(row, mapping, "Specialization", "Major")) or "Unknown",
+        "course_type": _to_text(_row_get(row, mapping, "Course_Type", "Course Type")) or "Unknown",
+        "city": city or "Unknown",
+        "state": state or "Unknown",
         "transfer_count": _to_number(_row_get(row, mapping, "Transfer_Count")) or 0,
         "transfer_flag": _contains(_to_text(_row_get(row, mapping, "Transfer_Flag", "Transferred")), "yes", "true", "1"),
+        "transfer_from": _to_text(_row_get(row, mapping, "Transfer_From", "Transfer From")) or "Unknown",
+        "movement_reason": _to_text(_row_get(row, mapping, "Reason_For_Movement", "Reason For Movement", "Movement_Reason")) or "Unknown",
         "exit_reason": _to_text(_row_get(row, mapping, "Exit_Reason", "Resignation_Reason")) or "Unknown",
         "exit_type": _to_text(_row_get(row, mapping, "Exit_Type", "Separation_Type")) or "Unknown",
         "probation_status": _to_text(_row_get(row, mapping, "Probation_Status")) or "Unknown",
+        "probation_end_date": _to_datetime(_row_get(row, mapping, "Probation_End_Date", "Probation End Date")),
+        "current_experience_years": _to_experience_years(_row_get(row, mapping, "Current_Experience", "Current Experience")),
+        "group_experience_years": _to_experience_years(_row_get(row, mapping, "Group_Experience", "Group Experience")),
         "pan": _to_text(_row_get(row, mapping, "PAN", "PAN_Number")),
         "aadhar": _to_text(_row_get(row, mapping, "Aadhar", "Aadhaar", "Aadhar_Number")),
         "pf": _to_text(_row_get(row, mapping, "PF_Number", "PF")),
@@ -428,16 +445,28 @@ def demographics(prepared: dict[str, Any]) -> dict[str, Any]:
 
     gender_by_department = []
     for dept, counter in dept_gender.items():
-        gender_by_department.append({
-            "department": dept,
-            "distribution": [{"name": k, "value": v} for k, v in counter.items()],
-        })
+        for gender, value in sorted(counter.items(), key=lambda x: x[0]):
+            gender_by_department.append({
+                "department": dept,
+                "gender": gender,
+                "value": value,
+            })
+
+    age_distribution = [{"name": b["name"], "value": b["value"]} for b in bins]
+    nationality_distribution = _group_count(records, lambda r: r["nationality"])
+    location_distribution = _group_count(records, lambda r: r["city"] if r["city"] != "Unknown" else r["location"])
 
     return {
-        "ageDistribution": [{"name": b["name"], "value": b["value"]} for b in bins],
+        "charts": {
+            "age_distribution": age_distribution,
+            "gender_by_department": gender_by_department,
+            "nationality_distribution": nationality_distribution,
+            "location_distribution": location_distribution,
+        },
+        "ageDistribution": age_distribution,
         "genderDiversityByDepartment": gender_by_department,
-        "nationalityDistribution": _group_count(records, lambda r: r["nationality"]),
-        "locationDistribution": _group_count(records, lambda r: r["location"]),
+        "nationalityDistribution": nationality_distribution,
+        "locationDistribution": location_distribution,
     }
 
 
@@ -456,11 +485,22 @@ def hiring(prepared: dict[str, Any]) -> dict[str, Any]:
         by_department[r["department"]] += 1
         by_location[r["location"]] += 1
 
+    monthly_hiring_trend = _list_counter({k: v for k, v in monthly.items() if k})
+    yearly_hiring_trend = _list_counter(dict(yearly))
+    hiring_by_department = _list_counter(dict(by_department))
+    hiring_by_location = _list_counter(dict(by_location))
+
     return {
-        "monthlyHiringTrend": _list_counter({k: v for k, v in monthly.items() if k}),
-        "yearlyHiringTrend": _list_counter(dict(yearly)),
-        "hiringByDepartment": _list_counter(dict(by_department)),
-        "hiringByLocation": _list_counter(dict(by_location)),
+        "charts": {
+            "monthly_hiring_trend": monthly_hiring_trend,
+            "yearly_hiring_trend": yearly_hiring_trend,
+            "hiring_by_department": hiring_by_department,
+            "hiring_by_location": hiring_by_location,
+        },
+        "monthlyHiringTrend": monthly_hiring_trend,
+        "yearlyHiringTrend": yearly_hiring_trend,
+        "hiringByDepartment": hiring_by_department,
+        "hiringByLocation": hiring_by_location,
     }
 
 
@@ -469,7 +509,7 @@ def attrition(prepared: dict[str, Any]) -> dict[str, Any]:
     total = len(records)
     exits = [r for r in records if r["resignation_date"] or r["status"] == "inactive"]
     exit_count = len(exits)
-    attrition_rate = (exit_count / total * 100) if total else 0
+    attrition_rate = (exit_count / total) if total else 0
 
     voluntary = 0
     involuntary = 0
@@ -485,9 +525,8 @@ def attrition(prepared: dict[str, Any]) -> dict[str, Any]:
     reason_counter = Counter(r["exit_reason"] for r in exits)
 
     exp_bins = {
-        "0-1": 0,
-        "1-3": 0,
-        "3-5": 0,
+        "0-2": 0,
+        "2-5": 0,
         "5-10": 0,
         "10+": 0,
     }
@@ -495,25 +534,43 @@ def attrition(prepared: dict[str, Any]) -> dict[str, Any]:
         exp = r["experience_years"]
         if exp is None:
             continue
-        if exp < 1:
-            exp_bins["0-1"] += 1
-        elif exp < 3:
-            exp_bins["1-3"] += 1
+        if exp < 2:
+            exp_bins["0-2"] += 1
         elif exp < 5:
-            exp_bins["3-5"] += 1
+            exp_bins["2-5"] += 1
         elif exp < 10:
             exp_bins["5-10"] += 1
         else:
             exp_bins["10+"] += 1
 
+    exits_by_department = _group_count(exits, lambda r: r["department"])
+    exits_by_manager = [{"name": k, "value": v} for k, v in manager_counter.most_common(10)]
+    top_exit_reasons = [{"name": k, "value": v} for k, v in reason_counter.most_common(10)]
+    attrition_by_experience = [{"name": k, "value": v} for k, v in exp_bins.items()]
+    voluntary_vs_involuntary = [
+        {"name": "Voluntary", "value": voluntary},
+        {"name": "Involuntary", "value": involuntary},
+    ]
+
     return {
-        "attritionRate": round(attrition_rate, 2),
+        "kpis": {
+            "attrition_rate": round(attrition_rate, 4),
+            "attrition_rate_percentage": round(attrition_rate * 100, 2),
+        },
+        "charts": {
+            "voluntary_vs_involuntary": voluntary_vs_involuntary,
+            "exits_by_department": exits_by_department,
+            "exits_by_manager": exits_by_manager,
+            "top_exit_reasons": top_exit_reasons,
+            "attrition_by_experience": attrition_by_experience,
+        },
+        "attritionRate": round(attrition_rate * 100, 2),
         "voluntaryExits": voluntary,
         "involuntaryExits": involuntary,
-        "exitsByDepartment": _group_count(exits, lambda r: r["department"]),
-        "exitsByManager": [{"name": k, "value": v} for k, v in manager_counter.most_common(10)],
-        "topExitReasons": [{"name": k, "value": v} for k, v in reason_counter.most_common(10)],
-        "attritionByExperience": [{"name": k, "value": v} for k, v in exp_bins.items()],
+        "exitsByDepartment": exits_by_department,
+        "exitsByManager": exits_by_manager,
+        "topExitReasons": top_exit_reasons,
+        "attritionByExperience": attrition_by_experience,
     }
 
 
@@ -522,24 +579,20 @@ def experience(prepared: dict[str, Any]) -> dict[str, Any]:
     exps = [r["experience_years"] for r in records if r["experience_years"] is not None]
 
     bins = {
-        "0-1": 0,
-        "1-3": 0,
-        "3-5": 0,
+        "0-2": 0,
+        "2-5": 0,
         "5-10": 0,
         "10+": 0,
     }
     senior = 0
     junior = 0
     for exp in exps:
-        if exp < 1:
-            bins["0-1"] += 1
-            junior += 1
-        elif exp < 3:
-            bins["1-3"] += 1
+        if exp < 2:
+            bins["0-2"] += 1
             junior += 1
         elif exp < 5:
-            bins["3-5"] += 1
-            senior += 1
+            bins["2-5"] += 1
+            junior += 1
         elif exp < 10:
             bins["5-10"] += 1
             senior += 1
@@ -547,19 +600,34 @@ def experience(prepared: dict[str, Any]) -> dict[str, Any]:
             bins["10+"] += 1
             senior += 1
 
+    experience_distribution = [{"name": k, "value": v} for k, v in bins.items()]
+    senior_vs_junior_ratio = round((senior / junior), 2) if junior else None
+
     return {
+        "kpis": {
+            "avg_experience": round(_average(exps), 2),
+        },
+        "charts": {
+            "experience_distribution": experience_distribution,
+            "senior_vs_junior_ratio": [
+                {"name": "Senior", "value": senior},
+                {"name": "Junior", "value": junior},
+            ],
+        },
         "averageExperience": round(_average(exps), 2),
-        "experienceDistribution": [{"name": k, "value": v} for k, v in bins.items()],
+        "experienceDistribution": experience_distribution,
         "seniorEmployees": senior,
         "juniorEmployees": junior,
-        "seniorJuniorRatio": round((senior / junior), 2) if junior else None,
+        "seniorJuniorRatio": senior_vs_junior_ratio,
     }
 
 
 def org(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
-    manager_teams = Counter(r["manager"] for r in records if r["manager"] and r["manager"] != "Unassigned")
-    team_sizes = [{"name": k, "value": v} for k, v in manager_teams.items()]
+    manager_teams = Counter(
+        (r["manager_id"] or r["manager_name"]) for r in records if (r["manager_id"] or r["manager_name"]) and r["manager_name"] != "Unassigned"
+    )
+    team_sizes = [{"name": k, "value": v} for k, v in sorted(manager_teams.items(), key=lambda x: (-x[1], x[0]))]
 
     span_values = list(manager_teams.values())
     span_of_control = {
@@ -571,12 +639,14 @@ def org(prepared: dict[str, Any]) -> dict[str, Any]:
     nodes_by_id: dict[str, dict[str, Any]] = {}
     roots: list[dict[str, Any]] = []
 
-    for r in records:
-        employee_id = r["employee_id"] or f"employee-{id(r)}"
+    for idx, r in enumerate(records):
+        employee_id = r["employee_id"] or f"employee-{idx + 1}"
+        employee_name = _to_text(r["raw"].get(prepared["mapping"].get("Employee_Name", ""))) or employee_id
         nodes_by_id[employee_id] = {
-            "name": employee_id,
-            "displayName": _to_text(r["raw"].get(prepared["mapping"].get("Employee_Name", ""))) or employee_id,
+            "id": employee_id,
+            "name": employee_name,
             "department": r["department"],
+            "manager_id": r["manager_id"] or "",
             "children": [],
         }
 
@@ -597,11 +667,16 @@ def org(prepared: dict[str, Any]) -> dict[str, Any]:
         roots = [next(iter(nodes_by_id.values()))]
 
     hierarchy = {
+        "id": "organization-root",
         "name": "Organization",
-        "children": roots[:50],
+        "children": roots[:200],
     }
 
     return {
+        "charts": {
+            "org_tree": hierarchy,
+            "manager_team_size": team_sizes,
+        },
         "managerWiseTeamSize": team_sizes,
         "spanOfControl": span_of_control,
         "hierarchy": hierarchy,
@@ -610,61 +685,123 @@ def org(prepared: dict[str, Any]) -> dict[str, Any]:
 
 def payroll(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
+    payment_mode_distribution = _group_count(records, lambda r: r["payment_mode"])
+    bank_distribution = _group_count(records, lambda r: r["bank_name"])
     return {
-        "paymentModeDistribution": _group_count(records, lambda r: r["payment_mode"]),
-        "bankDistribution": _group_count(records, lambda r: r["bank_name"]),
+        "charts": {
+            "payment_mode_distribution": payment_mode_distribution,
+            "bank_distribution": bank_distribution,
+        },
+        "paymentModeDistribution": payment_mode_distribution,
+        "bankDistribution": bank_distribution,
     }
 
 
 def education(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
+    qualification_distribution = _group_count(records, lambda r: r["qualification"])
+    specialization_distribution = _group_count(records, lambda r: r["specialization"])
+    course_type_distribution = _group_count(records, lambda r: r["course_type"])
     return {
-        "qualificationDistribution": _group_count(records, lambda r: r["qualification"]),
-        "specializationDistribution": _group_count(records, lambda r: r["specialization"]),
+        "charts": {
+            "qualification_distribution": qualification_distribution,
+            "specialization_distribution": specialization_distribution,
+            "course_type_distribution": course_type_distribution,
+        },
+        "qualificationDistribution": qualification_distribution,
+        "specializationDistribution": specialization_distribution,
+        "courseTypeDistribution": course_type_distribution,
     }
 
 
 def location(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
     transfers = sum(1 for r in records if r["transfer_flag"] or (r["transfer_count"] and r["transfer_count"] > 0))
+    transfer_trends_counter = Counter()
+    movement_reason_counter = Counter()
+
+    for r in records:
+        has_transfer = r["transfer_flag"] or (r["transfer_count"] and r["transfer_count"] > 0)
+        if not has_transfer:
+            continue
+        transfer_key = f"{r['transfer_from']} -> {r['location']}"
+        transfer_trends_counter[transfer_key] += 1
+        movement_reason_counter[r["movement_reason"]] += 1
+
+    location_distribution = _group_count(records, lambda r: r["location"])
+    transfer_trends = [{"name": k, "value": v} for k, v in transfer_trends_counter.most_common(20)]
+    movement_reasons = [{"name": k, "value": v} for k, v in movement_reason_counter.most_common(20)]
+
     return {
+        "charts": {
+            "location_distribution": location_distribution,
+            "transfer_trends": transfer_trends,
+            "movement_reasons": movement_reasons,
+        },
         "transfers": transfers,
-        "locationDistribution": _group_count(records, lambda r: r["location"]),
+        "locationDistribution": location_distribution,
+        "transferTrends": transfer_trends,
+        "movementReasons": movement_reasons,
     }
 
 
 def department(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
     exits = [r for r in records if r["status"] == "inactive" or r["resignation_date"]]
+    headcount_per_department = _group_count(records, lambda r: r["department"])
+    attrition_per_department = _group_count(exits, lambda r: r["department"])
     return {
-        "headcountPerDepartment": _group_count(records, lambda r: r["department"]),
-        "attritionPerDepartment": _group_count(exits, lambda r: r["department"]),
+        "charts": {
+            "headcount_per_department": headcount_per_department,
+            "attrition_per_department": attrition_per_department,
+        },
+        "headcountPerDepartment": headcount_per_department,
+        "attritionPerDepartment": attrition_per_department,
     }
 
 
 def lifecycle(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
-    probation_records = [r for r in records if _to_text(r["probation_status"]) not in ["", "Unknown"]]
+    probation_records = [r for r in records if r["probation_end_date"] is not None or _to_text(r["probation_status"]) not in ["", "Unknown"]]
 
     successful = 0
     for r in probation_records:
         status = _normalize(r["probation_status"])
         if any(token in status for token in ["confirm", "pass", "completed"]):
             successful += 1
+            continue
+
+        if r["probation_end_date"] and (not r["resignation_date"] or r["resignation_date"] >= r["probation_end_date"]):
+            successful += 1
 
     probation_success_rate = (successful / len(probation_records) * 100) if probation_records else 0
 
     early_attrition = 0
     lifecycle_months = []
+    lifecycle_duration = []
     for r in records:
         if r["join_date"] and r["resignation_date"]:
             years = _years_between(r["join_date"], r["resignation_date"])
             if years is not None:
-                lifecycle_months.append(years * 12)
-                if years < 1:
+                months = years * 12
+                lifecycle_months.append(months)
+                lifecycle_duration.append({
+                    "name": r["employee_id"] or "Unknown",
+                    "value": round(months, 2),
+                })
+                if years < 0.5:
                     early_attrition += 1
 
+    early_attrition_rate = (early_attrition / len(records) * 100) if records else 0
+
     return {
+        "kpis": {
+            "probation_success_rate": round(probation_success_rate, 2),
+            "early_attrition": round(early_attrition_rate, 2),
+        },
+        "charts": {
+            "lifecycle_duration": sorted(lifecycle_duration, key=lambda x: x["value"], reverse=True)[:300],
+        },
         "probationSuccessRate": round(probation_success_rate, 2),
         "earlyAttritionCount": early_attrition,
         "averageLifecycleDurationMonths": round(_average(lifecycle_months), 2),
@@ -726,8 +863,19 @@ def data_quality(prepared: dict[str, Any]) -> dict[str, Any]:
 
     completeness = (non_null_cells / total_cells * 100) if total_cells else 0
 
+    null_distribution_per_column = [{"name": k, "value": v} for k, v in null_counts.items()]
+    total_null_values = sum(v for v in null_counts.values())
+
     return {
-        "nullCountsPerColumn": [{"name": k, "value": v} for k, v in null_counts.items()],
+        "kpis": {
+            "total_null_values": total_null_values,
+            "duplicate_employees": len(duplicate_employees),
+            "completeness_percentage": round(completeness, 2),
+        },
+        "charts": {
+            "null_distribution_per_column": null_distribution_per_column,
+        },
+        "nullCountsPerColumn": null_distribution_per_column,
         "duplicateEmployees": duplicate_employees,
         "completenessPercentage": round(completeness, 2),
     }
