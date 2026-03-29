@@ -13,16 +13,11 @@ const TemplateRoutes = ({ datasetColumns = null, datasetData = [] }) => {
 
     const safeDatasetColumns = useMemo(() => {
         if (datasetColumns == null) {
-            return [
-                { name: 'Employee_ID', type: 'string' },
-                { name: 'Employment_Status', type: 'string' },
-                { name: 'Department', type: 'string' },
-                { name: 'Business_Unit', type: 'string' },
-                { name: 'Location', type: 'string' },
-                { name: 'Workforce_Category', type: 'string' },
-                { name: 'Gender', type: 'string' },
-                { name: 'Marital_Status', type: 'string' },
-            ];
+            const hrTemplate = ANALYTICS_TEMPLATES.find((template) => template.id === 'hr');
+            return (hrTemplate?.requiredFields || []).map((field) => ({
+                name: field.name,
+                type: field.type,
+            }));
         }
 
         return datasetColumns;

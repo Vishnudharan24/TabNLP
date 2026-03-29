@@ -1,0 +1,155 @@
+I already have multiple charts implemented (bar, line, pie, donut, etc.), but they currently look basic and cluttered.
+
+I want to upgrade ALL charts to an enterprise-grade standard similar to Power BI, Tableau, or Looker.
+
+----------------------------------------
+🔷 GOAL
+----------------------------------------
+
+Improve:
+- Readability
+- Clarity
+- Spacing
+- Interactivity
+- Scalability (large datasets)
+
+Make charts:
+- Clean
+- Minimal
+- Professional
+- Insight-focused
+
+----------------------------------------
+🔷 GLOBAL IMPROVEMENTS (APPLY TO ALL CHARTS)
+----------------------------------------
+
+1. Typography & Labels:
+- Reduce label clutter (avoid overlapping)
+- Use smart label display (only important values)
+- Rotate axis labels when needed
+- Truncate long labels with ellipsis
+- Add tooltip to show full text
+
+2. Grid & Spacing:
+- Add proper grid margins (top, left, right, bottom)
+- Avoid cutting labels
+- Increase padding between elements
+
+Example:
+grid: {
+  top: 40,
+  left: 60,
+  right: 30,
+  bottom: 80,
+  containLabel: true
+}
+
+----------------------------------------
+3. Tooltips (VERY IMPORTANT):
+- Enable rich tooltips for ALL charts
+- Show:
+  - Full label
+  - Exact value
+  - Percentage (if applicable)
+
+----------------------------------------
+4. Legends:
+- Position properly (top or bottom)
+- Avoid overlapping chart area
+- Make scrollable if too many items
+
+----------------------------------------
+5. Colors:
+- Use consistent color palette
+- Avoid random colors
+- Use semantic colors:
+  - Blue → primary
+  - Green → positive
+  - Red → negative
+
+----------------------------------------
+6. Data Handling:
+- Sort data descending (for bar charts)
+- Limit to Top N (e.g., Top 10 or Top 20)
+- Group remaining as "Others"
+
+----------------------------------------
+7. Interactivity:
+- Add hover effects
+- Enable zoom (dataZoom) for large datasets
+- Enable click events for drill-down
+
+----------------------------------------
+🔷 CHART-SPECIFIC IMPROVEMENTS
+----------------------------------------
+
+📊 BAR CHART:
+- Avoid label overlap
+- Show labels only for important values
+- Use horizontal bar for large categories
+- Add dataZoom for scrolling
+
+📈 LINE CHART:
+- Smooth lines
+- Add markers for peaks
+- Highlight max/min points
+
+🥧 PIE / DONUT:
+- Show percentage + value
+- Avoid label crowding
+- Use legend instead of too many labels
+
+----------------------------------------
+🔷 KPI CARDS (IMPORTANT)
+----------------------------------------
+
+Improve KPI cards:
+- Add icons
+- Add trend indicators (↑ ↓)
+- Add subtle background
+- Use large, bold numbers
+
+----------------------------------------
+🔷 RESPONSIVENESS
+----------------------------------------
+
+- Charts should resize properly
+- Avoid overflow issues
+- Maintain readability on smaller screens
+
+----------------------------------------
+🔷 PERFORMANCE
+----------------------------------------
+
+- Optimize for large datasets
+- Avoid rendering unnecessary labels
+- Use lazy loading if needed
+
+----------------------------------------
+🔷 IMPLEMENTATION
+----------------------------------------
+
+1. Update global chart config in:
+services/echartsOptionBuilder.js
+
+2. Create reusable helpers:
+- formatLabels()
+- applyGridSpacing()
+- applyTooltip()
+- applyDataZoom()
+
+3. Apply enhancements across ALL chart types
+
+----------------------------------------
+🔷 OUTPUT
+----------------------------------------
+
+Provide:
+- Updated ECharts configuration patterns
+- Reusable helper functions
+- Best practices for each chart type
+- Example before vs after improvements
+
+----------------------------------------
+GOAL:
+Transform all charts into clean, professional, enterprise-grade dashboards with high readability and usability.

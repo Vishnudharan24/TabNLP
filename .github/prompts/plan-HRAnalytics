@@ -1,0 +1,196 @@
+Add all these analysis to the hr analytics template!!
+
+Endpoint: POST /hr/analytics/demographics
+
+Compute demographic insights.
+
+Steps:
+- Convert DOB → age
+- Bucket age: 18–24, 25–34, 35–44, 45–54, 55+
+
+Charts:
+- age_distribution
+- gender_by_department
+- nationality_distribution
+- location_distribution
+
+Columns:
+DOB, Gender, Department, Nationality, City, State
+
+Return chart-ready JSON.
+
+
+Endpoint: POST /hr/analytics/hiring
+
+Compute hiring trends.
+
+Steps:
+- Group by month(Date_of_Joining)
+- Group by year(Date_of_Joining)
+
+Charts:
+- monthly_hiring_trend
+- yearly_hiring_trend
+- hiring_by_department
+- hiring_by_location
+
+Columns:
+Date_of_Joining, Department, Location
+
+Endpoint: POST /hr/analytics/attrition
+
+Compute attrition metrics.
+
+KPIs:
+- attrition_rate = exited / total
+
+Charts:
+- voluntary_vs_involuntary
+- exits_by_department
+- exits_by_manager
+- top_exit_reasons
+- attrition_by_experience
+
+Columns:
+Date_of_Resignation, Exit Type, Exit Reason, Department, Manager ID, Total Experience
+
+
+Endpoint: POST /hr/analytics/experience
+
+Compute experience insights.
+
+KPIs:
+- avg_experience
+
+Charts:
+- experience_distribution (0–2, 2–5, 5–10, 10+)
+- senior_vs_junior_ratio
+
+Columns:
+Total Experience, Current Experience, Group Experience
+
+
+Endpoint: POST /hr/analytics/org
+
+Compute organization hierarchy.
+
+Steps:
+- Build tree using:
+  parent = Manager_ID
+  child = Employee_ID
+
+Charts:
+- org_tree
+- manager_team_size
+
+Columns:
+Employee_ID, Manager ID, Manager Name
+
+
+Endpoint: POST /hr/analytics/payroll
+
+Compute payroll distribution.
+
+Charts:
+- payment_mode_distribution
+- bank_distribution
+
+Columns:
+Payment Mode, Bank Name, IFSC Code
+
+Endpoint: POST /hr/analytics/education
+
+Compute education insights.
+
+Charts:
+- qualification_distribution
+- specialization_distribution
+- course_type_distribution
+
+Columns:
+Qualification, Specialization, Course Type
+
+Endpoint: POST /hr/analytics/location
+
+Compute location and mobility insights.
+
+Charts:
+- location_distribution
+- transfer_trends
+- movement_reasons
+
+Columns:
+Location, Transfer From, Reason For Movement
+
+
+Endpoint: POST /hr/analytics/department
+
+Compute department insights.
+
+Charts:
+- headcount_per_department
+- attrition_per_department
+
+Columns:
+Department, Date_of_Resignation
+
+Endpoint: POST /hr/analytics/lifecycle
+
+Compute employee lifecycle metrics.
+
+KPIs:
+- probation_success_rate
+- early_attrition (within 6 months)
+
+Charts:
+- lifecycle_duration
+
+Columns:
+Date_of_Joining, Probation End Date, Date_of_Resignation
+
+Endpoint: POST /hr/analytics/lifecycle
+
+Compute employee lifecycle metrics.
+
+KPIs:
+- probation_success_rate
+- early_attrition (within 6 months)
+
+Charts:
+- lifecycle_duration
+
+Columns:
+Date_of_Joining, Probation End Date, Date_of_Resignation
+
+Endpoint: POST /hr/analytics/lifecycle
+
+Compute employee lifecycle metrics.
+
+KPIs:
+- probation_success_rate
+- early_attrition (within 6 months)
+
+Charts:
+- lifecycle_duration
+
+Columns:
+Date_of_Joining, Probation End Date, Date_of_Resignation
+
+Endpoint: POST /hr/analytics/data-quality
+
+Compute data quality metrics.
+
+KPIs:
+- total_null_values
+- duplicate_employees
+- completeness_percentage
+
+Charts:
+- null_distribution_per_column
+
+Columns:
+All columns
+
+
+
+build all these api in backend now

@@ -53,7 +53,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const labelMode = style.labelMode || 'auto';
     const tooltipEnabled = style.tooltipEnabled !== false;
     const tooltipDecimals = Number.isFinite(Number(style.tooltipDecimals)) ? Number(style.tooltipDecimals) : 2;
-    const categories = processedData.map(d => d.name);
+    let categories = processedData.map(d => d.name);
     const axisNameFromDimension = String(dimension || 'Category');
     const axisNameFromMeasure = measures.length === 1
         ? String(measures[0] || 'Value')
@@ -70,7 +70,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         if (labelMode === 'show') return { ...fallback, show: true };
         return fallback;
     };
-    const tooltipStyle = {
+    const tooltipStyle = applyTooltip({ tooltip: {
         trigger: 'axis',
         show: tooltipEnabled,
         backgroundColor: isDark ? '#1e293b' : '#ffffff',
@@ -80,16 +80,17 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         padding: [12, 16],
         extraCssText: 'border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);',
         valueFormatter: (value) => numberFormatter(value),
-    };
+    } }).tooltip;
     const legendStyle = {
         textStyle: { color: subTextColor, fontSize, fontFamily },
+        type: 'scroll',
         bottom: 0,
         itemGap: isClearMode ? 18 : 16,
         icon: 'roundRect',
         itemWidth: isClearMode ? 14 : 12,
         itemHeight: isClearMode ? 9 : 8,
     };
-    const gridStyle = { left: 52, right: 22, top: 24, bottom: 48, containLabel: true };
+    const gridStyle = applyGridSpacing({ grid: { left: 52, right: 22, top: 24, bottom: 48, containLabel: true } }).grid;
     const axisLabelStyle = { color: subTextColor, fontSize, fontFamily };
     const axisNameStyle = {
         color: textColor,
@@ -106,7 +107,317 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         },
     };
 
-    const xAxisCategory = {
+    const truncateText = (value, max = 16) => {
+        const str = String(value ?? '');
+        if (str.length <= max) return str;
+        return `${str.slice(0, Math.max(0, max - 1))}…`;
+    };
+
+    const toAxisArray = (axis) => (Array.isArray(axis) ? axis : (axis ? [axis] : []));
+
+    const formatLabels = (axis = {}, options = {}) => {
+        const {
+            maxLabelLength = 16,
+            rotateThreshold = 10,
+            rotateAngle = 35,
+            isCategory = false,
+        } = options;
+
+        const categories = Array.isArray(axis?.data) ? axis.data : [];
+        const shouldRotate = isCategory && categories.length >= rotateThreshold;
+
+        return {
+            ...axis,
+            axisLabel: {
+                ...(axis?.axisLabel || {}),
+                color: subTextColor,
+                hideOverlap: true,
+                interval: 'auto',
+                rotate: shouldRotate ? rotateAngle : (axis?.axisLabel?.rotate ?? 0),
+                formatter: (value) => truncateText(value, maxLabelLength),
+            },
+            axisPointer: {
+                ...(axis?.axisPointer || {}),
+                show: true,
+                label: {
+                    ...(axis?.axisPointer?.label || {}),
+                    show: true,
+                    formatter: ({ value }) => String(value ?? ''),
+                },
+            },
+        };
+    };
+
+    const applyGridSpacing = (option = {}) => {
+        const baseGrid = {
+            top: 40,
+            left: 60,
+            right: 30,
+            bottom: 80,
+            containLabel: true,
+        };
+
+        if (Array.isArray(option.grid)) {
+            return {
+                ...option,
+                grid: option.grid.map((grid, idx) => (idx === 0 ? { ...baseGrid, ...(grid || {}) } : grid)),
+            };
+        }
+
+        return {
+            ...option,
+            grid: {
+                ...baseGrid,
+                ...(option.grid || {}),
+            },
+        };
+    };
+
+    const applyTooltip = (option = {}) => ({
+        ...option,
+        tooltip: {
+            ...(option.tooltip || {}),
+            show: tooltipEnabled,
+            confine: true,
+            appendToBody: true,
+            backgroundColor: isDark ? '#111827' : '#ffffff',
+            borderColor: isDark ? '#374151' : '#d1d5db',
+            borderWidth: 1,
+            textStyle: { color: textColor, fontSize, fontFamily },
+            extraCssText: 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.16);max-width:340px;white-space:normal;',
+            formatter: (params) => {
+                const list = Array.isArray(params) ? params : [params];
+                const head = list[0]?.axisValueLabel || list[0]?.name || '';
+                let html = `<div style="font-weight:700;margin-bottom:6px">${head}</div>`;
+                list.forEach((p) => {
+                    if (!p) return;
+                    const value = numberFormatter(p.value);
+                    const percent = Number.isFinite(Number(p.percent)) ? ` (${Number(p.percent).toFixed(1)}%)` : '';
+                    const fullName = String(p.name ?? head ?? '');
+                    html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0">
+                        <span style="display:flex;align-items:center;gap:6px;min-width:0;">
+                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color || colors[0]}"></span>
+                            <span title="${fullName}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fullName}</span>
+                        </span>
+                        <strong>${value}${percent}</strong>
+                    </div>`;
+                });
+                return html;
+            },
+        },
+    });
+
+    const applyDataZoom = (option = {}, categoryCount = 0) => {
+        if (categoryCount <= 12) return option;
+
+        const xAxis = Array.isArray(option?.xAxis) ? option.xAxis[0] : option?.xAxis;
+        const yAxis = Array.isArray(option?.yAxis) ? option.yAxis[0] : option?.yAxis;
+        const useYAxisZoom = xAxis?.type === 'value' && yAxis?.type === 'category';
+
+        return {
+            ...option,
+            dataZoom: [
+                useYAxisZoom
+                    ? { type: 'inside', yAxisIndex: 0, filterMode: 'filter', zoomLock: false }
+                    : { type: 'inside', xAxisIndex: 0, filterMode: 'filter', zoomLock: false },
+                useYAxisZoom
+                    ? { type: 'slider', yAxisIndex: 0, width: 12, right: 4, top: 40, bottom: 60, borderColor: borderColor, handleSize: 12 }
+                    : { type: 'slider', xAxisIndex: 0, height: 14, bottom: 24, borderColor: borderColor, handleSize: 16 },
+            ],
+        };
+    };
+
+    const applyTopNAndSortForBar = (option = {}, maxCategories = 20) => {
+        const series = Array.isArray(option?.series) ? option.series : [];
+        if (series.length === 0 || !series.every((s) => String(s?.type || '').includes('bar'))) return option;
+
+        const xAxis = Array.isArray(option.xAxis) ? option.xAxis[0] : option.xAxis;
+        const yAxis = Array.isArray(option.yAxis) ? option.yAxis[0] : option.yAxis;
+
+        const isHorizontal = xAxis?.type === 'value' && yAxis?.type === 'category';
+        const categoryAxisKey = isHorizontal ? 'yAxis' : 'xAxis';
+        const axis = isHorizontal ? yAxis : xAxis;
+        const categories = Array.isArray(axis?.data) ? axis.data : [];
+        if (categories.length === 0) return option;
+
+        const totals = categories.map((_, idx) => (
+            series.reduce((sum, s) => {
+                const point = Array.isArray(s?.data) ? s.data[idx] : 0;
+                const val = typeof point === 'object' ? Number(point?.value) : Number(point);
+                return sum + (Number.isFinite(val) ? val : 0);
+            }, 0)
+        ));
+
+        const sortedIdx = categories.map((_, idx) => idx).sort((a, b) => totals[b] - totals[a]);
+        const topIdx = sortedIdx.slice(0, Math.min(maxCategories, sortedIdx.length));
+        const restIdx = sortedIdx.slice(maxCategories);
+
+        const nextCategories = topIdx.map((i) => categories[i]);
+        if (restIdx.length > 0) nextCategories.push('Others');
+
+        const nextSeries = series.map((s) => {
+            const baseData = Array.isArray(s?.data) ? s.data : [];
+            const selected = topIdx.map((i) => baseData[i]);
+            if (restIdx.length > 0) {
+                const others = restIdx.reduce((sum, i) => {
+                    const raw = baseData[i];
+                    const value = typeof raw === 'object' ? Number(raw?.value) : Number(raw);
+                    return sum + (Number.isFinite(value) ? value : 0);
+                }, 0);
+                selected.push(others);
+            }
+
+            return {
+                ...s,
+                data: selected,
+            };
+        });
+
+        const nextOption = {
+            ...option,
+            series: nextSeries,
+        };
+
+        if (Array.isArray(option[categoryAxisKey])) {
+            nextOption[categoryAxisKey] = option[categoryAxisKey].map((a, idx) => (
+                idx === 0 ? { ...a, data: nextCategories } : a
+            ));
+        } else {
+            nextOption[categoryAxisKey] = { ...(option[categoryAxisKey] || {}), data: nextCategories };
+        }
+
+        return nextOption;
+    };
+
+    const applySeriesPolish = (option = {}) => {
+        const series = Array.isArray(option?.series) ? option.series : [];
+        return {
+            ...option,
+            series: series.map((s) => {
+                const t = String(s?.type || '').toLowerCase();
+                if (t === 'bar') {
+                    return {
+                        ...s,
+                        labelLayout: { hideOverlap: true },
+                        emphasis: {
+                            ...(s?.emphasis || {}),
+                            focus: 'series',
+                            scale: true,
+                        },
+                        label: resolveLabel({
+                            ...(s?.label || {}),
+                            show: labelMode === 'show' || (labelMode === 'auto' && (Array.isArray(s?.data) ? s.data.length <= 14 : true)),
+                            formatter: ({ value }) => numberFormatter(value),
+                        }),
+                    };
+                }
+
+                if (t === 'line') {
+                    return {
+                        ...s,
+                        smooth: s?.smooth ?? true,
+                        showSymbol: s?.showSymbol ?? true,
+                        symbolSize: s?.symbolSize ?? 6,
+                        markPoint: s?.markPoint || {
+                            symbolSize: 36,
+                            data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
+                        },
+                    };
+                }
+
+                if (t === 'pie') {
+                    return {
+                        ...s,
+                        avoidLabelOverlap: true,
+                        minAngle: s?.minAngle ?? 3,
+                        labelLayout: { hideOverlap: true },
+                        label: resolveLabel({
+                            ...(s?.label || {}),
+                            show: labelMode === 'show',
+                            formatter: '{b}: {c} ({d}%)',
+                        }),
+                    };
+                }
+
+                return s;
+            }),
+        };
+    };
+
+    const applyLegendPolish = (option = {}) => {
+        if (!option?.legend) return option;
+        if (Array.isArray(option.legend)) {
+            return {
+                ...option,
+                legend: option.legend.map((lg) => ({
+                    ...lg,
+                    type: 'scroll',
+                    orient: lg?.orient || 'horizontal',
+                    top: lg?.top ?? 6,
+                    bottom: lg?.bottom ?? 4,
+                })),
+            };
+        }
+
+        return {
+            ...option,
+            legend: {
+                ...option.legend,
+                type: 'scroll',
+                orient: option.legend?.orient || 'horizontal',
+                top: option.legend?.top ?? 6,
+                bottom: option.legend?.bottom ?? 4,
+            },
+        };
+    };
+
+    const finalizeEnterpriseOption = (option = {}, type = resolvedVisualType) => {
+        const isBarType = [
+            ChartType.BAR,
+            ChartType.BAR_CLUSTERED,
+            ChartType.BAR_STACKED,
+            ChartType.BAR_PERCENT,
+            ChartType.BAR_HORIZONTAL,
+            ChartType.BAR_HORIZONTAL_PERCENT,
+            ChartType.BAR_HORIZONTAL_STACKED,
+            ChartType.COMBO_BAR_LINE,
+        ].includes(type);
+
+        let next = { ...(option || {}) };
+
+        const xAxes = toAxisArray(next.xAxis).map((axis) => formatLabels(axis, {
+            isCategory: axis?.type === 'category',
+            maxLabelLength: 18,
+            rotateThreshold: 9,
+            rotateAngle: 35,
+        }));
+        const yAxes = toAxisArray(next.yAxis).map((axis) => formatLabels(axis, {
+            isCategory: axis?.type === 'category',
+            maxLabelLength: 18,
+            rotateThreshold: 10,
+            rotateAngle: 0,
+        }));
+
+        if (xAxes.length > 0) next.xAxis = Array.isArray(next.xAxis) ? xAxes : xAxes[0];
+        if (yAxes.length > 0) next.yAxis = Array.isArray(next.yAxis) ? yAxes : yAxes[0];
+
+        if (isBarType) next = applyTopNAndSortForBar(next, 20);
+        next = applyGridSpacing(next);
+        next = applyTooltip(next);
+        next = applyLegendPolish(next);
+        next = applySeriesPolish(next);
+
+        const xAxis0 = Array.isArray(next.xAxis) ? next.xAxis[0] : next.xAxis;
+        const yAxis0 = Array.isArray(next.yAxis) ? next.yAxis[0] : next.yAxis;
+        const categoryCount = Array.isArray(xAxis0?.data)
+            ? xAxis0.data.length
+            : (Array.isArray(yAxis0?.data) ? yAxis0.data.length : 0);
+        next = applyDataZoom(next, categoryCount);
+
+        return next;
+    };
+
+    const xAxisCategory = formatLabels({
         type: 'category',
         data: categories,
         name: axisNameFromDimension,
@@ -117,8 +428,13 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         axisLine: axisLineStyle,
         axisTick: { show: false },
         splitLine: { show: false },
-    };
-    const yAxisValue = {
+    }, {
+        isCategory: true,
+        maxLabelLength: 18,
+        rotateThreshold: 10,
+        rotateAngle: 35,
+    });
+    const yAxisValue = formatLabels({
         type: 'value',
         name: axisNameFromMeasure,
         nameLocation: 'middle',
@@ -128,7 +444,10 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         axisLine: { show: false },
         axisTick: { show: false },
         splitLine: splitLineStyle,
-    };
+    }, {
+        isCategory: false,
+        maxLabelLength: 12,
+    });
 
     const base = {
         backgroundColor: bgColor,
@@ -649,7 +968,55 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         return type;
     };
 
+    const preprocessTopNBarData = (rows = [], maxCategories = 20) => {
+        const safeRows = Array.isArray(rows) ? [...rows] : [];
+        if (safeRows.length <= maxCategories) return safeRows;
+
+        const measureKeys = Array.isArray(measures) ? measures.filter(Boolean) : [];
+        if (measureKeys.length === 0) return safeRows;
+
+        const totals = safeRows.map((row) => measureKeys.reduce((sum, key) => {
+            const value = Number(row?.[key]);
+            return sum + (Number.isFinite(value) ? value : 0);
+        }, 0));
+
+        const sorted = safeRows
+            .map((row, idx) => ({ row, idx, score: totals[idx] }))
+            .sort((a, b) => b.score - a.score);
+
+        const top = sorted.slice(0, maxCategories).map((entry) => entry.row);
+        const others = sorted.slice(maxCategories);
+
+        if (others.length === 0) return top;
+
+        const othersRow = { name: 'Others' };
+        measureKeys.forEach((key) => {
+            othersRow[key] = others.reduce((sum, entry) => {
+                const value = Number(entry?.row?.[key]);
+                return sum + (Number.isFinite(value) ? value : 0);
+            }, 0);
+        });
+
+        return [...top, othersRow];
+    };
+
     const resolvedVisualType = normalizeVisualType(visualType, config);
+    const barLikeTypes = new Set([
+        ChartType.BAR,
+        ChartType.BAR_CLUSTERED,
+        ChartType.BAR_STACKED,
+        ChartType.BAR_PERCENT,
+        ChartType.BAR_HORIZONTAL,
+        ChartType.BAR_HORIZONTAL_STACKED,
+        ChartType.BAR_HORIZONTAL_PERCENT,
+        ChartType.COMBO_BAR_LINE,
+    ]);
+
+    if (barLikeTypes.has(resolvedVisualType)) {
+        processedData = preprocessTopNBarData(processedData, 20);
+        categories = processedData.map(d => d.name);
+        xAxisCategory.data = categories;
+    }
 
     switch (resolvedVisualType) {
         // ═══════════════════ BAR CHARTS ═══════════════════
@@ -659,6 +1026,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: measures.length > 1 ? legendStyle : undefined,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m, i) => applyBarColorStyle({
@@ -692,6 +1060,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: legendStyle,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m, i) => applyBarColorStyle({
@@ -731,6 +1100,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 },
                 legend: legendStyle,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: { ...yAxisValue, max: 100 },
                 series: measures.map((m, i) => applyBarColorStyle({
@@ -752,6 +1122,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: measures.length > 1 ? legendStyle : undefined,
                 grid: { ...gridStyle, left: 80 },
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 yAxis: { ...xAxisCategory, type: 'category' },
                 xAxis: { ...yAxisValue, type: 'value' },
                 series: measures.map((m, i) => applyBarColorStyle({
@@ -838,6 +1209,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 },
                 legend: measures.length > 1 ? legendStyle : undefined,
                 grid: { ...gridStyle, top: 88, left: 56, right: 24, bottom: 56 },
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: {
                     ...xAxisCategory,
                     axisLabel: { ...xAxisCategory.axisLabel, color: lineUi.text, fontSize: 12 },
@@ -864,6 +1236,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: measures.length > 1 ? legendStyle : undefined,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m, i) => ({
@@ -883,6 +1256,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: legendStyle,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m) => ({
@@ -905,6 +1279,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: legendStyle,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: { ...yAxisValue, max: 100 },
                 series: measures.map((m) => ({
@@ -1356,6 +1731,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: legendStyle,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m, i) => ({
@@ -1390,6 +1766,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: legendStyle,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m, i) => ({
@@ -1527,6 +1904,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 tooltip: tooltipStyle,
                 legend: measures.length > 1 ? legendStyle : undefined,
                 grid: gridStyle,
+                ...(categories.length > 12 ? applyDataZoom({}, categories.length) : {}),
                 xAxis: xAxisCategory,
                 yAxis: yAxisValue,
                 series: measures.map((m, i) => applyBarColorStyle({
