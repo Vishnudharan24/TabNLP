@@ -72,11 +72,18 @@ Implemented chart-config-to-query translation:
   - global filters
   - chart-local filters
   - drill filters
-- Supports modes:
-  - `aggregate`
-  - `raw`
-  - `hierarchy`
-  - `org_tree`
+- Enforces one universal query contract for all chart types:
+
+```json
+{
+  "datasetId": "...",
+  "dimensions": ["..."],
+  "measures": [{ "field": "...", "aggregation": "SUM" }],
+  "filters": [{ "field": "...", "operator": "...", "value": "..." }],
+  "sort": { "field": "...", "order": "asc|desc" },
+  "limit": 100
+}
+```
 
 ## 3.3 `backendApi.js`
 
@@ -99,10 +106,10 @@ Request supports:
 - dataset selection (`datasetId`)
 - dimensions
 - measures with aggregation
-- filters
-- mode-specific fields (`hierarchy`, `org_tree`, `raw`)
+- filters (`field`, `operator`, `value`)
 - sort and limit
 - joins (future-ready)
+- optional chart context (`chartType`) used only for renderer-specific backend shaping
 
 ## 4.2 Query Engine Components
 
@@ -111,15 +118,15 @@ Request supports:
 - Resolves dataset
 - Builds/returns data model
 - Applies filters
-- Delegates to mode-specific execution
+- Delegates to chart-aware backend shaping while keeping one request contract
+- Returns a unified response envelope:
+  - `columns: string[]`
+  - `rows: any[][]`
 - Implements in-memory query caching
 
 ### `filter_engine.py`
 
-- Handles filter types:
-  - include filters
-  - numeric ranges
-  - operator filters (`EQUALS`, `GT`, `BETWEEN`, etc.)
+- Handles universal operator flow (`EQUALS`, `IN`, `BETWEEN`, `GT`, `GTE`, `LT`, `LTE`, etc.)
 
 ### `aggregation_engine.py`
 
@@ -211,11 +218,20 @@ Implemented backend in-memory caching in `query_parser.py`:
 - Frontend chart data aggregation in `Visualization.processData()`
 - Frontend manual top-15 output truncation
 - Frontend-driven hierarchy/org aggregation path in visualization runtime
+- Legacy backend endpoint `POST /chart/aggregate`
+- Legacy frontend API method `backendApi.aggregateChart(...)`
 
 ## Replaced with
 
-- Backend query modes (`aggregate`, `hierarchy`, `org_tree`, `raw`)
+- Standardized `/query` contract for all chart types
+- Unified backend `columns + rows` matrix response format
 - Backend-first aggregation/filter engine
+
+## Explicit removed functions/files
+
+- Removed function: `backendApi.aggregateChart(...)`
+- Removed API route: `POST /chart/aggregate`
+- Removed request model in backend: `ChartAggregateRequest`
 
 ---
 
@@ -227,14 +243,46 @@ Implemented backend in-memory caching in `query_parser.py`:
    - avoids repeated frontend filtering work
 3. **Query result cache**
    - faster repeated interactions
-4. **Mode-based query execution**
-   - fetch only needed shape (raw/aggregate/hierarchy/org-tree)
+4. **Contract-based query execution**
+  - one contract simplifies cacheability and reduces branching
 5. **Frontend render simplification**
    - visualization focuses on rendering only
 
 ---
 
-## 11. Migration Plan (Completed + Next)
+## 11. Final data flow diagram
+
+```text
+User Interaction
+  |
+  v
+GlobalFilterBar / Chart Config state
+  |
+  v
+buildQuery(config, filters)  [frontend only builds JSON]
+  |
+  v
+POST /query
+  |
+  v
+Backend query_parser
+  -> apply_filters
+  -> apply_joins (extensible)
+  -> aggregate_rows / hierarchy builder / org-tree builder
+  |
+  v
+Unified response { columns, rows }
+  |
+  v
+Visualization maps matrix -> row objects
+  |
+  v
+buildChartOption(...) -> ReactECharts render
+```
+
+---
+
+## 12. Migration Plan (Completed + Next)
 
 ## Completed in this refactor
 
@@ -256,7 +304,7 @@ Implemented backend in-memory caching in `query_parser.py`:
 
 ---
 
-## 12. Validation Status
+## 13. Validation Status
 
 - Frontend static checks: no editor errors on modified files
 - Backend syntax: `python -m compileall backend` successful

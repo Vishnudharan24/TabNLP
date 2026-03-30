@@ -278,13 +278,6 @@ export const backendApi = {
         }, baseUrl, requestConfig);
     },
 
-    aggregateChart(payload, baseUrl, requestConfig) {
-        return request('/chart/aggregate', {
-            method: 'POST',
-            body: JSON.stringify(payload),
-        }, baseUrl, requestConfig);
-    },
-
     runQuery(payload, baseUrl, requestConfig) {
         return request('/query', {
             method: 'POST',

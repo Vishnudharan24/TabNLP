@@ -1,0 +1,343 @@
+You are a senior data platform architect and backend systems expert.
+
+I have already migrated my BI application to a query-driven architecture:
+
+Frontend → QueryBuilder → /query API → Backend → Result → ECharts
+
+The system is working, but the **query contract and execution pipeline are too basic** and NOT ready for advanced features like:
+
+* calculated measures
+* filter context evaluation
+* multi-table relationships
+* semantic layer
+
+Your task is to **upgrade and stabilize the query contract and backend execution pipeline** WITHOUT breaking the current frontend or visualization system.
+
+---
+
+# 🎯 OBJECTIVE
+
+Transform the backend from:
+
+"Simple aggregation engine"
+
+→
+
+"Extensible BI query engine (Power BI–ready)"
+
+---
+
+# 🚨 STRICT RULES
+
+1. DO NOT break existing frontend integration
+2. KEEP response compatible with current charts (columns + rows)
+3. EXTEND contract instead of replacing it completely
+4. Backend must be future-ready for:
+
+   * measure expressions
+   * relationship joins
+   * filter context
+5. Code must be modular and production-grade
+
+---
+
+# 🔥 STEP 1 — EXTEND QUERY CONTRACT (BACKWARD COMPATIBLE)
+
+## CURRENT (basic)
+
+{
+"dimensions": ["state"],
+"measures": [
+{ "field": "sales", "aggregation": "SUM" }
+]
+}
+
+---
+
+## TARGET (extended)
+
+{
+"datasetId": "sales_data",
+
+"dimensions": [
+{ "field": "state", "table": "sales" }
+],
+
+"measures": [
+{
+"name": "Total Sales",
+"expression": "SUM(sales)"
+}
+],
+
+"filters": [
+{
+"field": "year",
+"operator": "=",
+"value": 2024,
+"type": "dimension",
+"table": "sales"
+}
+],
+
+"sort": {
+"field": "Total Sales",
+"order": "desc"
+},
+
+"limit": 100,
+
+"meta": {
+"requestId": "uuid",
+"timestamp": "..."
+}
+}
+
+---
+
+## REQUIREMENTS
+
+* Still accept old format for compatibility
+* Internally normalize to new format
+* Add support for:
+
+  * expression-based measures
+  * table references
+  * extensible filters
+
+---
+
+# 🔥 STEP 2 — EXTEND RESPONSE CONTRACT
+
+## CURRENT
+
+{
+"columns": [...],
+"rows": [...]
+}
+
+---
+
+## TARGET
+
+{
+"columns": ["state", "Total Sales"],
+"rows": [...],
+
+"meta": {
+"dimensionFields": ["state"],
+"measureFields": ["Total Sales"],
+"types": {
+"state": "categorical",
+"Total Sales": "number"
+},
+"executionTimeMs": 12,
+"cacheHit": true
+}
+}
+
+---
+
+## REQUIREMENTS
+
+* Do NOT break charts
+* Add metadata for:
+
+  * future measure engine
+  * debugging
+  * optimization
+
+---
+
+# 🔥 STEP 3 — BUILD QUERY EXECUTION PIPELINE
+
+Replace current flat execution with a structured pipeline:
+
+---
+
+## REQUIRED PIPELINE
+
+1. parse_query()
+2. normalize_query()
+3. validate_query()
+4. resolve_relationships()
+5. build_filter_context()
+6. execute_aggregation()
+7. (future) evaluate_measures()
+8. format_response()
+
+---
+
+## IMPLEMENTATION
+
+Create:
+
+/backend/services/query_pipeline/
+
+Files:
+
+* parser.py
+* normalizer.py
+* validator.py
+* relationship_resolver.py
+* filter_context.py
+* aggregation_executor.py
+* response_formatter.py
+
+---
+
+## REQUIREMENTS
+
+* Each step must be isolated and testable
+* No monolithic function
+* Clear input/output per stage
+
+---
+
+# 🔥 STEP 4 — ADD RELATIONSHIP RESOLUTION (MINIMUM WORKING)
+
+Even if simple, implement:
+
+* one-to-many join support
+* automatic join detection based on query fields
+
+Example:
+
+orders.customer_id → customers.id
+
+---
+
+## REQUIREMENTS
+
+* Only join when required
+* Avoid duplicate joins
+* Prepare for multi-table expansion
+
+---
+
+# 🔥 STEP 5 — BUILD FILTER CONTEXT ENGINE
+
+Instead of directly applying filters:
+
+---
+
+## Build:
+
+context = {
+filters,
+dimensions,
+relationships
+}
+
+---
+
+## REQUIREMENTS
+
+* Filters must apply BEFORE aggregation
+* Context object must be reusable for future measure engine
+* Support multiple filters across fields
+
+---
+
+# 🔥 STEP 6 — ADD EXPRESSION SUPPORT (BASIC PARSE ONLY)
+
+Do NOT fully evaluate yet.
+
+Just:
+
+* parse expressions like:
+
+  * SUM(sales)
+  * AVG(price)
+
+Convert into:
+
+{
+field: "sales",
+aggregation: "SUM"
+}
+
+---
+
+## REQUIREMENTS
+
+* Prepare for full expression engine later
+* Store expression in normalized form
+
+---
+
+# 🔥 STEP 7 — IMPROVE CACHING
+
+Current: simple hash(query)
+
+---
+
+## UPGRADE:
+
+cache_key = hash(
+normalized_query +
+dataset_version
+)
+
+---
+
+## REQUIREMENTS
+
+* Avoid stale results
+* Track cacheHit in response meta
+
+---
+
+# 🔥 STEP 8 — ADD ERROR CONTRACT
+
+Backend must return structured errors:
+
+{
+"error": {
+"code": "INVALID_QUERY",
+"message": "SUM not allowed on categorical field",
+"details": {...}
+}
+}
+
+---
+
+## REQUIREMENTS
+
+* No silent failures
+* Frontend can display meaningful messages
+
+---
+
+# 🔥 STEP 9 — KEEP COMPATIBILITY
+
+Ensure:
+
+* Existing charts still work
+* Old query format still accepted
+* No breaking changes in frontend
+
+---
+
+# 🧠 OUTPUT REQUIRED
+
+1. Updated query contract schema
+2. Backend pipeline implementation (code)
+3. Normalizer logic (old → new format)
+4. Relationship resolver (basic implementation)
+5. Filter context implementation
+6. Updated response formatter
+7. Error handling system
+8. Example request → pipeline → response flow
+
+---
+
+# 🚀 FINAL GOAL
+
+Upgrade backend from:
+
+"Basic aggregation service"
+
+→
+
+"Structured BI query engine ready for semantic layer and measure engine"

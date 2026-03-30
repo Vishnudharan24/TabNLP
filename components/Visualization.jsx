@@ -19,6 +19,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const [orgSelectedPathNames, setOrgSelectedPathNames] = useState([]);
     const [orgSelectedNodeId, setOrgSelectedNodeId] = useState('');
     const [chartData, setChartData] = useState([]);
+    const [queryColumns, setQueryColumns] = useState([]);
     const [isQueryLoading, setIsQueryLoading] = useState(false);
     const [queryError, setQueryError] = useState('');
     const chartRef = useRef(null);
@@ -268,9 +269,20 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         let isCancelled = false;
 
         const fetchChartData = async () => {
+            if (Array.isArray(chartAudit?.errors) && chartAudit.errors.length > 0) {
+                if (!isCancelled) {
+                    setChartData([]);
+                    setQueryColumns([]);
+                    setQueryError('');
+                    setIsQueryLoading(false);
+                }
+                return;
+            }
+
             if (!queryPayload?.datasetId) {
                 if (!isCancelled) {
                     setChartData([]);
+                    setQueryColumns([]);
                     setQueryError('');
                     setIsQueryLoading(false);
                 }
@@ -281,12 +293,24 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             setQueryError('');
             try {
                 const response = await backendApi.runQuery(queryPayload);
-                const rows = Array.isArray(response?.rows) ? response.rows : [];
+                const columns = Array.isArray(response?.columns) ? response.columns : [];
+                const rowMatrix = Array.isArray(response?.rows) ? response.rows : [];
+                const rows = rowMatrix.map((row) => {
+                    if (Array.isArray(row)) {
+                        return Object.fromEntries(columns.map((col, idx) => [col, row[idx]]));
+                    }
+                    if (row && typeof row === 'object') {
+                        return row;
+                    }
+                    return {};
+                });
                 if (!isCancelled) {
+                    setQueryColumns(columns);
                     setChartData(rows);
                 }
             } catch (error) {
                 if (!isCancelled) {
+                    setQueryColumns([]);
                     setChartData([]);
                     setQueryError(error?.message || 'Unable to load chart data');
                 }
@@ -302,7 +326,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         return () => {
             isCancelled = true;
         };
-    }, [queryPayload]);
+    }, [queryPayload, chartAudit]);
 
     const isDark = theme === 'dark';
 
@@ -484,6 +508,10 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
         // Table type — keep HTML renderer
         if (type === ChartType.TABLE) {
+            const tableColumns = queryColumns.length > 0
+                ? queryColumns
+                : [normalizedConfig.dimension, ...measures].filter(Boolean);
+
             return (
                 <div
                     className="h-full overflow-auto font-medium text-gray-600 dark:text-gray-300"
@@ -495,19 +523,13 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                     <table className="w-full text-left border-collapse" style={{ fontFamily: configuredFontFamily }}>
                         <thead>
                             <tr className="border-b border-gray-200 dark:border-gray-700">
-                                <th
-                                    className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 sticky top-0 bg-white dark:bg-gray-800"
-                                    style={{ fontSize: `${Math.max(10, configuredFontSize - 1)}px` }}
-                                >
-                                    {normalizedConfig.dimension}
-                                </th>
-                                {measures.map(m => (
+                                {tableColumns.map((col) => (
                                     <th
-                                        key={m}
+                                        key={col}
                                         className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 sticky top-0 bg-white dark:bg-gray-800"
                                         style={{ fontSize: `${Math.max(10, configuredFontSize - 1)}px` }}
                                     >
-                                        {m}
+                                        {col}
                                     </th>
                                 ))}
                             </tr>
@@ -515,8 +537,19 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                         <tbody>
                             {chartData.map((row, idx) => (
                                 <tr key={idx} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                    <td className="py-3 px-4 font-bold text-gray-900 dark:text-gray-100" style={{ fontSize: `${configuredFontSize}px` }}>{row.name}</td>
-                                    {measures.map(m => <td key={m} className="py-3 px-4" style={{ fontSize: `${configuredFontSize}px` }}>{Number(row[m]).toLocaleString()}</td>)}
+                                    {tableColumns.map((col) => {
+                                        const value = row?.[col];
+                                        const isNumeric = typeof value === 'number' && Number.isFinite(value);
+                                        return (
+                                            <td
+                                                key={col}
+                                                className={`py-3 px-4 ${col === tableColumns[0] ? 'font-bold text-gray-900 dark:text-gray-100' : ''}`}
+                                                style={{ fontSize: `${configuredFontSize}px` }}
+                                            >
+                                                {isNumeric ? value.toLocaleString() : String(value ?? '')}
+                                            </td>
+                                        );
+                                    })}
                                 </tr>
                             ))}
                         </tbody>
@@ -527,7 +560,8 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
         // KPI_SINGLE type — keep custom renderer
         if (type === ChartType.KPI_SINGLE) {
-            const primaryValue = chartData.reduce((acc, curr) => acc + (curr[measures[0]] || 0), 0);
+            const measureKey = measures[0] || queryColumns.find((c) => c !== effectiveDimension) || 'Count';
+            const primaryValue = Number(chartData?.[0]?.[measureKey] || 0);
             return (
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden">
                     <div className="absolute inset-0 opacity-5 bg-gray-500 dark:bg-gray-300"></div>
