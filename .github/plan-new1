@@ -1,0 +1,278 @@
+You are a senior software architect and refactoring expert.
+
+I have an existing BI dashboard application built with:
+
+* React (frontend)
+* Apache ECharts (visualization)
+* FastAPI (backend)
+* Existing modules:
+
+  * Visualization.jsx (previously had processData())
+  * DataPanel.jsx
+  * GlobalFilterBar.jsx
+  * chartRecommender.js
+  * chartConfigSystem.js
+  * chartValidationEngine.js
+  * echartsOptionBuilder.js
+  * backend query endpoints already partially implemented
+
+I have already started migrating to a backend-driven query architecture.
+
+---
+
+# 🎯 OBJECTIVE
+
+Complete the migration to a **fully query-driven BI architecture** BEFORE implementing advanced features like measures.
+
+The system must strictly follow:
+
+UI → Chart Config → Query Builder → API (/query) → Backend → Result → Visualization
+
+---
+
+# 🚨 STRICT RULES
+
+1. DO NOT redesign the UI
+2. DO NOT remove ECharts or chart rendering logic
+3. DO NOT rebuild from scratch
+4. ONLY refactor and integrate into existing system
+5. REMOVE all redundant/legacy data-processing code
+6. FRONTEND must NOT perform any aggregation, filtering, or grouping
+
+---
+
+# 🔥 STEP 1 — REMOVE LEGACY DATA PROCESSING
+
+Identify and REMOVE:
+
+* Any remaining logic inside Visualization.jsx that:
+
+  * groups data
+  * aggregates data
+  * filters dataset rows
+  * sorts data for analysis
+* Any usage of:
+
+  * reduce() for aggregation
+  * manual groupBy logic
+  * top-N slicing (e.g., top 15)
+* Any duplicate aggregation utilities across the codebase
+
+Ensure:
+Visualization.jsx does NOT contain any data processing logic.
+
+---
+
+# 🔥 STEP 2 — STANDARDIZE QUERY CONTRACT
+
+Define a SINGLE universal query format used by ALL charts:
+
+{
+"datasetId": "...",
+"dimensions": ["..."],
+"measures": [
+{ "field": "...", "aggregation": "SUM" }
+],
+"filters": [
+{ "field": "...", "operator": "...", "value": "..." }
+],
+"sort": { "field": "...", "order": "asc|desc" },
+"limit": 100
+}
+
+Ensure:
+
+* Every chart uses this exact structure
+* No custom variations per chart type
+
+---
+
+# 🔥 STEP 3 — BUILD / FIX QUERY BUILDER (FRONTEND)
+
+Create or refactor:
+
+/services/queryBuilder.js
+
+Responsibilities:
+
+* Convert chart config → query JSON
+* Merge global filters + chart filters
+* Handle dimension and measure mapping
+
+Example:
+
+Input:
+
+* xAxisField: "state"
+* measures: ["sales"]
+* aggregation: "SUM"
+
+Output:
+{
+"dimensions": ["state"],
+"measures": [{ "field": "sales", "aggregation": "SUM" }]
+}
+
+Ensure:
+
+* This is the ONLY place where queries are constructed
+* No query logic exists elsewhere
+
+---
+
+# 🔥 STEP 4 — REFACTOR VISUALIZATION FLOW
+
+Modify Visualization.jsx:
+
+REPLACE ALL DATA PROCESSING WITH:
+
+1. Build query:
+   const query = buildQuery(config, globalFilters)
+
+2. Call backend:
+   const result = await backendApi.runQuery(query)
+
+3. Render:
+   const option = buildChartOption(result)
+
+Ensure:
+
+* Visualization ONLY renders data
+* No transformation logic exists
+
+---
+
+# 🔥 STEP 5 — FIX FILTER FLOW
+
+Ensure:
+
+* GlobalFilterBar.jsx ONLY updates filter state
+* Filters are passed to backend via query
+* No filtering happens in frontend
+
+Final flow:
+
+User interaction → update globalFilters → rebuild query → API call → re-render charts
+
+---
+
+# 🔥 STEP 6 — UNIFY BACKEND RESPONSE FORMAT
+
+Ensure backend ALWAYS returns:
+
+{
+"columns": ["col1", "col2"],
+"rows": [
+["value1", 100],
+["value2", 200]
+]
+}
+
+Ensure:
+
+* No chart-specific response formats
+* No nested or inconsistent structures
+
+---
+
+# 🔥 STEP 7 — VALIDATION BEFORE QUERY
+
+Refactor chartValidationEngine.js:
+
+* Validate chart config BEFORE sending query
+* Prevent:
+
+  * invalid aggregations (e.g., SUM on ID fields)
+  * missing dimension/measure combos
+
+Ensure:
+
+* Backend receives only valid queries
+
+---
+
+# 🔥 STEP 8 — REMOVE DEAD CODE
+
+Identify and DELETE:
+
+* Old aggregation helpers
+* Legacy processData() logic
+* Duplicate validation logic
+* Unused chart processing utilities
+
+Ensure:
+
+* No redundant data logic remains
+
+---
+
+# 🔥 STEP 9 — VERIFY ALL CHART TYPES
+
+Test all supported charts:
+
+* Bar
+* Line
+* Area
+* Pie / Donut
+* Scatter / Bubble
+* Heatmap
+* KPI / Table
+
+For each:
+
+* Validate correct query generation
+* Validate backend response
+* Validate correct rendering
+
+---
+
+# 🔥 STEP 10 — PERFORMANCE VALIDATION
+
+Test with datasets:
+
+* 10k rows
+* 50k rows
+* 100k rows
+
+Ensure:
+
+* Frontend remains fast (no heavy computation)
+* Backend handles aggregation
+* Query caching works (if implemented)
+
+---
+
+# 🧠 FINAL EXPECTED STATE
+
+After migration:
+
+* Frontend is PURE UI + query builder
+* Backend handles ALL data logic
+* Query format is standardized
+* Visualization only renders results
+* No legacy processing code remains
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+Provide:
+
+1. Updated file structure (frontend + backend)
+2. Modified Visualization.jsx (clean version)
+3. queryBuilder.js implementation
+4. List of removed functions/files
+5. Final data flow diagram
+6. Any potential risks or edge cases remaining
+
+---
+
+# 🚀 GOAL
+
+Transform this system from:
+
+"Frontend-driven chart processor"
+
+→
+
+"Clean, scalable, query-driven BI engine ready for measure engine and semantic layer"

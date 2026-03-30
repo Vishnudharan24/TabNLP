@@ -139,17 +139,59 @@ const inferColumnType = (columnName = '', values = []) => {
     const sample = values.filter(v => v !== null && v !== undefined && v !== '').slice(0, 50);
     if (sample.length === 0) return 'string';
 
+    const toNormalizedString = (value) => String(value ?? '').trim();
+
+    const isNumericValue = (value) => {
+        if (typeof value === 'number') return Number.isFinite(value);
+        if (typeof value !== 'string') return false;
+
+        let text = value.trim();
+        if (!text) return false;
+
+        if (/^\(.*\)$/.test(text)) {
+            text = `-${text.slice(1, -1)}`;
+        }
+
+        text = text
+            .replace(/[,$£€¥₹%\s]/g, '');
+
+        if (!text) return false;
+        return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text);
+    };
+
+    const isDateLikeValue = (value) => {
+        if (value instanceof Date) return !Number.isNaN(value.getTime());
+        if (typeof value !== 'string') return false;
+
+        const text = value.trim();
+        if (!text) return false;
+
+        // Avoid classifying pure numerics (e.g. 1, 202401) as dates.
+        if (isNumericValue(text)) return false;
+
+        // Require common date cues before trusting Date.parse.
+        const hasDateCue = /[-/]|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b|\d{4}-\d{1,2}-\d{1,2}/i.test(text);
+        if (!hasDateCue) return false;
+
+        const parsed = Date.parse(text);
+        return !Number.isNaN(parsed);
+    };
+
     const normalizedName = String(columnName || '').trim().toLowerCase();
     const isExperienceColumn = /(experience|exp|tenure|service)/i.test(normalizedName);
     const isIdLikeColumn = /(^id$|_id$|id_|code$|sku|employee.?id|product.?id|order.?id|customer.?id)/i.test(normalizedName);
     const isCategoricalByName = /(name|product|item|category|brand|department|city|state|country|segment|status|type)/i.test(normalizedName);
 
     const uniqueRatio = sample.length > 0
-        ? (new Set(sample.map(v => String(v).trim())).size / sample.length)
+        ? (new Set(sample.map(v => toNormalizedString(v))).size / sample.length)
         : 0;
 
     const numericRatio = sample.length > 0
-        ? (sample.filter(v => typeof v === 'number' || (!Number.isNaN(Number(v)) && `${v}`.trim() !== '')).length / sample.length)
+        ? (sample.filter(v => isNumericValue(v)).length / sample.length)
+        : 0;
+
+    const dateRatio = sample.length > 0
+        ? (sample.filter(v => isDateLikeValue(v)).length / sample.length)
         : 0;
 
     const toExperienceMonths = (value) => {
@@ -177,12 +219,15 @@ const inferColumnType = (columnName = '', values = []) => {
     if (allExperienceLike) return 'number';
 
     if (isIdLikeColumn && numericRatio >= 0.8) return 'string';
+
+    if (numericRatio >= 0.9) return 'number';
+
+    if (dateRatio >= 0.9) return 'date';
+
     if (isCategoricalByName) return 'string';
 
-    if (numericRatio >= 0.95 && uniqueRatio < 0.98) return 'number';
-
-    const allDates = sample.every(v => !Number.isNaN(Date.parse(v)));
-    if (allDates) return 'date';
+    // For mixed string columns, keep low-cardinality fields as categorical strings.
+    if (uniqueRatio <= 0.35) return 'string';
 
     return 'string';
 };
@@ -197,10 +242,23 @@ const getDatasetFileNameFromMetadata = (dataset) => (
 const mapBackendDatasetToAppDataset = (item) => {
     const rows = Array.isArray(item?.data) ? item.data : [];
     const detectedColumns = rows[0] ? Object.keys(rows[0]) : [];
+    const metadata = item?.metadata || null;
+    const declaredTypes = metadata?.column_types || {};
+    const semanticTypes = metadata?.column_semantic_types || {};
+
+    const normalizeBackendType = (columnName) => {
+        const semantic = String(semanticTypes?.[columnName] || '').toLowerCase();
+        const declared = String(declaredTypes?.[columnName] || '').toLowerCase();
+
+        if (semantic === 'numeric' || declared === 'number' || declared === 'numeric') return 'number';
+        if (semantic === 'date' || declared === 'date' || declared === 'datetime' || declared === 'timestamp') return 'date';
+        if (semantic === 'id') return 'string';
+        return null;
+    };
 
     const columns = detectedColumns.map((name) => ({
         name,
-        type: inferColumnType(name, rows.map(r => r?.[name])),
+        type: normalizeBackendType(name) || inferColumnType(name, rows.map(r => r?.[name])),
     }));
 
     return {

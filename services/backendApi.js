@@ -285,6 +285,13 @@ export const backendApi = {
         }, baseUrl, requestConfig);
     },
 
+    runQuery(payload, baseUrl, requestConfig) {
+        return request('/query', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
     getTestExcel(baseUrl, requestConfig) {
         return request('/test/file', { method: 'GET' }, baseUrl, requestConfig);
     },

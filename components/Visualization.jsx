@@ -4,8 +4,10 @@ import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
 import { ChartType } from '../types';
 import { buildChartOption } from '../services/echartsOptionBuilder';
-import { buildHierarchy, buildOrgTree, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
+import { configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
 import { auditChartConfiguration } from '../services/chartValidationEngine';
+import { buildQuery } from '../services/queryBuilder';
+import { backendApi } from '../services/backendApi';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
@@ -16,6 +18,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const [orgSelectedPathIds, setOrgSelectedPathIds] = useState([]);
     const [orgSelectedPathNames, setOrgSelectedPathNames] = useState([]);
     const [orgSelectedNodeId, setOrgSelectedNodeId] = useState('');
+    const [chartData, setChartData] = useState([]);
+    const [isQueryLoading, setIsQueryLoading] = useState(false);
+    const [queryError, setQueryError] = useState('');
     const chartRef = useRef(null);
 
     useEffect(() => {
@@ -165,34 +170,6 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         });
     }, [normalizedConfig?.type, roleFieldMap]);
 
-    // Apply global filters (cross-dataset filtering)
-    const applyGlobalFilters = (data) => {
-        if (!globalFilters || globalFilters.length === 0) return data;
-        return data.filter(row => {
-            return globalFilters.every(gf => {
-                if (!(gf.column in row)) return true;
-                const val = row[gf.column];
-                if (gf.type === 'include' && gf.values && gf.values.length > 0) {
-                    return gf.values.includes(String(val));
-                }
-                if (gf.type === 'range') {
-                    const num = Number(val);
-                    if (isNaN(num)) return false;
-                    return num >= gf.rangeMin && num <= gf.rangeMax;
-                }
-                return true;
-            });
-        });
-    };
-
-    // Apply drill-down path filters
-    const applyDrillFilters = (data) => {
-        if (drillPath.length === 0) return data;
-        return drillPath.reduce((filtered, drill) => {
-            return filtered.filter(row => String(row[drill.dimensionCol]) === drill.value);
-        }, data);
-    };
-
     // Get effective dimension considering drill-down
     const getEffectiveDimension = () => {
         if (drillPath.length === 0) return normalizedConfig.dimension;
@@ -278,153 +255,55 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         return toTitleCase(agg || 'N/A');
     })();
 
-    const applyFilters = (data) => {
-        if (!normalizedConfig.filters || normalizedConfig.filters.length === 0) return data;
+    const queryPayload = useMemo(() => buildQuery({
+        config: normalizedConfig,
+        dataset,
+        datasetId: config?.datasetId || dataset?.id,
+        globalFilters,
+        drillPath,
+        effectiveDimension,
+    }), [normalizedConfig, dataset, config?.datasetId, globalFilters, drillPath, effectiveDimension]);
 
-        const columnTypeMap = new Map((dataset?.columns || []).map(col => [col.name, col.type]));
-        const toComparable = (raw, typeHint) => {
-            if (typeHint === 'date') {
-                const ts = new Date(raw).getTime();
-                return Number.isNaN(ts) ? null : ts;
+    useEffect(() => {
+        let isCancelled = false;
+
+        const fetchChartData = async () => {
+            if (!queryPayload?.datasetId) {
+                if (!isCancelled) {
+                    setChartData([]);
+                    setQueryError('');
+                    setIsQueryLoading(false);
+                }
+                return;
             }
 
-            const numeric = Number(raw);
-            if (!Number.isNaN(numeric) && `${raw}`.trim() !== '') {
-                return numeric;
+            setIsQueryLoading(true);
+            setQueryError('');
+            try {
+                const response = await backendApi.runQuery(queryPayload);
+                const rows = Array.isArray(response?.rows) ? response.rows : [];
+                if (!isCancelled) {
+                    setChartData(rows);
+                }
+            } catch (error) {
+                if (!isCancelled) {
+                    setChartData([]);
+                    setQueryError(error?.message || 'Unable to load chart data');
+                }
+            } finally {
+                if (!isCancelled) {
+                    setIsQueryLoading(false);
+                }
             }
-
-            const parsedDate = new Date(raw).getTime();
-            if (!Number.isNaN(parsedDate)) {
-                return parsedDate;
-            }
-
-            return null;
         };
 
-        return data.filter(row => {
-            return normalizedConfig.filters.every(f => {
-                const val = row[f.column];
-                const target = f.value;
-                const targetSec = f.valueSecondary;
-                const inferredType = f.columnType || columnTypeMap.get(f.column);
+        fetchChartData();
 
-                switch (f.operator) {
-                    case 'EQUALS': return String(val).toLowerCase() === String(target).toLowerCase();
-                    case 'CONTAINS': return String(val).toLowerCase().includes(String(target).toLowerCase());
-                    case 'STARTS_WITH': return String(val).toLowerCase().startsWith(String(target).toLowerCase());
-                    case 'IS_EMPTY': return !val || val === '';
-                    case 'GT': {
-                        const left = toComparable(val, inferredType);
-                        const right = toComparable(target, inferredType);
-                        return left !== null && right !== null ? left > right : false;
-                    }
-                    case 'LT': {
-                        const left = toComparable(val, inferredType);
-                        const right = toComparable(target, inferredType);
-                        return left !== null && right !== null ? left < right : false;
-                    }
-                    case 'BETWEEN': {
-                        const left = toComparable(val, inferredType);
-                        const min = toComparable(target, inferredType);
-                        const max = toComparable(targetSec, inferredType);
-                        return left !== null && min !== null && max !== null ? left >= min && left <= max : false;
-                    }
-                    case 'IS_TRUE': return !!val;
-                    case 'IS_FALSE': return !val;
-                    default: return true;
-                }
-            });
-        });
-    };
+        return () => {
+            isCancelled = true;
+        };
+    }, [queryPayload]);
 
-    const processData = () => {
-        const { measures, aggregation, assignments = [], type } = normalizedConfig;
-        const dimension = effectiveDimension;
-
-        const hierarchyFields = assignments
-            .filter(a => a?.role === FieldRoles.HIERARCHY)
-            .map(a => a.field)
-            .filter(Boolean);
-        const nodeField = assignments.find(a => a?.role === FieldRoles.NODE)?.field;
-        const parentField = assignments.find(a => a?.role === FieldRoles.PARENT)?.field;
-        const labelField = assignments.find(a => a?.role === FieldRoles.LABEL)?.field;
-        const colorField = assignments.find(a => a?.role === FieldRoles.COLOR)?.field;
-        const valueAssignment = assignments.find(a => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
-
-        const effectiveMeasures = sanitizedMeasureFields;
-        const effectiveAggregation = effectiveAggregationMode;
-
-        let filteredData = applyGlobalFilters(dataset.data);
-        filteredData = applyFilters(filteredData);
-        filteredData = applyDrillFilters(filteredData);
-
-        if ((type === ChartType.SUNBURST || type === ChartType.TREEMAP) && hierarchyFields.length > 0) {
-            const hierarchy = buildHierarchy(
-                filteredData,
-                hierarchyFields,
-                isGroupByMode ? '__count__' : (valueAssignment?.field || effectiveMeasures[0] || '__count__'),
-                isGroupByMode ? 'COUNT' : (valueAssignment?.aggregation || effectiveAggregation || 'COUNT')
-            );
-            return hierarchy.length > 0 ? [{ __hierarchy: hierarchy }] : [];
-        }
-
-        if (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) {
-            if (!nodeField || !parentField) return [];
-            const { treeData, meta } = buildOrgTree(filteredData, nodeField, parentField, labelField, colorField);
-            return [{ __orgTree: treeData, __orgMeta: meta || {} }];
-        }
-
-        if (!dimension) return [];
-
-        const groups = {};
-
-        filteredData.forEach(row => {
-            const dimVal = String(row[dimension] || 'Unknown');
-            if (!groups[dimVal]) groups[dimVal] = {};
-
-            effectiveMeasures.forEach(m => {
-                if (!groups[dimVal][m]) groups[dimVal][m] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
-                if (m === '__count__' || isGroupByMode) {
-                    groups[dimVal][m].count += 1;
-                    groups[dimVal][m].sum += 1;
-                    groups[dimVal][m].min = 1;
-                    groups[dimVal][m].max = 1;
-                } else {
-                    const val = Number(row[m]);
-                    if (!isNaN(val)) {
-                        groups[dimVal][m].sum += val;
-                        groups[dimVal][m].count += 1;
-                        groups[dimVal][m].min = Math.min(groups[dimVal][m].min, val);
-                        groups[dimVal][m].max = Math.max(groups[dimVal][m].max, val);
-                    }
-                }
-            });
-        });
-
-        let result = Object.entries(groups).map(([name, statsMap]) => {
-            const row = { name };
-            effectiveMeasures.forEach(m => {
-                const s = statsMap[m] || { sum: 0, count: 0, min: 0, max: 0 };
-                if (effectiveAggregation === 'AVG') row[m] = s.count > 0 ? s.sum / s.count : 0;
-                else if (effectiveAggregation === 'COUNT' || isGroupByMode) row[m] = s.count;
-                else if (effectiveAggregation === 'MIN') row[m] = s.min === Infinity ? 0 : s.min;
-                else if (effectiveAggregation === 'MAX') row[m] = s.max === -Infinity ? 0 : s.max;
-                else row[m] = s.sum;
-            });
-            return row;
-        });
-
-        return result.sort((a, b) => (b[effectiveMeasures[0]] || 0) - (a[effectiveMeasures[0]] || 0)).slice(0, 15);
-    };
-
-    const chartData = useMemo(() => processData(), [
-        normalizedConfig,
-        effectiveDimension,
-        dataset?.data,
-        dataset?.columns,
-        drillPath,
-        globalFilters,
-    ]);
     const isDark = theme === 'dark';
 
     // Can we drill further?
@@ -572,6 +451,22 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             );
         }
 
+        if (queryError) {
+            return (
+                <div className="h-full flex items-center justify-center text-xs font-semibold text-rose-500 dark:text-rose-300 tracking-wide p-12 text-center">
+                    {queryError}
+                </div>
+            );
+        }
+
+        if (isQueryLoading) {
+            return (
+                <div className="h-full flex items-center justify-center text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide p-12 text-center">
+                    Loading chart data...
+                </div>
+            );
+        }
+
         if (chartData.length === 0) return (
             <div className="h-full flex items-center justify-center text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide p-12 text-center">
                 No results match the current filters
@@ -584,23 +479,44 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             : (Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
                 ? normalizedConfig.measures
                 : ['__count__']);
+        const configuredFontSize = Math.max(10, Number(normalizedConfig?.style?.fontSize || 11));
+        const configuredFontFamily = normalizedConfig?.style?.fontFamily || 'Plus Jakarta Sans, sans-serif';
 
         // Table type — keep HTML renderer
         if (type === ChartType.TABLE) {
             return (
-                <div className="h-full overflow-auto text-xs font-medium text-gray-600 dark:text-gray-300">
-                    <table className="w-full text-left border-collapse">
+                <div
+                    className="h-full overflow-auto font-medium text-gray-600 dark:text-gray-300"
+                    style={{
+                        fontSize: `${configuredFontSize}px`,
+                        fontFamily: configuredFontFamily,
+                    }}
+                >
+                    <table className="w-full text-left border-collapse" style={{ fontFamily: configuredFontFamily }}>
                         <thead>
                             <tr className="border-b border-gray-200 dark:border-gray-700">
-                                <th className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{normalizedConfig.dimension}</th>
-                                {measures.map(m => <th key={m} className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 text-[11px] sticky top-0 bg-white dark:bg-gray-800">{m}</th>)}
+                                <th
+                                    className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 sticky top-0 bg-white dark:bg-gray-800"
+                                    style={{ fontSize: `${Math.max(10, configuredFontSize - 1)}px` }}
+                                >
+                                    {normalizedConfig.dimension}
+                                </th>
+                                {measures.map(m => (
+                                    <th
+                                        key={m}
+                                        className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 sticky top-0 bg-white dark:bg-gray-800"
+                                        style={{ fontSize: `${Math.max(10, configuredFontSize - 1)}px` }}
+                                    >
+                                        {m}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
                             {chartData.map((row, idx) => (
                                 <tr key={idx} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                    <td className="py-3 px-4 font-bold text-gray-900 dark:text-gray-100">{row.name}</td>
-                                    {measures.map(m => <td key={m} className="py-3 px-4">{Number(row[m]).toLocaleString()}</td>)}
+                                    <td className="py-3 px-4 font-bold text-gray-900 dark:text-gray-100" style={{ fontSize: `${configuredFontSize}px` }}>{row.name}</td>
+                                    {measures.map(m => <td key={m} className="py-3 px-4" style={{ fontSize: `${configuredFontSize}px` }}>{Number(row[m]).toLocaleString()}</td>)}
                                 </tr>
                             ))}
                         </tbody>

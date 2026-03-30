@@ -1,0 +1,342 @@
+You are a senior software architect and refactoring expert.
+
+I already have a working BI dashboard system built with:
+
+* React (frontend)
+* Apache ECharts (visualization)
+* FastAPI (backend)
+* Existing modules:
+
+  * chartRecommender.js
+  * chartConfigSystem.js
+  * chartValidationEngine.js
+  * echartsOptionBuilder.js
+  * Visualization.jsx (contains processData())
+  * DataPanel.jsx
+  * GlobalFilterBar.jsx
+
+The system currently:
+
+* Processes data in frontend (grouping, aggregation, filtering)
+* Uses heuristic column typing
+* Works on a single flat dataset
+* Has cross-filtering and drill interactions
+* Renders charts correctly using ECharts
+
+---
+
+# 🎯 OBJECTIVE
+
+Refactor THIS EXISTING SYSTEM into a **Power BI–like architecture** WITHOUT breaking the UI.
+
+Key transformation:
+
+OLD:
+dataset → chart → processData() → render
+
+NEW:
+dataset → data model → query engine → result → chart
+
+---
+
+# 🚨 CRITICAL REFACTOR RULES
+
+1. DO NOT rewrite everything from scratch
+2. REUSE existing components wherever possible
+3. REMOVE redundant/buggy logic
+4. MOVE data logic to backend
+5. KEEP UI/UX intact
+
+---
+
+# 🔥 STEP 1 — REMOVE / CLEAN EXISTING BAD LOGIC
+
+## ❌ REMOVE these:
+
+1. Entire data processing inside:
+
+   * Visualization.processData()
+
+2. Any logic doing:
+
+   * groupBy in frontend
+   * aggregation in frontend
+   * manual sorting + top 15 slicing
+
+3. Hardcoded limits:
+
+   * top 15 rows restriction
+
+4. Duplicate aggregation logic across files
+
+---
+
+## ⚠️ FIX these BUGGY AREAS:
+
+* Wrong aggregation on ID fields (e.g. SUM(customer_id))
+* Heuristic column typing inconsistency
+* Over-filtering due to stacked filters
+
+---
+
+# 🧱 STEP 2 — INTRODUCE QUERY BUILDER (FRONTEND)
+
+## Create new module:
+
+/services/queryBuilder.js
+
+### Responsibility:
+
+Convert chart config → backend query
+
+### Example:
+
+Input (existing chart config):
+
+* xAxisField: "state"
+* measures: ["sales"]
+* aggregation: "SUM"
+
+Output:
+{
+"dimensions": ["state"],
+"measures": [
+{ "field": "sales", "aggregation": "SUM" }
+],
+"filters": [...]
+}
+
+---
+
+## 🔁 Modify:
+
+### Visualization.jsx
+
+REPLACE:
+
+```js
+const chartData = processData(dataset, config)
+```
+
+WITH:
+
+```js
+const query = buildQuery(config, globalFilters)
+const chartData = await backendApi.runQuery(query)
+```
+
+---
+
+# ⚙️ STEP 3 — BUILD BACKEND QUERY ENGINE
+
+## Add new backend module:
+
+/backend/services/query_engine/
+
+Files:
+
+* query_parser.py
+* aggregation_engine.py
+* filter_engine.py
+* join_engine.py
+
+---
+
+## Create endpoint:
+
+POST /query
+
+### Input:
+
+{
+"datasetId": "...",
+"dimensions": [...],
+"measures": [...],
+"filters": [...]
+}
+
+---
+
+## Backend responsibilities:
+
+* Apply filters
+* Perform groupBy
+* Apply aggregations
+* Join tables (future-ready)
+* Return aggregated result
+
+---
+
+# 🧠 STEP 4 — INTRODUCE DATA MODEL LAYER
+
+## Add:
+
+/backend/models/data_model.py
+
+### Structure:
+
+Model:
+
+* tables
+* relationships
+* measures
+
+---
+
+## Modify ingestion:
+
+When dataset is saved:
+
+* Store schema (column types)
+* Store metadata (id, categorical, numeric)
+
+---
+
+## REMOVE:
+
+* frontend-only column typing as source of truth
+
+---
+
+# 🔗 STEP 5 — FIX FILTER SYSTEM
+
+## CURRENT:
+
+filters applied inside processData()
+
+## NEW:
+
+* globalFilters → passed to backend query
+* interactions → update globalFilters only
+
+---
+
+## Modify:
+
+GlobalFilterBar.jsx:
+
+* no local filtering logic
+* only updates filter state
+
+---
+
+# ⚡ STEP 6 — ADD QUERY CACHING
+
+## Backend:
+
+* cache key = hash(query + filters)
+* store results in memory (or Redis later)
+
+---
+
+# 📊 STEP 7 — KEEP AND ADAPT VISUALIZATION ENGINE
+
+## KEEP:
+
+* echartsOptionBuilder.js
+* chart types
+* styling engine
+
+---
+
+## MODIFY:
+
+Visualization.jsx:
+
+* Now receives already aggregated data
+* ONLY maps data → ECharts option
+
+---
+
+# 🧠 STEP 8 — FIX CHART CONFIG + VALIDATION
+
+## Update chartValidationEngine.js:
+
+* Validate BEFORE query
+* Prevent:
+
+  * SUM on ID fields
+  * invalid dimension-measure combos
+
+---
+
+# 🚀 STEP 9 — PREPARE FOR MULTI-TABLE SUPPORT
+
+## Add (backend):
+
+relationships table:
+
+{
+"from_table": "orders",
+"from_column": "customer_id",
+"to_table": "customers",
+"to_column": "id"
+}
+
+---
+
+## Update query engine:
+
+* allow dimension from table A
+* measure from table B
+
+---
+
+# 🧹 STEP 10 — CLEAN CODEBASE
+
+## REMOVE:
+
+* duplicate utility functions
+* unused chart configs
+* redundant validation logic
+
+---
+
+## CONSOLIDATE:
+
+* all aggregation logic → backend only
+* all query logic → queryBuilder + backend
+
+---
+
+# 🧠 EXPECTED FINAL FLOW
+
+1. User configures chart (DataPanel)
+2. QueryBuilder creates query JSON
+3. Frontend calls /query
+4. Backend processes data
+5. Returns aggregated result
+6. Visualization renders using ECharts
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. Updated file structure
+2. Modified Visualization.jsx
+3. queryBuilder.js implementation
+4. FastAPI query engine code
+5. Migration plan from old system
+6. List of removed files/functions
+7. Performance improvements
+
+---
+
+# ⚠️ IMPORTANT
+
+* Do NOT break existing UI
+* Do NOT remove ECharts layer
+* Do NOT remove recommender system
+* Make system scalable (100k+ rows)
+
+---
+
+# 🚀 GOAL
+
+Transform this project from:
+
+“Frontend chart tool”
+
+→
+
+“Backend-driven BI engine like Power BI”

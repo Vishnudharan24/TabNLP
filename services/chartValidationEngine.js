@@ -26,6 +26,31 @@ const isBlank = (v) => v === null || v === undefined || String(v).trim() === '';
 
 const idNameRegex = /(^id$|_id$|(^|_)(id|uuid|key|code)$|identifier|employee_id|customer_id|user_id|order_id)/i;
 
+const isNumericLike = (value) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value !== 'string') return false;
+
+    let text = value.trim();
+    if (!text) return false;
+    if (/^\(.*\)$/.test(text)) text = `-${text.slice(1, -1)}`;
+    text = text.replace(/[,$£€¥₹%\s]/g, '');
+    return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text);
+};
+
+const isDateLike = (value) => {
+    if (value instanceof Date) return !Number.isNaN(value.getTime());
+    if (typeof value !== 'string') return false;
+    const text = value.trim();
+    if (!text) return false;
+    if (isNumericLike(text)) return false;
+
+    const hasDateCue = /[-/]|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b|\d{4}-\d{1,2}-\d{1,2}/i.test(text);
+    if (!hasDateCue) return false;
+    const parsed = new Date(text).getTime();
+    return !Number.isNaN(parsed);
+};
+
 const classifyFieldType = (column, rows = []) => {
     const name = String(column?.name || '').trim();
     const declared = String(column?.type || 'string').toLowerCase();
@@ -38,8 +63,8 @@ const classifyFieldType = (column, rows = []) => {
     const nonNullCount = values.length;
     const uniquenessRatio = nonNullCount > 0 ? uniqueCount / nonNullCount : 0;
 
-    const numericCount = values.filter((v) => Number.isFinite(Number(v)) && `${v}`.trim() !== '').length;
-    const dateCount = values.filter((v) => !Number.isNaN(new Date(v).getTime())).length;
+    const numericCount = values.filter((v) => isNumericLike(v)).length;
+    const dateCount = values.filter((v) => isDateLike(v)).length;
     const numericRatio = nonNullCount > 0 ? (numericCount / nonNullCount) : 0;
     const dateRatio = nonNullCount > 0 ? (dateCount / nonNullCount) : 0;
 
@@ -92,8 +117,8 @@ const inferFieldTypeFromData = (fieldName, rows = []) => {
         };
     }
 
-    const numericCount = values.filter((v) => Number.isFinite(Number(v)) && `${v}`.trim() !== '').length;
-    const dateCount = values.filter((v) => !Number.isNaN(new Date(v).getTime())).length;
+    const numericCount = values.filter((v) => isNumericLike(v)).length;
+    const dateCount = values.filter((v) => isDateLike(v)).length;
 
     let type = 'categorical';
     if (numericCount / nonNullCount >= 0.9) type = 'numeric';
