@@ -19,6 +19,7 @@ collection = db["datasets"]
 source_config_collection = db["source_config"]
 version_counters_collection = db["dataset_version_counters"]
 users_collection = db["users"]
+relationships_collection = db["relationships"]
 
 _indexes_initialized = False
 
@@ -50,6 +51,15 @@ async def ensure_indexes():
         [("email", 1)],
         unique=True,
         name="users_email_unique",
+    )
+    await relationships_collection.create_index(
+        [("from_table", 1), ("from_column", 1), ("to_table", 1), ("to_column", 1)],
+        unique=True,
+        name="relationships_unique",
+    )
+    await relationships_collection.create_index(
+        [("from_table", 1)],
+        name="relationships_from_table_idx",
     )
 
     _indexes_initialized = True
@@ -157,6 +167,70 @@ async def get_dataset_by_id(document_id: str):
         return None
 
     return await collection.find_one({"_id": ObjectId(document_id)})
+
+
+async def get_dataset_for_query(dataset_id: str):
+    """
+    Resolve dataset by document id first, then by source_key/source_id latest snapshot.
+    """
+    if not dataset_id:
+        return None
+
+    if ObjectId.is_valid(dataset_id):
+        by_id = await collection.find_one({"_id": ObjectId(dataset_id)})
+        if by_id:
+            return by_id
+
+    by_source_key_latest = await collection.find_one(
+        {"source_key": dataset_id, "is_latest": True},
+        sort=[("ingested_at", -1)],
+    )
+    if by_source_key_latest:
+        return by_source_key_latest
+
+    by_source_id_latest = await collection.find_one(
+        {"source_id": dataset_id, "is_latest": True},
+        sort=[("ingested_at", -1)],
+    )
+    if by_source_id_latest:
+        return by_source_id_latest
+
+    return None
+
+
+async def list_relationships(limit: int = 1000):
+    cursor = relationships_collection.find({}).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def upsert_relationship(from_table: str, from_column: str, to_table: str, to_column: str):
+    result = await relationships_collection.update_one(
+        {
+            "from_table": from_table,
+            "from_column": from_column,
+            "to_table": to_table,
+            "to_column": to_column,
+        },
+        {
+            "$set": {
+                "from_table": from_table,
+                "from_column": from_column,
+                "to_table": to_table,
+                "to_column": to_column,
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$setOnInsert": {
+                "created_at": datetime.now(timezone.utc),
+            },
+        },
+        upsert=True,
+    )
+
+    return {
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+        "upserted_id": str(result.upserted_id) if result.upserted_id else None,
+    }
 
 
 async def upsert_source_config(

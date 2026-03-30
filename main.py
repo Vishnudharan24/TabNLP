@@ -28,6 +28,7 @@ from services.chart.visualization_engine import (
     generate_chart_config,
     aggregate_for_chart,
 )
+from services.query_engine import run_query
 from db.db_store import (
     upsert_source_config,
     ensure_indexes,
@@ -42,6 +43,8 @@ from db.db_store import (
     get_user_by_email,
     get_user_by_id,
     update_user_last_login,
+    list_relationships,
+    upsert_relationship,
 )
 
 app = FastAPI()
@@ -129,6 +132,51 @@ class ChartConfigRequest(ChartEngineRequest):
 class ChartAggregateRequest(BaseModel):
     data: list[dict[str, Any]]
     config: dict[str, Any]
+
+
+class QueryMeasure(BaseModel):
+    field: str
+    aggregation: Literal["SUM", "AVG", "COUNT", "MIN", "MAX", "GROUP_BY"] = "COUNT"
+    alias: Optional[str] = None
+
+
+class QueryFilter(BaseModel):
+    field: str
+    type: Literal["include", "range", "operator"]
+    values: Optional[list[str]] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    operator: Optional[str] = None
+    value: Optional[Any] = None
+    valueSecondary: Optional[Any] = None
+    columnType: Optional[str] = None
+
+
+class QueryJoin(BaseModel):
+    from_table: str
+    from_column: str
+    to_table: str
+    to_column: str
+
+
+class QueryRequest(BaseModel):
+    datasetId: str
+    mode: Optional[Literal["aggregate", "raw", "hierarchy", "org_tree"]] = "aggregate"
+    dimensions: Optional[list[str]] = None
+    measures: Optional[list[QueryMeasure]] = None
+    filters: Optional[list[QueryFilter]] = None
+    fields: Optional[list[str]] = None
+    hierarchy: Optional[list[str]] = None
+    valueField: Optional[str] = None
+    valueAggregation: Optional[str] = None
+    nodeField: Optional[str] = None
+    parentField: Optional[str] = None
+    labelField: Optional[str] = None
+    colorField: Optional[str] = None
+    sortBy: Optional[str] = None
+    sortOrder: Optional[Literal["asc", "desc"]] = "desc"
+    limit: Optional[int] = None
+    joins: Optional[list[QueryJoin]] = None
 
 
 def _serialize_source_config(source_config: dict):
@@ -645,6 +693,48 @@ async def chart_aggregate(payload: ChartAggregateRequest, _current_user: dict = 
         return aggregate_for_chart(data=payload.data, config=payload.config)
     except Exception as e:
         _raise_internal_error("Failed to aggregate chart data", e)
+
+
+@app.post("/query")
+async def query_data(payload: QueryRequest, _current_user: dict = Depends(_require_current_user)):
+    try:
+        response = await run_query(payload.model_dump(exclude_none=True))
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _raise_internal_error("Failed to execute query", e)
+
+
+@app.get("/relationships")
+async def get_relationships(limit: int = 1000, _current_user: dict = Depends(_require_current_user)):
+    try:
+        items = await list_relationships(limit=limit)
+        return {
+            "status": "success",
+            "count": len(items),
+            "items": [_to_json_safe({k: v for k, v in item.items() if k != "_id"}) for item in items],
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to list relationships", e)
+
+
+@app.post("/relationships")
+async def create_relationship(payload: QueryJoin, _current_user: dict = Depends(_require_current_user)):
+    try:
+        result = await upsert_relationship(
+            from_table=payload.from_table,
+            from_column=payload.from_column,
+            to_table=payload.to_table,
+            to_column=payload.to_column,
+        )
+        return {
+            "status": "success",
+            "relationship": payload.model_dump(),
+            "db_result": result,
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to save relationship", e)
 
 
 @app.post("/hr/analytics/summary")

@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
+import pandas as pd
 
 
 SENSITIVE_KEYS = {"password", "passphrase", "private_key", "private_key_path", "token", "secret"}
@@ -64,6 +65,43 @@ def _extract_filename_from_source(source_url: str):
 def generate_metadata(source_url, df, source_type="api", source_details=None, response_headers=None):
     response_headers = response_headers or {}
 
+    def classify_declared_type(series: pd.Series) -> str:
+        if pd.api.types.is_numeric_dtype(series):
+            return "number"
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return "date"
+        if pd.api.types.is_bool_dtype(series):
+            return "boolean"
+        return "string"
+
+    def infer_semantic_type(column_name: str, series: pd.Series) -> str:
+        sample = [v for v in series.dropna().tolist() if str(v).strip() != ""]
+        sample = sample[:500]
+        if not sample:
+            return "categorical"
+
+        lowered = str(column_name or "").strip().lower()
+        if (
+            lowered == "id"
+            or "_id" in lowered
+            or "identifier" in lowered
+            or "uuid" in lowered
+            or "code" in lowered
+            or "sku" in lowered
+        ):
+            return "id"
+
+        unique_ratio = len({str(v) for v in sample}) / max(1, len(sample))
+        if unique_ratio >= 0.98:
+            return "id"
+
+        declared = classify_declared_type(series)
+        if declared == "number":
+            return "numeric"
+        if declared == "date":
+            return "date"
+        return "categorical"
+
     file_name = _extract_filename_from_content_disposition(
         response_headers.get("content-disposition", "")
     ) or _extract_filename_from_source(source_url)
@@ -74,6 +112,9 @@ def generate_metadata(source_url, df, source_type="api", source_details=None, re
         "timestamp": datetime.now(),
         "row_count": len(df),
         "columns": list(df.columns),
+        "column_types": {column: classify_declared_type(df[column]) for column in df.columns},
+        "column_semantic_types": {column: infer_semantic_type(column, df[column]) for column in df.columns},
+        "relationships": [],
         "file_name": file_name,
     }
 
