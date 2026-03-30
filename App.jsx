@@ -1051,7 +1051,7 @@ const App = () => {
         return currentPageCharts.length;
     }, [exportScope, charts.length, currentPageCharts.length]);
 
-    const handleBackendIngestionSuccess = async (ingestionResult) => {
+    const handleBackendIngestionSuccess = async (ingestionResult, options = {}) => {
         const sourceId = ingestionResult?.source_id;
         if (!sourceId) return;
 
@@ -1061,12 +1061,17 @@ const App = () => {
             if (!item) return;
 
             const mapped = mapBackendDatasetToAppDataset(item);
+            const preferredCompanyId = options?.preferredCompanyId || null;
+            const mappedWithCompany = {
+                ...mapped,
+                companyId: preferredCompanyId,
+            };
 
             setDatasets(prev => {
-                const withoutSameId = prev.filter(d => d.id !== mapped.id);
-                return [...withoutSameId, mapped];
+                const withoutSameId = prev.filter(d => d.id !== mappedWithCompany.id);
+                return [...withoutSameId, mappedWithCompany];
             });
-            setSelectedDatasetId(mapped.id);
+            setSelectedDatasetId(mappedWithCompany.id);
             setView('data');
         } catch (error) {
             console.error('Failed to load latest ingested dataset:', error);
@@ -1124,6 +1129,7 @@ const App = () => {
                             onPreviewDataset={id => setPreviewDatasetId(id)}
                             onOpenMerge={() => setShowMerger(true)}
                             onProfileDataset={id => setProfilerDatasetId(id)}
+                            onBackendIngestionSuccess={handleBackendIngestionSuccess}
                         />
                     ) : view === 'source-config' ? (
                         <SourceConfigIngestionPage onIngestionSuccess={handleBackendIngestionSuccess} />

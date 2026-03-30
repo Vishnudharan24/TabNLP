@@ -5,6 +5,7 @@ import {
     Building2, Plus, X, Edit3, Check, ChevronDown, Tag, Search, FolderOpen
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { backendApi } from '../services/backendApi';
 
 const PRESET_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#14b8a6', '#6366f1'];
 
@@ -22,6 +23,7 @@ const DataSourceView = ({
     onPreviewDataset,
     onOpenMerge,
     onProfileDataset,
+    onBackendIngestionSuccess,
 }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
@@ -117,49 +119,26 @@ const DataSourceView = ({
     const getCompanyForDataset = (ds) => companies.find(c => c.id === ds.companyId);
     const unassignedCount = datasets.filter(d => !d.companyId).length;
 
-    const handleFileUpload = (e) => {
+    const handleFileUpload = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setIsUploading(true);
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            try {
-                const text = event.target?.result;
-                const rows = text.split('\n').map(row => row.trim()).filter(row => row !== '');
+        try {
+            const ingestionResult = await backendApi.uploadDatasetFile(file);
 
-                if (rows.length < 1) throw new Error("Empty file");
-
-                const headers = rows[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-                const data = rows.slice(1).map(row => {
-                    const values = row.split(',');
-                    return headers.reduce((obj, header, i) => {
-                        let val = values[i]?.trim().replace(/^"|"$/g, '');
-                        obj[header] = isNaN(Number(val)) || val === "" ? val : Number(val);
-                        return obj;
-                    }, {});
-                });
-
-                const columns = headers.map(h => ({
-                    name: h,
-                    type: typeof data[0][h] === 'number' ? 'number' : 'string'
-                }));
-
-                onAddDataset({
-                    id: Math.random().toString(36).substr(2, 9),
-                    name: file.name,
-                    columns,
-                    data,
-                    companyId: activeCompanyId !== '__all__' && activeCompanyId !== '__unassigned__' ? activeCompanyId : null,
-                });
-            } catch (err) {
-                alert("Failed to parse CSV. Please ensure it is a valid comma-separated file.");
-            } finally {
-                setIsUploading(false);
-                if (fileInputRef.current) fileInputRef.current.value = '';
+            if (onBackendIngestionSuccess) {
+                const preferredCompanyId = activeCompanyId !== '__all__' && activeCompanyId !== '__unassigned__'
+                    ? activeCompanyId
+                    : null;
+                await onBackendIngestionSuccess(ingestionResult, { preferredCompanyId });
             }
-        };
-        reader.readAsText(file);
+        } catch (err) {
+            alert(err?.message || 'Failed to upload and ingest file.');
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
     };
 
     const handleCreateCompany = () => {
@@ -190,7 +169,7 @@ const DataSourceView = ({
                         </div>
                         <h2 className={`text-4xl font-black tracking-tight ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>External Sources</h2>
                         <p className={`max-w-lg ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Organize data by company. Upload CSV files, assign them to subsidiaries, and build cross-entity insights.
+                            Organize data by company. Upload files, assign them to subsidiaries, and build cross-entity insights.
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -210,9 +189,9 @@ const DataSourceView = ({
                             ) : (
                                 <Upload size={20} />
                             )}
-                            <span>{isUploading ? 'Processing...' : 'Add New CSV'}</span>
+                            <span>{isUploading ? 'Processing...' : 'Add New File'}</span>
                         </button>
-                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv" />
+                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".csv,.tsv,.json,.xlsx,.xls,.xlsm,.xlsb" />
                     </div>
                 </div>
             </div>
@@ -385,7 +364,7 @@ const DataSourceView = ({
                         </p>
                         <p className="text-sm opacity-60 mt-2">
                             {datasets.length === 0
-                                ? 'Add a company and upload CSV files to begin.'
+                                ? 'Add a company and upload files to begin.'
                                 : 'Try switching company tabs or clearing the search.'}
                         </p>
                     </div>

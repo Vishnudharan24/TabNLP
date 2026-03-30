@@ -1,0 +1,358 @@
+You are working on a React (JavaScript) analytics platform called ChillView.
+
+The system supports the following chart types:
+
+BAR, LINE, AREA, PIE, DONUT, SUNBURST, RADAR, SCATTER, BUBBLE, TREEMAP, ORG_CHART, HEATMAP, COMBO_BAR_LINE, KPI_SINGLE, TABLE, GAUGE, SPARKLINE
+
+Your task is to build a **Chart Validation & Audit Engine** that detects ALL incorrect chart configurations, bad field selections, and logical visualization mistakes.
+
+---
+
+# 🎯 GOAL
+
+For every chart configuration, validate:
+
+* Field types
+* Aggregations
+* Required dimensions
+* Chart suitability
+* Data density issues
+
+Return:
+
+* Errors ❌
+* Warnings ⚠️
+* Suggestions 💡
+
+---
+
+# 🧠 1. FIELD TYPE CLASSIFICATION
+
+Classify fields into:
+
+```js
+"id" | "categorical" | "numeric" | "date"
+```
+
+Rules:
+
+* ID → unique values (customer_id, employee_id)
+* categorical → string labels
+* numeric → numbers
+* date → time fields
+
+---
+
+# 🚨 2. GLOBAL AGGREGATION RULES
+
+Apply:
+
+```js
+if (field.type === "id") {
+  only allow COUNT;
+}
+
+if (field.type === "categorical") {
+  disallow SUM/AVG;
+}
+```
+
+Detect:
+
+* SUM(customer_id) ❌
+* AVG(name) ❌
+* COUNT(salary) ⚠️ (warn, but allow)
+
+---
+
+# 📊 3. CHART-SPECIFIC VALIDATION RULES
+
+---
+
+## BAR
+
+Required:
+
+* 1 categorical
+* 1 numeric
+
+Errors:
+
+* No numeric field ❌
+* Using ID as SUM ❌
+
+Warnings:
+
+* Too many categories (>20)
+
+---
+
+## LINE / AREA
+
+Required:
+
+* 1 date
+* 1 numeric
+
+Errors:
+
+* Missing date ❌
+* Using categorical instead of time ❌
+
+---
+
+## PIE / DONUT
+
+Required:
+
+* 1 categorical
+* 1 numeric
+
+Errors:
+
+* Too many categories (>10) ❌
+
+Warnings:
+
+* High cardinality field used ⚠️
+
+---
+
+## SUNBURST
+
+Required:
+
+* 2–4 categorical (hierarchy)
+* 1 numeric
+
+Errors:
+
+* Only 1 level ❌
+* Too many levels (>5) ❌
+
+Warnings:
+
+* Leaf nodes too many ⚠️
+
+---
+
+## RADAR
+
+Required:
+
+* 1 categorical
+* 3+ numeric
+
+Errors:
+
+* Less than 3 numeric fields ❌
+
+---
+
+## SCATTER
+
+Required:
+
+* 2 numeric
+
+Errors:
+
+* Non-numeric fields ❌
+
+---
+
+## BUBBLE
+
+Required:
+
+* 3 numeric
+
+---
+
+## TREEMAP
+
+Required:
+
+* 1–2 categorical
+* 1 numeric
+
+Warnings:
+
+* Too many small nodes ⚠️
+
+---
+
+## HEATMAP
+
+Required:
+
+* 2 categorical
+* 1 numeric
+
+---
+
+## ORG_CHART
+
+Required:
+
+* Node (ID)
+* Parent (ID)
+
+Errors:
+
+* Missing parent field ❌
+* Cyclic relationships ❌
+
+Warnings:
+
+* Multiple roots ⚠️
+
+---
+
+## COMBO_BAR_LINE
+
+Required:
+
+* 1 categorical or date
+* 2 numeric
+
+---
+
+## KPI_SINGLE
+
+Required:
+
+* 1 numeric
+
+---
+
+## GAUGE
+
+Required:
+
+* 1 numeric
+
+---
+
+## SPARKLINE
+
+Required:
+
+* 1 date
+* 1 numeric
+
+---
+
+## TABLE
+
+No restriction (always valid)
+
+---
+
+# 🚨 4. HIGH CARDINALITY DETECTION
+
+Detect:
+
+```js
+if (uniqueValues > 20) {
+  warn("Too many categories for this chart");
+}
+```
+
+Critical for:
+
+* Pie
+* Bar
+* Sunburst
+
+---
+
+# 🧠 5. WRONG CHART DETECTION
+
+Compare dataset with best-fit chart:
+
+Examples:
+
+* Date + numeric → should be LINE
+* Only categorical → should be TABLE
+* Hierarchy → should be SUNBURST or ORG
+
+---
+
+Return:
+
+```js
+suggestion: "Use LINE chart instead"
+```
+
+---
+
+# 🎨 6. UX VALIDATION
+
+Detect:
+
+* Overlapping labels
+* Too many nodes
+* Empty chart (no aggregation result)
+* Tiny slices in pie
+
+---
+
+# 🔧 7. AUTO FIX ENGINE
+
+Provide fixes:
+
+```js
+{
+  fix: {
+    aggregation: "COUNT",
+    chartType: "BAR"
+  }
+}
+```
+
+---
+
+# ⚠️ 8. OUTPUT FORMAT
+
+Return:
+
+```js
+{
+  errors: [],
+  warnings: [],
+  suggestions: []
+}
+```
+
+---
+
+# 🧪 9. TEST CASES
+
+Must detect:
+
+* SUM on ID fields ❌
+* Pie with 50 categories ❌
+* Line chart without date ❌
+* Scatter with string fields ❌
+* Sunburst with 1 level ❌
+
+---
+
+# 🚀 FINAL EXPECTATION
+
+The system should:
+
+* Prevent bad charts from rendering
+* Suggest better charts
+* Auto-correct simple issues
+* Improve data understanding
+
+---
+
+Focus on:
+👉 Data correctness
+👉 Visualization logic
+👉 Business intelligence accuracy
+
+NOT just code validation

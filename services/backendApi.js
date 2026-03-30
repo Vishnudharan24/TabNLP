@@ -67,12 +67,14 @@ async function request(path, options = {}, baseUrl, requestConfig = {}) {
         const { signal: requestSignal, cleanup } = withCancellationAndTimeout(signal, timeoutMs);
         const persistedToken = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
         const providedHeaders = options.headers || {};
+        const isFormDataBody = typeof FormData !== 'undefined' && options?.body instanceof FormData;
         const hasAuthorizationHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'authorization');
+        const hasContentTypeHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'content-type');
 
         try {
             const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
                 headers: {
-                    'Content-Type': 'application/json',
+                    ...(!isFormDataBody && !hasContentTypeHeader ? { 'Content-Type': 'application/json' } : {}),
                     ...(persistedToken && !hasAuthorizationHeader ? { Authorization: `Bearer ${persistedToken}` } : {}),
                     ...(options.headers || {}),
                 },
@@ -175,6 +177,12 @@ export const backendApi = {
 
     ingestBySourceId(sourceId, baseUrl, requestConfig) {
         return request(`/ingest/source/${encodeURIComponent(sourceId)}`, { method: 'POST' }, baseUrl, requestConfig);
+    },
+
+    uploadDatasetFile(file, baseUrl, requestConfig) {
+        const form = new FormData();
+        form.append('file', file);
+        return request('/ingest/upload', { method: 'POST', body: form }, baseUrl, requestConfig);
     },
 
     listLatestDatasets(limit = 100, baseUrl, requestConfig) {

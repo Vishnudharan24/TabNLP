@@ -4,6 +4,8 @@ import ReactECharts from 'echarts-for-react';
 import jsPDF from 'jspdf';
 import { useTheme } from '../../contexts/ThemeContext';
 import { backendApi } from '../../services/backendApi';
+import { ChartType } from '../../types';
+import { buildChartOption } from '../../services/echartsOptionBuilder';
 
 const MODULES = [
     'summary',
@@ -91,6 +93,41 @@ const readKpi = (analytics, moduleName, kpiKey, fallbacks = []) => {
         if (mod?.[key] != null) return mod[key];
     }
     return 0;
+};
+
+const collectTreeDepartments = (root) => {
+    const set = new Set();
+    const visit = (node) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.department && node.department !== 'Unknown') set.add(String(node.department));
+        const children = Array.isArray(node.children) ? node.children : [];
+        children.forEach(visit);
+    };
+    visit(root);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+};
+
+const filterOrgTreeByDepartment = (root, department) => {
+    const selected = String(department || '__all__');
+    if (selected === '__all__') return root;
+
+    const prune = (node, depth = 0) => {
+        if (!node || typeof node !== 'object') return null;
+        const children = (Array.isArray(node.children) ? node.children : [])
+            .map((child) => prune(child, depth + 1))
+            .filter(Boolean);
+
+        const matches = String(node.department || '') === selected;
+        const keep = depth === 0 || matches || children.length > 0;
+        if (!keep) return null;
+
+        return {
+            ...node,
+            children,
+        };
+    };
+
+    return prune(root, 0) || { name: 'Organization', children: [] };
 };
 
 const toValueMap = (items = []) => {
@@ -409,15 +446,39 @@ const KpiCard = ({ title, value, hint, isDark }) => (
     </div>
 );
 
-const ChartCard = ({ title, option, isDark, height = 320 }) => {
+const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras = null, renderExpandedControls = null }) => {
     const [expanded, setExpanded] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [exportError, setExportError] = useState('');
     const [expandedChartRef, setExpandedChartRef] = useState(null);
+    const [expandedZoomPct, setExpandedZoomPct] = useState(100);
     const axisFields = CHART_AXIS_FIELDS[title] || { x: 'Category', y: 'Value' };
+
+    const runExpandedZoom = (factor = 1) => {
+        const instance = expandedChartRef?.getEchartsInstance?.();
+        if (!instance) return;
+        const width = instance.getWidth?.() || 1200;
+        const heightPx = instance.getHeight?.() || 700;
+
+        instance.dispatchAction({
+            type: 'treeRoam',
+            zoom: factor,
+            originX: width / 2,
+            originY: heightPx / 2,
+        });
+        setExpandedZoomPct((prev) => Math.max(30, Math.min(350, Math.round(prev * factor))));
+    };
+
+    const resetExpandedView = () => {
+        const instance = expandedChartRef?.getEchartsInstance?.();
+        if (!instance) return;
+        instance.dispatchAction({ type: 'restore' });
+        setExpandedZoomPct(100);
+    };
 
     useEffect(() => {
         if (!expanded) return;
+        setExpandedZoomPct(100);
 
         const onKeyDown = (event) => {
             if (event.key === 'Escape') {
@@ -526,6 +587,7 @@ const ChartCard = ({ title, option, isDark, height = 320 }) => {
                         <p className={`mt-1 text-[11px] ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                             X-axis: {axisFields.x} · Y-axis: {axisFields.y}
                         </p>
+                        {headerExtras}
                     </div>
                     <button
                         type="button"
@@ -535,7 +597,7 @@ const ChartCard = ({ title, option, isDark, height = 320 }) => {
                         Expand
                     </button>
                 </div>
-                <ReactECharts option={option} style={{ width: '100%', height }} notMerge lazyUpdate />
+                <ReactECharts option={option} style={{ width: '100%', height }} notMerge lazyUpdate onEvents={onEvents} />
             </div>
 
             {expanded && (
@@ -585,12 +647,25 @@ const ChartCard = ({ title, option, isDark, height = 320 }) => {
                             <p className={`mb-2 text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>{exportError}</p>
                         )}
 
+                        {typeof renderExpandedControls === 'function' && (
+                            <div className="mb-3">
+                                {renderExpandedControls({
+                                    zoomPct: expandedZoomPct,
+                                    zoomIn: () => runExpandedZoom(1.15),
+                                    zoomOut: () => runExpandedZoom(0.87),
+                                    resetZoom: resetExpandedView,
+                                    close: () => setExpanded(false),
+                                })}
+                            </div>
+                        )}
+
                         <ReactECharts
                             ref={(ref) => setExpandedChartRef(ref)}
                             option={option}
                             style={{ width: '100%', height: 'calc(92vh - 90px)' }}
                             notMerge
                             lazyUpdate
+                            onEvents={onEvents}
                         />
                     </div>
                 </div>
@@ -611,6 +686,12 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
     const [error, setError] = useState('');
     const [analytics, setAnalytics] = useState({});
     const [validation, setValidation] = useState([]);
+    const [orgSearchQuery, setOrgSearchQuery] = useState('');
+    const [orgTreeExpandMode, setOrgTreeExpandMode] = useState('default');
+    const [orgSelectedPathIds, setOrgSelectedPathIds] = useState([]);
+    const [orgSelectedPathNames, setOrgSelectedPathNames] = useState([]);
+    const [orgSelectedNodeId, setOrgSelectedNodeId] = useState('');
+    const [orgDepartmentFilter, setOrgDepartmentFilter] = useState('__all__');
 
     useEffect(() => {
         let mounted = true;
@@ -696,6 +777,207 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
 
     const orgTree = readChart(analytics, 'org', 'org_tree', ['hierarchy']);
     const managerTeamSize = readChart(analytics, 'org', 'manager_team_size', ['managerWiseTeamSize']);
+
+    const orgDepartmentOptions = useMemo(
+        () => collectTreeDepartments(orgTree),
+        [orgTree]
+    );
+
+    const filteredOrgTree = useMemo(
+        () => filterOrgTreeByDepartment(orgTree && typeof orgTree === 'object' ? orgTree : { name: 'Organization', children: [] }, orgDepartmentFilter),
+        [orgTree, orgDepartmentFilter]
+    );
+
+    useEffect(() => {
+        setOrgSelectedPathIds([]);
+        setOrgSelectedPathNames([]);
+        setOrgSelectedNodeId('');
+    }, [orgDepartmentFilter]);
+
+    const orgChartOption = useMemo(() => {
+        const treeRoot = filteredOrgTree && typeof filteredOrgTree === 'object'
+            ? filteredOrgTree
+            : { name: 'Organization', children: [] };
+
+        return buildChartOption(
+            ChartType.ORG_CHART,
+            [{ __orgTree: treeRoot }],
+            {
+                type: ChartType.ORG_CHART,
+                assignments: [],
+                nodeField: 'id',
+                parentField: 'manager_id',
+                labelField: 'name',
+                colorField: 'department',
+                orgSearchQuery,
+                orgSelectedPathIds,
+                orgSelectedNodeId,
+                orgTreeExpandMode,
+                orgCollapseDepth: orgTreeExpandMode === 'expand-all' ? -1 : 1,
+                style: { labelMode: 'show' },
+            },
+            isDark ? 'dark' : 'light',
+            'clear',
+            'vibrant'
+        );
+    }, [filteredOrgTree, orgSearchQuery, orgSelectedPathIds, orgSelectedNodeId, orgTreeExpandMode, isDark]);
+
+    const orgChartEvents = useMemo(() => ({
+        click: (params) => {
+            const pathInfo = Array.isArray(params?.treePathInfo) ? params.treePathInfo : [];
+            const names = pathInfo.map((p) => p?.name).filter(Boolean);
+            const ids = pathInfo
+                .map((p) => String(p?.data?.id || p?.data?.key || p?.name || '').trim())
+                .filter(Boolean);
+            const clickedId = String(params?.data?.id || params?.data?.key || params?.name || '').trim();
+
+            setOrgSelectedPathNames(names);
+            setOrgSelectedPathIds(ids);
+            setOrgSelectedNodeId(clickedId || ids[ids.length - 1] || '');
+        },
+    }), []);
+
+    const orgHeaderExtras = (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+                value={orgSearchQuery}
+                onChange={(e) => {
+                    setOrgSearchQuery(e.target.value);
+                    setOrgTreeExpandMode('default');
+                }}
+                placeholder="Search employee..."
+                className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'bg-white border-gray-300 text-gray-700 placeholder:text-gray-400'}`}
+            />
+            <select
+                value={orgDepartmentFilter}
+                onChange={(e) => {
+                    setOrgDepartmentFilter(e.target.value);
+                    setOrgTreeExpandMode('default');
+                }}
+                className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-700'}`}
+            >
+                <option value="__all__">All Departments</option>
+                {orgDepartmentOptions.map((dep) => (
+                    <option key={dep} value={dep}>{dep}</option>
+                ))}
+            </select>
+            <button
+                type="button"
+                onClick={() => setOrgTreeExpandMode('collapse-all')}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+            >
+                Collapse All
+            </button>
+            <button
+                type="button"
+                onClick={() => setOrgTreeExpandMode('expand-all')}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+            >
+                Expand All
+            </button>
+            <button
+                type="button"
+                onClick={() => {
+                    setOrgSearchQuery('');
+                    setOrgDepartmentFilter('__all__');
+                    setOrgTreeExpandMode('default');
+                    setOrgSelectedPathIds([]);
+                    setOrgSelectedPathNames([]);
+                    setOrgSelectedNodeId('');
+                }}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+            >
+                Reset
+            </button>
+            {orgSelectedPathNames.length > 0 && (
+                <span className={`max-w-full truncate text-[10px] ${isDark ? 'text-gray-300' : 'text-gray-600'}`} title={orgSelectedPathNames.join(' / ')}>
+                    {orgSelectedPathNames.join(' / ')}
+                </span>
+            )}
+        </div>
+    );
+
+    const renderExpandedOrgControls = ({ zoomPct, zoomIn, zoomOut, resetZoom }) => (
+        <div className={`rounded-lg border p-2 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+            <div className="flex flex-wrap items-center gap-2">
+                <input
+                    value={orgSearchQuery}
+                    onChange={(e) => {
+                        setOrgSearchQuery(e.target.value);
+                        setOrgTreeExpandMode('default');
+                    }}
+                    placeholder="Search employee..."
+                    className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'bg-white border-gray-300 text-gray-700 placeholder:text-gray-400'}`}
+                />
+                <select
+                    value={orgDepartmentFilter}
+                    onChange={(e) => {
+                        setOrgDepartmentFilter(e.target.value);
+                        setOrgTreeExpandMode('default');
+                    }}
+                    className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-700'}`}
+                >
+                    <option value="__all__">All Departments</option>
+                    {orgDepartmentOptions.map((dep) => (
+                        <option key={dep} value={dep}>{dep}</option>
+                    ))}
+                </select>
+
+                <button
+                    type="button"
+                    onClick={() => setOrgTreeExpandMode('collapse-all')}
+                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                    Collapse All
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setOrgTreeExpandMode('expand-all')}
+                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                    Expand All
+                </button>
+                <button
+                    type="button"
+                    onClick={() => {
+                        setOrgSearchQuery('');
+                        setOrgDepartmentFilter('__all__');
+                        setOrgTreeExpandMode('default');
+                        setOrgSelectedPathIds([]);
+                        setOrgSelectedPathNames([]);
+                        setOrgSelectedNodeId('');
+                        resetZoom();
+                    }}
+                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                    Reset
+                </button>
+
+                <div className="ml-auto flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={zoomIn}
+                        className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                    >
+                        Zoom +
+                    </button>
+                    <button
+                        type="button"
+                        onClick={zoomOut}
+                        className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                    >
+                        Zoom -
+                    </button>
+                    <span className={`text-[11px] font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{zoomPct}%</span>
+                </div>
+            </div>
+            {orgSelectedPathNames.length > 0 && (
+                <div className={`mt-2 text-[11px] ${isDark ? 'text-gray-300' : 'text-gray-600'}`} title={orgSelectedPathNames.join(' / ')}>
+                    {orgSelectedPathNames.join(' / ')}
+                </div>
+            )}
+        </div>
+    );
 
     const paymentModeDistribution = readChart(analytics, 'payroll', 'payment_mode_distribution', ['paymentModeDistribution']);
     const bankDistribution = readChart(analytics, 'payroll', 'bank_distribution', ['bankDistribution']);
@@ -1039,8 +1321,12 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Organization Tree"
                             isDark={isDark}
+                            height={420}
+                            onEvents={orgChartEvents}
+                            headerExtras={orgHeaderExtras}
+                            renderExpandedControls={renderExpandedOrgControls}
                             option={{
-                                ...treeOption(isDark, orgTree),
+                                ...orgChartOption,
                             }}
                         />
 

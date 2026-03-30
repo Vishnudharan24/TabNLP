@@ -66,7 +66,7 @@ export const ChartType = {
 };
 
 /**
- * @typedef {'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX'} AggregationType
+ * @typedef {'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX' | 'GROUP_BY'} AggregationType
  */
 
 /**

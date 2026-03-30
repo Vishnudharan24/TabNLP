@@ -1,0 +1,287 @@
+Design and implement a complete enterprise-grade Data Visualization Engine from scratch for a React + FastAPI application (Chillview), replacing the existing chart builder and chart recommender system entirely, while preserving the existing Org Chart implementation.
+
+The system must support the following chart types:
+
+BAR, LINE, AREA, PIE, DONUT, SCATTER, BUBBLE, HEATMAP, TREEMAP, SUNBURST, COMBO_BAR_LINE, GAUGE, SPARKLINE, RADAR, KPI_SINGLE, TABLE
+
+---
+
+1. CORE ARCHITECTURE
+
+Build a modular architecture with the following layers:
+
+Frontend (React):
+
+* Chart Builder Panel
+* Field Assignment System
+* Chart Renderer (ECharts)
+* Chart Recommendation Engine UI
+
+Backend (FastAPI):
+
+* Data profiling API
+* Aggregation engine
+* Chart recommendation API
+* Analytics computation endpoints (/hr/analytics/*)
+
+---
+
+2. COLUMN PROFILING ENGINE
+
+Automatically classify dataset columns into:
+
+* DIMENSION (categorical → string, enums)
+* MEASURE (numeric → int, float)
+* TIME (date/datetime)
+* IDENTIFIER (unique IDs like employee_id)
+
+Rules:
+
+* If unique > 95% → mark as IDENTIFIER
+* If numeric → MEASURE
+* If date → TIME
+* Else → DIMENSION
+
+Return metadata:
+{
+column_name,
+type: "dimension" | "measure" | "time" | "id",
+unique_count,
+null_count,
+sample_values
+}
+
+---
+
+3. CHART CONFIGURATION MODEL
+
+Each chart must strictly define required fields:
+
+BAR:
+
+* X Axis: DIMENSION
+* Y Axis: MEASURE (aggregation required)
+
+LINE:
+
+* X Axis: TIME (preferred) OR DIMENSION
+* Y Axis: MEASURE
+
+AREA:
+
+* Same as LINE
+
+PIE / DONUT:
+
+* Category: DIMENSION
+* Value: MEASURE (COUNT default)
+
+SCATTER:
+
+* X: MEASURE
+* Y: MEASURE
+
+BUBBLE:
+
+* X: MEASURE
+* Y: MEASURE
+* Size: MEASURE
+
+HEATMAP:
+
+* X: DIMENSION
+* Y: DIMENSION
+* Value: MEASURE
+
+TREEMAP / SUNBURST:
+
+* Hierarchy: MULTI DIMENSION
+* Value: MEASURE
+
+COMBO_BAR_LINE:
+
+* X: DIMENSION or TIME
+* Y1: MEASURE (bar)
+* Y2: MEASURE (line)
+
+GAUGE:
+
+* Value: SINGLE MEASURE
+
+SPARKLINE:
+
+* TIME + MEASURE
+
+RADAR:
+
+* DIMENSION + MULTIPLE MEASURES
+
+KPI_SINGLE:
+
+* SINGLE MEASURE
+
+TABLE:
+
+* ANY fields
+
+---
+
+4. FIELD ASSIGNMENT PANEL (CRITICAL UX)
+
+Replace current system with:
+
+Sections:
+
+* DIMENSION (X Axis / Category)
+* MEASURE (Values)
+* TIME (Optional)
+* SIZE (for bubble)
+* COLOR / LEGEND
+
+Rules:
+
+* Only allow compatible fields per chart
+* Disable invalid selections
+* Show helper text:
+
+Example:
+"Bar Chart requires 1 Dimension + 1 Measure"
+
+Auto suggestions:
+
+* Auto-fill best fields when chart selected
+
+---
+
+5. AGGREGATION ENGINE (VERY IMPORTANT)
+
+Auto-assign aggregations:
+
+* ID → COUNT ONLY
+* Numeric → SUM / AVG
+* Default:
+
+  * COUNT for dimensions
+  * SUM for measures
+
+Prevent:
+
+* SUM(employee_id)
+* AVG(string)
+
+---
+
+6. CHART RECOMMENDATION ENGINE
+
+Build a scoring system:
+
+Input:
+
+* #dimensions
+* #measures
+* #time columns
+
+Rules:
+
+1 dimension + 1 measure → BAR (score 90)
+1 time + 1 measure → LINE (95)
+2 measures → SCATTER (85)
+1 dimension + many measures → RADAR (75)
+hierarchy fields → TREEMAP/SUNBURST (80)
+any measure → KPI / GAUGE (60)
+
+Return ranked list:
+[
+{ chart: "bar", score: 90 },
+{ chart: "pie", score: 75 }
+]
+
+Auto-select top result.
+
+---
+
+7. ENTERPRISE CHART DESIGN (VERY IMPORTANT)
+
+All charts must include:
+
+* Title + Subtitle
+* Axis labels
+* Data labels (intelligent visibility)
+* Tooltips (rich)
+* Legends (scrollable if large)
+* Grid spacing optimized
+* Responsive layout
+* Export-ready styling
+
+Export requirements:
+
+* PNG/PDF must include:
+
+  * labels
+  * readable fonts
+  * no overlap
+  * high DPI
+
+---
+
+8. UI IMPROVEMENTS
+
+* Rotate labels when crowded
+* Auto-hide labels if overlap
+* Add zoom + scroll for large datasets
+* Top N + "Others" grouping
+* Sorting toggle (asc/desc)
+
+---
+
+9. ORG CHART (KEEP EXISTING + ADD NEW TYPE)
+
+Add new chart type:
+ORG_TREE_STRUCTURED
+
+Features:
+
+* Hierarchical boxes
+* Name + Role
+* No images
+* Expand/collapse nodes
+* Clean connectors (like corporate org charts)
+
+---
+
+10. API DESIGN (FASTAPI)
+
+Endpoints:
+
+POST /chart/recommend
+POST /chart/aggregate
+POST /chart/config
+
+---
+
+11. PERFORMANCE
+
+* Backend aggregation preferred
+* Use memoization in frontend
+* Virtualize large datasets
+
+---
+
+12. GOAL
+
+Build a system comparable to:
+
+* Power BI
+* Tableau
+
+The result must:
+
+* Prevent wrong chart configurations
+* Be intuitive for non-technical users
+* Generate insights automatically
+* Be scalable for large datasets
+
+IMPORTANT:
+Replace existing chart builder and recommender completely, but keep existing org chart implementation and extend it.
+
+---

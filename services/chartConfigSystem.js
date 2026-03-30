@@ -19,7 +19,7 @@ const TIME_TYPES = new Set(['date', 'datetime']);
 
 const toUpperAgg = (agg) => {
     const value = String(agg || '').toUpperCase();
-    return ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'].includes(value) ? value : undefined;
+    return ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'GROUP_BY'].includes(value) ? value : undefined;
 };
 
 const normalizeChartType = (type) => {
@@ -518,7 +518,7 @@ export function buildHierarchy(data = [], hierarchyFields = [], valueField = '__
                         ? (n.min === Infinity ? 0 : n.min)
                         : valueAgg === 'MAX'
                             ? (n.max === -Infinity ? 0 : n.max)
-                            : valueAgg === 'COUNT'
+                            : (valueAgg === 'COUNT' || valueAgg === 'GROUP_BY')
                                 ? n.count
                                 : n.sum;
 

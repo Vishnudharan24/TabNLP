@@ -148,7 +148,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         };
     };
 
-    const applyGridSpacing = (option = {}) => {
+    function applyGridSpacing(option = {}) {
         const baseGrid = {
             top: 40,
             left: 60,
@@ -171,41 +171,43 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 ...(option.grid || {}),
             },
         };
-    };
+    }
 
-    const applyTooltip = (option = {}) => ({
-        ...option,
-        tooltip: {
-            ...(option.tooltip || {}),
-            show: tooltipEnabled,
-            confine: true,
-            appendToBody: true,
-            backgroundColor: isDark ? '#111827' : '#ffffff',
-            borderColor: isDark ? '#374151' : '#d1d5db',
-            borderWidth: 1,
-            textStyle: { color: textColor, fontSize, fontFamily },
-            extraCssText: 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.16);max-width:340px;white-space:normal;',
-            formatter: (params) => {
-                const list = Array.isArray(params) ? params : [params];
-                const head = list[0]?.axisValueLabel || list[0]?.name || '';
-                let html = `<div style="font-weight:700;margin-bottom:6px">${head}</div>`;
-                list.forEach((p) => {
-                    if (!p) return;
-                    const value = numberFormatter(p.value);
-                    const percent = Number.isFinite(Number(p.percent)) ? ` (${Number(p.percent).toFixed(1)}%)` : '';
-                    const fullName = String(p.name ?? head ?? '');
-                    html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0">
-                        <span style="display:flex;align-items:center;gap:6px;min-width:0;">
-                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color || colors[0]}"></span>
-                            <span title="${fullName}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fullName}</span>
-                        </span>
-                        <strong>${value}${percent}</strong>
-                    </div>`;
-                });
-                return html;
+    function applyTooltip(option = {}) {
+        return {
+            ...option,
+            tooltip: {
+                ...(option.tooltip || {}),
+                show: tooltipEnabled,
+                confine: true,
+                appendToBody: true,
+                backgroundColor: isDark ? '#111827' : '#ffffff',
+                borderColor: isDark ? '#374151' : '#d1d5db',
+                borderWidth: 1,
+                textStyle: { color: textColor, fontSize, fontFamily },
+                extraCssText: 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.16);max-width:340px;white-space:normal;',
+                formatter: (params) => {
+                    const list = Array.isArray(params) ? params : [params];
+                    const head = list[0]?.axisValueLabel || list[0]?.name || '';
+                    let html = `<div style="font-weight:700;margin-bottom:6px">${head}</div>`;
+                    list.forEach((p) => {
+                        if (!p) return;
+                        const value = numberFormatter(p.value);
+                        const percent = Number.isFinite(Number(p.percent)) ? ` (${Number(p.percent).toFixed(1)}%)` : '';
+                        const fullName = String(p.name ?? head ?? '');
+                        html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0">
+                            <span style="display:flex;align-items:center;gap:6px;min-width:0;">
+                                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color || colors[0]}"></span>
+                                <span title="${fullName}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fullName}</span>
+                            </span>
+                            <strong>${value}${percent}</strong>
+                        </div>`;
+                    });
+                    return html;
+                },
             },
-        },
-    });
+        };
+    }
 
     const applyDataZoom = (option = {}, categoryCount = 0) => {
         if (categoryCount <= 12) return option;

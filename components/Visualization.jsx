@@ -5,6 +5,7 @@ import * as echarts from 'echarts';
 import { ChartType } from '../types';
 import { buildChartOption } from '../services/echartsOptionBuilder';
 import { buildHierarchy, buildOrgTree, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
+import { auditChartConfiguration } from '../services/chartValidationEngine';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 
@@ -54,6 +55,113 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         };
     }, [config]);
 
+    const chartAudit = useMemo(() => auditChartConfiguration({
+        config: normalizedConfig,
+        columns: dataset?.columns || [],
+        data: dataset?.data || [],
+    }), [normalizedConfig, dataset?.columns, dataset?.data]);
+
+    const getRequiredRolesForChart = (type) => {
+        switch (type) {
+            case ChartType.PIE:
+            case ChartType.DONUT:
+            case ChartType.ROSE:
+                return [
+                    { label: 'Legend', anyOf: [FieldRoles.LEGEND, FieldRoles.COLOR], required: true },
+                    { label: 'Value', anyOf: [FieldRoles.VALUE, FieldRoles.Y], required: true },
+                ];
+            case ChartType.SUNBURST:
+            case ChartType.TREEMAP:
+                return [
+                    { label: 'Hierarchy', anyOf: [FieldRoles.HIERARCHY], required: true, multi: true },
+                    { label: 'Value', anyOf: [FieldRoles.VALUE, FieldRoles.Y], required: true },
+                ];
+            case ChartType.ORG_CHART:
+                return [
+                    { label: 'Node', anyOf: [FieldRoles.NODE], required: true },
+                    { label: 'Parent', anyOf: [FieldRoles.PARENT], required: true },
+                    { label: 'Label', anyOf: [FieldRoles.LABEL], required: false },
+                    { label: 'Color/Legend', anyOf: [FieldRoles.COLOR, FieldRoles.LEGEND], required: false },
+                ];
+            case ChartType.SCATTER:
+                return [
+                    { label: 'X Axis', anyOf: [FieldRoles.X], required: true },
+                    { label: 'Y Axis', anyOf: [FieldRoles.Y], required: true },
+                    { label: 'Legend', anyOf: [FieldRoles.COLOR, FieldRoles.LEGEND], required: false },
+                ];
+            case ChartType.BUBBLE:
+                return [
+                    { label: 'X Axis', anyOf: [FieldRoles.X], required: true },
+                    { label: 'Y Axis', anyOf: [FieldRoles.Y], required: true },
+                    { label: 'Size', anyOf: [FieldRoles.SIZE], required: true },
+                    { label: 'Legend', anyOf: [FieldRoles.COLOR, FieldRoles.LEGEND], required: false },
+                ];
+            case ChartType.HEATMAP:
+                return [
+                    { label: 'X Axis', anyOf: [FieldRoles.X], required: true },
+                    { label: 'Y Axis', anyOf: [FieldRoles.Y], required: true },
+                    { label: 'Value', anyOf: [FieldRoles.VALUE, FieldRoles.Y], required: true },
+                ];
+            case ChartType.GAUGE:
+            case ChartType.KPI_SINGLE:
+                return [
+                    { label: 'Value', anyOf: [FieldRoles.VALUE, FieldRoles.Y], required: true },
+                ];
+            case ChartType.LINE:
+            case ChartType.LINE_SMOOTH:
+            case ChartType.LINE_STRAIGHT:
+            case ChartType.LINE_STEP:
+            case ChartType.AREA:
+            case ChartType.AREA_SMOOTH:
+            case ChartType.AREA_STACKED:
+            case ChartType.AREA_PERCENT:
+            case ChartType.SPARKLINE:
+                return [
+                    { label: 'Axis (Time/X)', anyOf: [FieldRoles.TIME, FieldRoles.X], required: true },
+                    { label: 'Y Axis', anyOf: [FieldRoles.Y, FieldRoles.VALUE], required: true, multi: true },
+                    { label: 'Legend', anyOf: [FieldRoles.LEGEND, FieldRoles.COLOR], required: false },
+                ];
+            case ChartType.RADAR:
+                return [
+                    { label: 'Legend', anyOf: [FieldRoles.LEGEND, FieldRoles.COLOR], required: false },
+                    { label: 'Values', anyOf: [FieldRoles.Y, FieldRoles.VALUE], required: true, multi: true },
+                ];
+            default:
+                return [
+                    { label: 'X Axis', anyOf: [FieldRoles.X, FieldRoles.TIME], required: true },
+                    { label: 'Y Axis/Value', anyOf: [FieldRoles.Y, FieldRoles.VALUE], required: true, multi: true },
+                    { label: 'Legend', anyOf: [FieldRoles.LEGEND, FieldRoles.COLOR], required: false },
+                ];
+        }
+    };
+
+    const roleFieldMap = useMemo(() => {
+        const map = new Map();
+        const assignments = Array.isArray(normalizedConfig?.assignments) ? normalizedConfig.assignments : [];
+        assignments.forEach((a) => {
+            if (!a?.role || !a?.field) return;
+            if (!map.has(a.role)) map.set(a.role, []);
+            map.get(a.role).push(a.field);
+        });
+        return map;
+    }, [normalizedConfig?.assignments]);
+
+    const requiredRoleInfo = useMemo(() => {
+        const requirements = getRequiredRolesForChart(normalizedConfig?.type);
+        return requirements.map((rule) => {
+            const selected = rule.anyOf
+                .flatMap((role) => roleFieldMap.get(role) || [])
+                .filter(Boolean);
+            const uniqueSelected = Array.from(new Set(selected));
+
+            return {
+                ...rule,
+                selected: uniqueSelected,
+                isMissing: rule.required && uniqueSelected.length === 0,
+            };
+        });
+    }, [normalizedConfig?.type, roleFieldMap]);
+
     // Apply global filters (cross-dataset filtering)
     const applyGlobalFilters = (data) => {
         if (!globalFilters || globalFilters.length === 0) return data;
@@ -100,12 +208,30 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         .trim()
         .replace(/\b\w/g, (char) => char.toUpperCase());
 
+    const primaryValueAssignment = (Array.isArray(normalizedConfig?.assignments) ? normalizedConfig.assignments : [])
+        .find((a) => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
+
+    const effectiveAggregationMode = toTitleCase(
+        primaryValueAssignment?.aggregation || normalizedConfig?.aggregation || ''
+    ).toUpperCase() || (
+        !Array.isArray(normalizedConfig?.measures) || normalizedConfig.measures.length === 0
+            ? 'COUNT'
+            : (normalizedConfig?.aggregation || 'SUM')
+    );
+
+    const isGroupByMode = effectiveAggregationMode === 'GROUP_BY';
+    const groupByTargetField = primaryValueAssignment?.field || normalizedConfig?.measures?.[0] || '__count__';
+
     const semanticTitle = (() => {
         const configured = (config.title || '').trim();
         const isGeneric = !configured || /^new visual$/i.test(configured) || /^analytics card$/i.test(configured);
         if (!isGeneric) return configured;
 
-        const firstMeasure = normalizedConfig?.measures?.[0] ? toTitleCase(normalizedConfig.measures[0]) : 'Value';
+        const firstMeasure = isGroupByMode
+            ? (groupByTargetField && groupByTargetField !== '__count__'
+                ? `Count Of ${toTitleCase(groupByTargetField)}`
+                : 'Count')
+            : (normalizedConfig?.measures?.[0] ? toTitleCase(normalizedConfig.measures[0]) : 'Value');
         const dim = effectiveDimension ? toTitleCase(effectiveDimension) : 'Category';
         return `${firstMeasure} by ${dim}`;
     })();
@@ -114,11 +240,15 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         ? `Grouped by ${toTitleCase(effectiveDimension)}`
         : toTitleCase(config.type.replace(/_/g, ' '));
 
-    const valueFieldsText = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
-        ? normalizedConfig.measures.map(toTitleCase).join(', ')
-        : 'None';
+    const valueFieldsText = isGroupByMode
+        ? (groupByTargetField && groupByTargetField !== '__count__'
+            ? `Count of ${toTitleCase(groupByTargetField)}`
+            : 'Count')
+        : (Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
+            ? normalizedConfig.measures.map(toTitleCase).join(', ')
+            : 'None');
 
-    const aggregationText = normalizedConfig?.aggregation ? toTitleCase(normalizedConfig.aggregation) : 'N/A';
+    const aggregationText = toTitleCase(effectiveAggregationMode || 'N/A');
 
     const applyFilters = (data) => {
         if (!normalizedConfig.filters || normalizedConfig.filters.length === 0) return data;
@@ -193,10 +323,10 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         const colorField = assignments.find(a => a?.role === FieldRoles.COLOR)?.field;
         const valueAssignment = assignments.find(a => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
 
-        const effectiveMeasures = Array.isArray(measures) && measures.length > 0
-            ? measures
-            : ['__count__'];
-        const effectiveAggregation = toTitleCase(valueAssignment?.aggregation || aggregation || '').toUpperCase() || (!Array.isArray(measures) || measures.length === 0 ? 'COUNT' : aggregation);
+        const effectiveMeasures = isGroupByMode
+            ? ['Count']
+            : (Array.isArray(measures) && measures.length > 0 ? measures : ['__count__']);
+        const effectiveAggregation = effectiveAggregationMode;
 
         let filteredData = applyGlobalFilters(dataset.data);
         filteredData = applyFilters(filteredData);
@@ -206,8 +336,8 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             const hierarchy = buildHierarchy(
                 filteredData,
                 hierarchyFields,
-                valueAssignment?.field || effectiveMeasures[0] || '__count__',
-                valueAssignment?.aggregation || effectiveAggregation || 'COUNT'
+                isGroupByMode ? '__count__' : (valueAssignment?.field || effectiveMeasures[0] || '__count__'),
+                isGroupByMode ? 'COUNT' : (valueAssignment?.aggregation || effectiveAggregation || 'COUNT')
             );
             return hierarchy.length > 0 ? [{ __hierarchy: hierarchy }] : [];
         }
@@ -228,7 +358,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
             effectiveMeasures.forEach(m => {
                 if (!groups[dimVal][m]) groups[dimVal][m] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
-                if (m === '__count__') {
+                if (m === '__count__' || isGroupByMode) {
                     groups[dimVal][m].count += 1;
                     groups[dimVal][m].sum += 1;
                     groups[dimVal][m].min = 1;
@@ -250,7 +380,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             effectiveMeasures.forEach(m => {
                 const s = statsMap[m] || { sum: 0, count: 0, min: 0, max: 0 };
                 if (effectiveAggregation === 'AVG') row[m] = s.count > 0 ? s.sum / s.count : 0;
-                else if (effectiveAggregation === 'COUNT') row[m] = s.count;
+                else if (effectiveAggregation === 'COUNT' || isGroupByMode) row[m] = s.count;
                 else if (effectiveAggregation === 'MIN') row[m] = s.min === Infinity ? 0 : s.min;
                 else if (effectiveAggregation === 'MAX') row[m] = s.max === -Infinity ? 0 : s.max;
                 else row[m] = s.sum;
@@ -403,6 +533,19 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     };
 
     const renderVisual = () => {
+        if (Array.isArray(chartAudit?.errors) && chartAudit.errors.length > 0) {
+            return (
+                <div className="h-full flex flex-col items-start justify-center gap-2 px-4 py-3 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 text-[11px]">
+                    <p className="font-bold text-rose-700 dark:text-rose-300">Chart configuration errors</p>
+                    <ul className="space-y-1 text-rose-700 dark:text-rose-300 list-disc pl-4">
+                        {chartAudit.errors.slice(0, 5).map((err, idx) => (
+                            <li key={`${err?.code || 'err'}-${idx}`}>{err?.message || String(err)}</li>
+                        ))}
+                    </ul>
+                </div>
+            );
+        }
+
         if (chartData.length === 0) return (
             <div className="h-full flex items-center justify-center text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide p-12 text-center">
                 No results match the current filters
@@ -410,9 +553,11 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         );
 
         const { type } = normalizedConfig;
-        const measures = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
-            ? normalizedConfig.measures
-            : ['__count__'];
+        const measures = isGroupByMode
+            ? ['Count']
+            : (Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
+                ? normalizedConfig.measures
+                : ['__count__']);
 
         // Table type — keep HTML renderer
         if (type === ChartType.TABLE) {
@@ -522,6 +667,32 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                             <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-semibold" title={`Aggregation: ${aggregationText}`}>
                                 {`Aggregation: ${aggregationText}`}
                             </span>
+                        </div>
+                        <div className="mt-2">
+                            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Required field mapping</p>
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                                {requiredRoleInfo.map((item) => {
+                                    const displayValue = item.selected.length === 0
+                                        ? (item.required ? 'Missing' : 'Optional')
+                                        : (item.multi ? item.selected.join(', ') : item.selected[0]);
+
+                                    const cls = item.isMissing
+                                        ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                                        : item.selected.length > 0
+                                            ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                                            : 'bg-gray-50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600';
+
+                                    return (
+                                        <span
+                                            key={`${item.label}-${item.anyOf.join('-')}`}
+                                            className={`text-[9px] px-2 py-0.5 rounded-md border font-semibold max-w-full break-all ${cls}`}
+                                            title={`${item.label}: ${displayValue}`}
+                                        >
+                                            {item.label}: {displayValue}
+                                        </span>
+                                    );
+                                })}
+                            </div>
                         </div>
                         {normalizedConfig.type === ChartType.ORG_CHART && (
                             <div className="mt-2 flex items-center gap-2">
