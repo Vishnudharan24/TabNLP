@@ -1,0 +1,291 @@
+You are a senior BI platform architect (Power BI / Tableau level).
+
+I already have:
+
+* Query engine (parse → normalize → validate → resolve → context → aggregate)
+* Measure engine (AST parser + evaluator)
+* Aggregation reuse and dependency tracking
+* Stable response format (columns + rows + meta)
+
+Now I want to build a **Semantic Layer (Measure Catalog System)** on top of this.
+
+---
+
+# 🎯 OBJECTIVE
+
+Create a **Power BI–like semantic layer** that allows:
+
+* Defining reusable measures (KPIs)
+* Referencing measures by name instead of raw expressions
+* Centralizing business logic
+* Supporting nested measures
+
+---
+
+# 🚨 STRICT RULES
+
+1. DO NOT break existing query engine
+2. DO NOT modify response structure (columns + rows)
+3. Semantic layer must plug into existing pipeline
+4. Must support both:
+
+   * direct expressions
+   * saved measures
+5. Must be scalable (multi-dataset support)
+
+---
+
+# 🧱 STEP 1 — DESIGN MEASURE CATALOG
+
+Create:
+
+/backend/services/semantic_layer/measure_registry.py
+
+---
+
+## STRUCTURE
+
+Measure registry must support:
+
+{
+"datasetId": "sales_data",
+"measures": {
+"Total Sales": {
+"expression": "SUM(sales)"
+},
+"Total Profit": {
+"expression": "SUM(profit)"
+},
+"Profit Margin": {
+"expression": "Total Profit / Total Sales"
+}
+}
+}
+
+---
+
+## REQUIREMENTS
+
+* Measures can reference other measures
+* Avoid circular dependencies
+* Allow dynamic loading per dataset
+
+---
+
+# 🧠 STEP 2 — BUILD MEASURE RESOLVER
+
+Create:
+
+/backend/services/semantic_layer/measure_resolver.py
+
+---
+
+## PURPOSE
+
+Convert:
+
+"Profit Margin"
+
+→
+
+"SUM(profit) / SUM(sales)"
+
+---
+
+## LOGIC
+
+1. Detect if measure name exists in registry
+2. Recursively resolve dependencies
+3. Replace nested measures with expressions
+4. Output final expanded expression
+
+---
+
+## EXAMPLE
+
+Input:
+"Profit Margin"
+
+Output:
+"SUM(profit) / SUM(sales)"
+
+---
+
+# 🔥 STEP 3 — ADD DEPENDENCY GRAPH
+
+Handle nested measures safely.
+
+---
+
+## REQUIREMENTS
+
+* Build DAG (Directed Acyclic Graph)
+* Detect cycles:
+
+Example (INVALID):
+
+A = B + 1
+B = A + 1
+
+→ throw error
+
+---
+
+# ⚙️ STEP 4 — INTEGRATE INTO QUERY NORMALIZATION
+
+Modify:
+
+/backend/services/query_pipeline/normalizer.py
+
+---
+
+## NEW BEHAVIOR
+
+If measure:
+
+{
+"name": "Profit Margin"
+}
+
+→ resolve using semantic layer
+
+→ convert into:
+
+{
+"name": "Profit Margin",
+"expression": "SUM(profit) / SUM(sales)",
+"type": "expression"
+}
+
+---
+
+## IMPORTANT
+
+* Happens BEFORE aggregation
+* Works seamlessly with existing measure engine
+
+---
+
+# 🔥 STEP 5 — SUPPORT MIXED MEASURES
+
+Allow:
+
+{
+"measures": [
+{ "name": "Total Sales" },
+{ "name": "Profit Margin" },
+{ "expression": "SUM(cost)" }
+]
+}
+
+---
+
+## REQUIREMENTS
+
+* Resolve named measures
+* Keep direct expressions intact
+
+---
+
+# 🧠 STEP 6 — UPDATE META RESPONSE
+
+Add:
+
+{
+"meta": {
+"measureFields": [...],
+"computedMeasures": [...],
+"semanticMeasuresUsed": ["Profit Margin", "Total Sales"]
+}
+}
+
+---
+
+# 🔥 STEP 7 — ADD CRUD API FOR MEASURES
+
+Create endpoints:
+
+/semantic/measures
+
+---
+
+## APIs
+
+1. Create measure
+   POST /semantic/measures
+
+2. Get measures
+   GET /semantic/measures?datasetId=sales_data
+
+3. Update measure
+   PUT /semantic/measures/{name}
+
+4. Delete measure
+   DELETE /semantic/measures/{name}
+
+---
+
+## STORAGE
+
+* In-memory (for now)
+* Later → database
+
+---
+
+# 🧪 STEP 8 — TEST CASES
+
+Test:
+
+1. Simple:
+   Total Sales → SUM(sales)
+
+2. Nested:
+   Profit Margin → Total Profit / Total Sales
+
+3. Multi-level:
+   KPI → (Profit Margin * 100)
+
+4. Invalid:
+   circular dependency
+
+---
+
+# ⚡ STEP 9 — PERFORMANCE
+
+* Cache resolved expressions
+* Avoid repeated resolution
+* Reuse aggregation registry
+
+---
+
+# 🚀 STEP 10 — FUTURE EXTENSION READY
+
+Design so it can support:
+
+* CALCULATE-like functions
+* Time intelligence (YTD, MTD)
+* Row-level security
+* Multi-table semantic modeling
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. measure_registry.py
+2. measure_resolver.py
+3. dependency graph logic
+4. normalizer integration
+5. semantic API endpoints
+6. example request → response flow
+
+---
+
+# 🎯 FINAL GOAL
+
+Transform system from:
+
+"User writes formulas every time"
+
+→
+
+"User selects business metrics (like Power BI)"

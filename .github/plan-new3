@@ -1,0 +1,273 @@
+You are a senior BI engine architect (Power BI / Tableau level).
+
+I have already built a query-driven BI system with:
+
+* React frontend (query builder + ECharts rendering)
+
+* FastAPI backend
+
+* Structured query pipeline:
+
+  parse_query →
+  normalize_query →
+  validate_query →
+  resolve_relationships →
+  build_filter_context →
+  execute_aggregation →
+  format_response
+
+* Query contract supports:
+
+  * dimensions
+  * measures (with expressions like SUM(sales))
+  * filters
+  * relationships (basic)
+
+* Aggregation engine is working
+
+* Frontend is clean (no data processing)
+
+---
+
+# 🎯 OBJECTIVE
+
+Build a **Measure Engine** that evaluates calculated measures AFTER aggregation, similar to Power BI.
+
+This engine must support:
+
+* Expression-based measures
+* Context-aware evaluation
+* Multiple measures in a single query
+* Clean integration into existing pipeline
+
+---
+
+# 🚨 STRICT RULES
+
+1. DO NOT break existing query pipeline
+2. DO NOT move aggregation logic
+3. Measure engine must run AFTER aggregation
+4. Keep system modular (no monolithic code)
+5. Must support future DAX-like expansion
+
+---
+
+# 🧱 STEP 1 — DEFINE MEASURE STRUCTURE
+
+Measures must support:
+
+{
+"name": "Profit Margin",
+"expression": "SUM(profit) / SUM(revenue)",
+"type": "expression"
+}
+
+Also support simple:
+
+{
+"name": "Total Sales",
+"field": "sales",
+"aggregation": "SUM",
+"type": "simple"
+}
+
+---
+
+# 🧠 STEP 2 — BUILD EXPRESSION PARSER
+
+Create:
+
+/backend/services/measure_engine/expression_parser.py
+
+---
+
+## REQUIREMENTS
+
+Parse expressions like:
+
+* SUM(sales)
+* SUM(profit) / SUM(revenue)
+* (SUM(profit) - SUM(cost)) / SUM(revenue)
+
+---
+
+## OUTPUT STRUCTURE (AST)
+
+Example:
+
+SUM(profit) / SUM(revenue)
+
+→
+
+{
+"type": "binary",
+"operator": "/",
+"left": { "type": "agg", "func": "SUM", "field": "profit" },
+"right": { "type": "agg", "func": "SUM", "field": "revenue" }
+}
+
+---
+
+# ⚙️ STEP 3 — BUILD MEASURE EVALUATOR
+
+Create:
+
+/backend/services/measure_engine/evaluator.py
+
+---
+
+## INPUT
+
+* aggregated result (after groupBy)
+* parsed AST
+* context
+
+---
+
+## LOGIC
+
+For each row:
+
+1. Replace:
+   SUM(profit) → aggregated value from result
+2. Evaluate expression tree
+3. Store computed value
+
+---
+
+## OUTPUT
+
+Append computed measure column:
+
+{
+"columns": ["state", "Profit Margin"],
+"rows": [
+["TN", 0.32],
+["KL", 0.28]
+]
+}
+
+---
+
+# 🔥 STEP 4 — INTEGRATE INTO PIPELINE
+
+Modify pipeline:
+
+parse_query →
+normalize_query →
+validate_query →
+resolve_relationships →
+build_filter_context →
+execute_aggregation →
+👉 evaluate_measures() ← ADD HERE
+format_response
+
+---
+
+# 🧠 STEP 5 — HANDLE MULTIPLE MEASURES
+
+Support:
+
+{
+"measures": [
+{ "name": "Sales", "expression": "SUM(sales)" },
+{ "name": "Profit Margin", "expression": "SUM(profit) / SUM(sales)" }
+]
+}
+
+---
+
+## REQUIREMENTS
+
+* Evaluate in correct order
+* Avoid recomputation of same aggregation
+* Cache intermediate results
+
+---
+
+# ⚡ STEP 6 — OPTIMIZE AGGREGATION REUSE
+
+If query has:
+
+SUM(sales)
+SUM(profit)
+
+👉 compute once in aggregation phase
+👉 reuse in measure engine
+
+---
+
+# 🧠 STEP 7 — HANDLE EDGE CASES
+
+* Division by zero
+* Missing values
+* Null handling
+* Invalid expressions
+
+Return safe values (null or 0)
+
+---
+
+# 🔥 STEP 8 — UPDATE RESPONSE FORMAT
+
+Ensure:
+
+{
+"columns": [..., "Profit Margin"],
+"rows": [...],
+"meta": {
+"measureFields": [...],
+"computedMeasures": ["Profit Margin"]
+}
+}
+
+---
+
+# 🧪 STEP 9 — TEST CASES
+
+Test:
+
+1. Simple aggregation:
+   SUM(sales)
+
+2. Ratio:
+   SUM(profit) / SUM(sales)
+
+3. Multi-measure:
+   SUM(sales), SUM(profit)
+
+4. Complex:
+   (SUM(profit) - SUM(cost)) / SUM(revenue)
+
+---
+
+# 🧠 STEP 10 — DESIGN FOR FUTURE
+
+Ensure system can later support:
+
+* DAX-like functions
+* time intelligence (YTD, MTD)
+* filter context modifications
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. expression_parser.py (AST builder)
+2. evaluator.py (measure computation)
+3. pipeline integration changes
+4. example input → output flow
+5. performance optimizations
+6. known limitations
+
+---
+
+# 🚀 FINAL GOAL
+
+Upgrade system from:
+
+"Aggregation engine"
+
+→
+
+"Full BI computation engine with calculated measures (Power BI–like)"
