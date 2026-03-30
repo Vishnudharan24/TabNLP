@@ -4,13 +4,18 @@ import {
     BarChart, LineChart, PieChart, Table as TableIcon, Search, Database,
     Calendar, Layers, Box, Maximize2, Settings2, ArrowRight,
     CheckCircle2, Target, Grid3X3, Activity, PieChart as PieIcon, LayoutGrid, Type,
-    CreditCard, Filter, X, Plus, ChevronDown, ChevronUp, Star, TrendingUp,
+    CreditCard, Filter, X, Plus, ChevronDown, ChevronUp, Star, TrendingUp, Wand2,
     ScatterChart, Gauge, Radar, Columns3, AreaChart
 } from 'lucide-react';
 import { ChartType } from '../types';
-import { recommendCharts, assignRoles } from '../services/chartRecommender';
+import {
+    recommendCharts,
+    assignRoles,
+    getChartRequirementText,
+    isFieldCompatibleWithRole,
+    getAllowedAggregationsForField,
+} from '../services/chartRecommender';
 import { autoAssignFields, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
-import { auditChartConfiguration } from '../services/chartValidationEngine';
 
 const CHART_ICON_MAP = {
     BAR: BarChart,
@@ -25,6 +30,7 @@ const CHART_ICON_MAP = {
     HEATMAP: Grid3X3,
     TREEMAP: LayoutGrid,
     ORG_CHART: Layers,
+    ORG_TREE_STRUCTURED: Layers,
     COMBO: TrendingUp,
     RADAR: Radar,
     RADIAL: Radar,
@@ -54,6 +60,7 @@ const CHART_DISPLAY_NAMES = {
     BUBBLE: 'Bubble',
     TREEMAP: 'Treemap',
     ORG_CHART: 'Org Chart',
+    ORG_TREE_STRUCTURED: 'Org Structured',
     HEATMAP: 'Heatmap',
     COMBO_BAR_LINE: 'Combo',
     KPI_SINGLE: 'KPI',
@@ -77,6 +84,7 @@ const ALL_CHART_TYPES = [
     ChartType.HEATMAP,
     ChartType.TREEMAP,
     ChartType.ORG_CHART,
+    ChartType.ORG_TREE_STRUCTURED,
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
     ChartType.GAUGE,
@@ -86,14 +94,35 @@ const ALL_CHART_TYPES = [
     ChartType.TABLE,
 ];
 
-const AGG_OPTIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'GROUP_BY'];
+const AGG_OPTIONS = ['SUM', 'AVG', 'COUNT'];
+
+const AGGREGATION_LABELS = {
+    SUM: 'Total',
+    COUNT: 'Count',
+    AVG: 'Average',
+    GROUP_BY: 'Count',
+};
+
+const ROLE_LABELS = {
+    [FieldRoles.X]: 'Dimension',
+    [FieldRoles.TIME]: 'Dimension',
+    [FieldRoles.Y]: 'Measure',
+    [FieldRoles.VALUE]: 'Measure',
+    [FieldRoles.LEGEND]: 'Breakdown',
+    [FieldRoles.COLOR]: 'Breakdown',
+    [FieldRoles.SIZE]: 'Size',
+    [FieldRoles.HIERARCHY]: 'Hierarchy',
+    [FieldRoles.NODE]: 'Node',
+    [FieldRoles.PARENT]: 'Parent',
+    [FieldRoles.LABEL]: 'Label',
+};
 
 const ROLE_SECTION_DEFS = [
     { key: 'hierarchy', title: 'Hierarchy', icon: Layers, roles: [FieldRoles.HIERARCHY], emoji: '🧩', multi: true },
-    { key: 'values', title: 'Values (Y Axis)', icon: BarChart, roles: [FieldRoles.VALUE, FieldRoles.Y], emoji: '📊', multi: true },
-    { key: 'axis', title: 'Axis (X Axis)', icon: Columns3, roles: [FieldRoles.X, FieldRoles.TIME], emoji: '🧭', multi: false },
-    { key: 'legend', title: 'Legend / Color', icon: PieIcon, roles: [FieldRoles.LEGEND, FieldRoles.COLOR], emoji: '🎨', multi: false },
-    { key: 'size', title: 'Size', icon: Maximize2, roles: [FieldRoles.SIZE], emoji: '📐', multi: false },
+    { key: 'axis', title: 'Dimension (X-axis)', icon: Columns3, roles: [FieldRoles.X, FieldRoles.TIME], emoji: '🟦', multi: false },
+    { key: 'values', title: 'Measure (Y-axis)', icon: BarChart, roles: [FieldRoles.VALUE, FieldRoles.Y], emoji: '🟩', multi: true },
+    { key: 'legend', title: 'Breakdown (Optional)', icon: PieIcon, roles: [FieldRoles.LEGEND, FieldRoles.COLOR], emoji: '🎨', multi: false },
+    { key: 'size', title: 'Size (Optional)', icon: Maximize2, roles: [FieldRoles.SIZE], emoji: '🫧', multi: false },
 ];
 
 const ORG_ROLE_SECTION_DEFS = [
@@ -104,10 +133,19 @@ const ORG_ROLE_SECTION_DEFS = [
 ];
 
 const getFieldTypeMeta = (type) => {
+    if (type === 'id') {
+        return {
+            icon: '#',
+            badge: 'ID',
+            label: 'ID',
+            chipClass: 'bg-fuchsia-100 dark:bg-fuchsia-900/50 text-fuchsia-700 dark:text-fuchsia-200',
+        };
+    }
     if (type === 'number') {
         return {
             icon: 'Σ',
             badge: 'NUM',
+            label: 'Number',
             chipClass: 'bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-200',
         };
     }
@@ -115,17 +153,43 @@ const getFieldTypeMeta = (type) => {
         return {
             icon: '⏱',
             badge: 'DATE',
+            label: 'Time',
             chipClass: 'bg-amber-100 dark:bg-amber-800 text-amber-700 dark:text-amber-200',
         };
     }
     return {
         icon: 'Aa',
         badge: 'CAT',
+        label: 'Category',
         chipClass: 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200',
     };
 };
 
 const getAggregationOptionsForFieldType = () => AGG_OPTIONS;
+
+const getRoleHelpText = (key) => {
+    if (key === 'axis') return 'Select a category field';
+    if (key === 'values') return 'Select a numeric field';
+    if (key === 'legend') return 'Optional grouping field';
+    if (key === 'size') return 'Only used for bubble charts';
+    if (key === 'hierarchy') return 'Add one or more levels';
+    return 'Select a field';
+};
+
+const toBusinessAggregationLabel = (agg) => AGGREGATION_LABELS[String(agg || '').toUpperCase()] || String(agg || '').replace('_', ' ');
+
+const toInternalAggregation = (uiAgg, fieldType) => {
+    const upper = String(uiAgg || 'COUNT').toUpperCase();
+    if (fieldType === 'number') return upper;
+    return upper === 'COUNT' ? 'GROUP_BY' : 'GROUP_BY';
+};
+
+const toUiAggregation = (internalAgg = '') => {
+    const agg = String(internalAgg || '').toUpperCase();
+    if (agg === 'GROUP_BY') return 'COUNT';
+    if (agg === 'SUM' || agg === 'AVG' || agg === 'COUNT') return agg;
+    return 'COUNT';
+};
 
 const FieldChip = ({ field, role, aggregation, fieldType, onRemove, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) => {
     const meta = getFieldTypeMeta(fieldType);
@@ -135,8 +199,8 @@ const FieldChip = ({ field, role, aggregation, fieldType, onRemove, onMoveUp, on
         <div className="group flex items-center gap-1.5 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80">
             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${meta.chipClass}`}>{meta.icon}</span>
             <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[130px]" title={field}>{field}</span>
-            <span className="text-[9px] font-bold uppercase text-gray-400 dark:text-gray-500">{role}</span>
-            {showAgg && <span className="text-[9px] font-semibold text-violet-500">({aggregation})</span>}
+            <span className="text-[9px] font-bold uppercase text-gray-400 dark:text-gray-500">{ROLE_LABELS[role] || role}</span>
+            {showAgg && <span className="text-[9px] font-semibold text-violet-500">({toBusinessAggregationLabel(aggregation)})</span>}
             {(canMoveUp || canMoveDown) && (
                 <>
                     <button onClick={onMoveUp} disabled={!canMoveUp} className="text-[10px] px-1 text-gray-400 disabled:opacity-30 hover:text-gray-600 dark:hover:text-gray-300">↑</button>
@@ -223,6 +287,20 @@ const DataPanel = ({
     const [newChartName, setNewChartName] = useState('');
 
     const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
+
+    const inferUiFieldType = (col) => {
+        const name = String(col?.name || '').toLowerCase();
+        if (/(^id$|_id$|employee.?id|product.?id|order.?id|customer.?id|sku|code)/i.test(name)) return 'id';
+        if (col?.type === 'number') return 'number';
+        if (col?.type === 'date') return 'date';
+        return 'string';
+    };
+
+    const getUiAggOptionsForFieldType = (fieldType = 'string') => {
+        const allowed = getAllowedAggregationsForField({ type: fieldType });
+        const normalized = Array.from(new Set(allowed.map(a => toUiAggregation(a))));
+        return normalized.filter(a => AGG_OPTIONS.includes(a));
+    };
     const filteredColumns = selectedDataset?.columns.filter(col =>
         col.name.toLowerCase().includes(fieldSearch.toLowerCase())
     ) || [];
@@ -284,6 +362,30 @@ const DataPanel = ({
         return [...starred, ...others];
     }, [recommendations]);
 
+    const smartSuggestion = useMemo(() => {
+        if (!selectedDataset || recommendations.length === 0) return null;
+        const top = recommendations[0];
+        const auto = assignRoles(top.type, selectedDataset.columns, selectedDataset.data, {
+            dimension: activeChartConfig?.dimension,
+            measures: activeChartConfig?.measures,
+        });
+        const dim = (auto?.xAxisField || auto?.timeField || auto?.dimension || '').trim();
+        const measure = Array.isArray(auto?.measures) && auto.measures.length > 0 ? auto.measures[0] : '__count__';
+        const prettyMeasure = measure === '__count__' ? 'Count' : `${toBusinessAggregationLabel(auto?.aggregation || 'COUNT')}(${measure})`;
+        return {
+            type: top.type,
+            assignments: auto?.assignments || [],
+            mode: auto?.mode,
+            text: dim ? `${dim} + ${prettyMeasure}` : prettyMeasure,
+        };
+    }, [selectedDataset, recommendations, activeChartConfig?.dimension, activeChartConfig?.measures]);
+
+    const applySmartSuggestion = () => {
+        if (!smartSuggestion || !activeChartConfig) return;
+        syncConfigFromAssignments(smartSuggestion.assignments, smartSuggestion.type);
+        onUpdateConfig({ mode: smartSuggestion.mode });
+    };
+
     const starredTypes = useMemo(
         () => new Set(recommendations.filter(r => r.score >= 85).map(r => r.type)),
         [recommendations]
@@ -321,7 +423,7 @@ const DataPanel = ({
         if (!activeChartConfig) return;
 
         const currentAssignments = [...effectiveAssignments];
-        const isOrgChart = activeChartConfig.type === ChartType.ORG_CHART;
+        const isOrgChart = activeChartConfig.type === ChartType.ORG_CHART || activeChartConfig.type === ChartType.ORG_TREE_STRUCTURED;
 
         const hasRole = (role) => currentAssignments.some(a => a.role === role);
         const hasField = (field) => currentAssignments.some(a => a.field === field);
@@ -329,11 +431,11 @@ const DataPanel = ({
 
         const type = activeChartConfig.type;
 
-        if (type === ChartType.ORG_CHART) {
+        if (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) {
             let orgRole = FieldRoles.NODE;
-            if (!hasRole(FieldRoles.NODE)) orgRole = FieldRoles.NODE;
-            else if (!hasRole(FieldRoles.PARENT)) orgRole = FieldRoles.PARENT;
-            else if (!hasRole(FieldRoles.LABEL)) orgRole = FieldRoles.LABEL;
+            if (!hasRole(FieldRoles.NODE) && isFieldCompatibleWithRole(type, FieldRoles.NODE, col)) orgRole = FieldRoles.NODE;
+            else if (!hasRole(FieldRoles.PARENT) && isFieldCompatibleWithRole(type, FieldRoles.PARENT, col)) orgRole = FieldRoles.PARENT;
+            else if (!hasRole(FieldRoles.LABEL) && isFieldCompatibleWithRole(type, FieldRoles.LABEL, col)) orgRole = FieldRoles.LABEL;
             else if (!hasRole(FieldRoles.COLOR)) orgRole = FieldRoles.COLOR;
             else return;
 
@@ -359,10 +461,19 @@ const DataPanel = ({
             nextRole = hasRole(FieldRoles.LEGEND) ? FieldRoles.HIERARCHY : FieldRoles.LEGEND;
         }
 
+        if (!isFieldCompatibleWithRole(type, nextRole, col)) {
+            return;
+        }
+
+        const uiFieldType = inferUiFieldType(col);
+        const allowedAgg = getAllowedAggregationsForField({ type: uiFieldType });
+
         const next = [...currentAssignments, {
             field: col.name,
             role: nextRole,
-            aggregation: ['y', 'value', 'x', 'size'].includes(nextRole) ? (activeChartConfig.aggregation || 'SUM') : undefined,
+            aggregation: ['y', 'value', 'x', 'size'].includes(nextRole)
+                ? (allowedAgg.includes(activeChartConfig.aggregation) ? activeChartConfig.aggregation : allowedAgg[0])
+                : undefined,
         }];
         syncConfigFromAssignments(next);
     };
@@ -383,46 +494,15 @@ const DataPanel = ({
     const fieldsByType = useMemo(() => {
         const cols = filteredColumns || [];
         return {
-            categorical: cols.filter(c => c.type !== 'number' && c.type !== 'date'),
-            date: cols.filter(c => c.type === 'date'),
-            numeric: cols.filter(c => c.type === 'number'),
+            categorical: cols.filter(c => inferUiFieldType(c) === 'string'),
+            date: cols.filter(c => inferUiFieldType(c) === 'date'),
+            numeric: cols.filter(c => inferUiFieldType(c) === 'number'),
+            id: cols.filter(c => inferUiFieldType(c) === 'id'),
         };
     }, [filteredColumns]);
 
-    const auditResult = useMemo(() => {
-        if (!selectedDataset || !activeChartConfig) {
-            return { errors: [], warnings: [], suggestions: [] };
-        }
-
-        return auditChartConfiguration({
-            config: {
-                ...activeChartConfig,
-                assignments: effectiveAssignments,
-            },
-            columns: selectedDataset.columns,
-            data: selectedDataset.data,
-        });
-    }, [selectedDataset, activeChartConfig, effectiveAssignments]);
-
-    const applyAuditFix = (fix) => {
-        if (!fix || !activeChartConfig) return;
-
-        if (fix.chartType && fix.chartType !== activeChartConfig.type) {
-            handleSelectChartType(fix.chartType);
-        }
-
-        if (fix.aggregation) {
-            const nextAssignments = effectiveAssignments.map((a) => (
-                [FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)
-                    ? { ...a, aggregation: fix.aggregation }
-                    : a
-            ));
-            syncConfigFromAssignments(nextAssignments);
-            onUpdateConfig({ aggregation: fix.aggregation });
-        }
-    };
     const activeRoleSections = useMemo(() => {
-        if (activeChartConfig?.type === ChartType.ORG_CHART) return ORG_ROLE_SECTION_DEFS;
+        if (activeChartConfig?.type === ChartType.ORG_CHART || activeChartConfig?.type === ChartType.ORG_TREE_STRUCTURED) return ORG_ROLE_SECTION_DEFS;
         return ROLE_SECTION_DEFS;
     }, [activeChartConfig?.type]);
 
@@ -440,18 +520,13 @@ const DataPanel = ({
 
     const candidateFieldsForRole = useMemo(() => {
         if (!pickerRole || !selectedDataset) return [];
-        const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART;
+        const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART || activeChartConfig?.type === ChartType.ORG_TREE_STRUCTURED;
         const used = isOrgChart
             ? new Set(effectiveAssignments.filter(a => a.role === pickerRole).map(a => a.field))
             : new Set(effectiveAssignments.map(a => a.field));
         const includeCount = ['y', 'value', 'x', 'size'].includes(pickerRole);
 
-        const allowed = selectedDataset.columns.filter((col) => {
-            if (isOrgChart && [FieldRoles.NODE, FieldRoles.PARENT, FieldRoles.LABEL, FieldRoles.COLOR].includes(pickerRole)) {
-                return true;
-            }
-            return true;
-        });
+        const allowed = selectedDataset.columns.filter((col) => isFieldCompatibleWithRole(activeChartConfig?.type, pickerRole, col));
 
         return allowed
             .filter(col => !used.has(col.name))
@@ -463,7 +538,7 @@ const DataPanel = ({
         if (!role || !fieldName) return;
         if (effectiveAssignments.some(a => a.field === fieldName && a.role === role)) return;
 
-        const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART;
+        const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART || activeChartConfig?.type === ChartType.ORG_TREE_STRUCTURED;
         const isOrgSingleRole = isOrgChart && [FieldRoles.NODE, FieldRoles.PARENT, FieldRoles.LABEL, FieldRoles.COLOR].includes(role);
 
         const pickedCol = selectedDataset?.columns?.find((c) => c.name === fieldName);
@@ -475,10 +550,13 @@ const DataPanel = ({
             ? effectiveAssignments.filter(a => a.role !== resolvedRole)
             : [...effectiveAssignments];
 
+        const pickedAllowedAgg = getAllowedAggregationsForField(pickedCol || {});
         const next = [...base, {
             field: fieldName,
             role: resolvedRole,
-            aggregation: ['y', 'value', 'x', 'size'].includes(resolvedRole) ? (activeChartConfig?.aggregation || 'SUM') : undefined,
+            aggregation: ['y', 'value', 'x', 'size'].includes(resolvedRole)
+                ? (pickedAllowedAgg.includes(activeChartConfig?.aggregation) ? activeChartConfig?.aggregation : pickedAllowedAgg[0])
+                : undefined,
         }];
         syncConfigFromAssignments(next);
         closeFieldPicker();
@@ -571,6 +649,32 @@ const DataPanel = ({
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 designer-scroll-container">
                     {activePane === 'data' ? (
                         <>
+                            {/* Chart Setup */}
+                            <div className="space-y-3 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/30">
+                                <div className="flex items-center gap-2">
+                                    <BarChart size={14} className="text-gray-500 dark:text-gray-300" />
+                                    <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Chart Setup</h4>
+                                </div>
+                                {activeChartConfig && (
+                                    <p className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                                        {getChartRequirementText(activeChartConfig?.type)}
+                                    </p>
+                                )}
+                                {smartSuggestion && (
+                                    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-900/20">
+                                        <div className="text-[11px] text-blue-700 dark:text-blue-200">
+                                            Suggested: {smartSuggestion.text}
+                                        </div>
+                                        <button
+                                            onClick={applySmartSuggestion}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                                        >
+                                            <Wand2 size={11} /> Apply
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
                             {/* Recommended Charts */}
                             {recommendations.length > 0 && (
                                 <div className="space-y-3">
@@ -721,7 +825,7 @@ const DataPanel = ({
 
                             {/* Modern Field Assignment Panel */}
                             <div className="space-y-4">
-                                <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Fields</h4>
+                                <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Field Mapping</h4>
 
                                 <div className="space-y-3">
                                     <button
@@ -755,9 +859,10 @@ const DataPanel = ({
 
                                             <div className="space-y-2">
                                                 {[
-                                                    { title: 'Categorical', key: 'categorical' },
-                                                    { title: 'Date', key: 'date' },
-                                                    { title: 'Numeric', key: 'numeric' },
+                                                    { title: 'Category', key: 'categorical' },
+                                                    { title: 'Time', key: 'date' },
+                                                    { title: 'Number', key: 'numeric' },
+                                                    { title: 'ID', key: 'id' },
                                                 ].map((group) => (
                                                     <div key={group.key} className="space-y-1">
                                                         <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">{group.title}</p>
@@ -793,8 +898,11 @@ const DataPanel = ({
 
                                 {activeChartConfig && (
                                     <div className="space-y-3">
-                                        <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Field Roles</h4>
+                                        <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Chart Setup</h4>
 
+                                        <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                                            {getChartRequirementText(activeChartConfig?.type)}
+                                        </p>
                                         {activeRoleSections.map((section) => {
                                             const chips = effectiveAssignments
                                                 .map((a, idx) => ({ ...a, idx }))
@@ -809,10 +917,10 @@ const DataPanel = ({
                                                     onAdd={() => openFieldPicker(section.roles[0])}
                                                 >
                                                     {chips.length === 0 ? (
-                                                        <div className="text-[10px] text-gray-400 dark:text-gray-500 italic px-1 py-1">No fields assigned</div>
+                                                        <div className="text-[10px] text-gray-400 dark:text-gray-500 italic px-1 py-1">{getRoleHelpText(section.key)}</div>
                                                     ) : chips.map((chip, idx) => {
                                                         const col = selectedDataset?.columns?.find(c => c.name === chip.field);
-                                                        const chipType = chip.field === '__count__' ? 'number' : (col?.type || 'string');
+                                                        const chipType = chip.field === '__count__' ? 'number' : inferUiFieldType(col || {});
                                                         return (
                                                             <div key={`${chip.field}-${chip.role}-${chip.idx}`} className="flex items-center gap-1.5">
                                                                 <div className="flex-1">
@@ -828,13 +936,13 @@ const DataPanel = ({
                                                                         onRemove={() => removeAssignment(chip.idx)}
                                                                     />
                                                                 </div>
-                                                                {['y', 'value', 'x', 'size'].includes(chip.role) && activeChartConfig?.type !== ChartType.ORG_CHART && (
+                                                                {['y', 'value', 'x', 'size'].includes(chip.role) && activeChartConfig?.type !== ChartType.ORG_CHART && activeChartConfig?.type !== ChartType.ORG_TREE_STRUCTURED && (
                                                                     <select
-                                                                        value={chip.aggregation || 'SUM'}
-                                                                        onChange={(e) => updateAssignment(chip.idx, { aggregation: e.target.value })}
+                                                                        value={toUiAggregation(chip.aggregation || 'COUNT')}
+                                                                        onChange={(e) => updateAssignment(chip.idx, { aggregation: toInternalAggregation(e.target.value, chipType) })}
                                                                         className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-semibold text-gray-700 dark:text-gray-200"
                                                                     >
-                                                                        {getAggregationOptionsForFieldType(chipType).map(agg => <option key={agg} value={agg}>{agg.replace('_', ' ')}</option>)}
+                                                                        {getUiAggOptionsForFieldType(chipType).map(agg => <option key={agg} value={agg}>{toBusinessAggregationLabel(agg)}</option>)}
                                                                     </select>
                                                                 )}
                                                             </div>
@@ -844,58 +952,13 @@ const DataPanel = ({
                                             );
                                         })}
 
-                                        {(auditResult.errors.length > 0 || auditResult.warnings.length > 0 || auditResult.suggestions.length > 0) && (
-                                            <div className="space-y-1">
-                                                {auditResult.errors.map((item, idx) => (
-                                                    <div key={`error-${item.code || idx}-${idx}`} className="text-[10px] font-medium text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg px-2 py-1.5">
-                                                        ❌ {item.message || String(item)}
-                                                        {item.fix && (
-                                                            <button
-                                                                onClick={() => applyAuditFix(item.fix)}
-                                                                className="ml-2 px-2 py-0.5 rounded border border-rose-300 dark:border-rose-700 text-[9px] font-bold hover:bg-rose-100 dark:hover:bg-rose-900/40"
-                                                            >
-                                                                Apply Fix
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ))}
-
-                                                {auditResult.warnings.map((item, idx) => (
-                                                    <div key={`warn-${item.code || idx}-${idx}`} className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-2 py-1.5">
-                                                        ⚠️ {item.message || String(item)}
-                                                        {item.fix && (
-                                                            <button
-                                                                onClick={() => applyAuditFix(item.fix)}
-                                                                className="ml-2 px-2 py-0.5 rounded border border-amber-300 dark:border-amber-700 text-[9px] font-bold hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                                                            >
-                                                                Apply Fix
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ))}
-
-                                                {auditResult.suggestions.map((item, idx) => (
-                                                    <div key={`sugg-${item.code || idx}-${idx}`} className="text-[10px] font-medium text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 rounded-lg px-2 py-1.5">
-                                                        💡 {item.message || String(item)}
-                                                        {item.fix && (
-                                                            <button
-                                                                onClick={() => applyAuditFix(item.fix)}
-                                                                className="ml-2 px-2 py-0.5 rounded border border-sky-300 dark:border-sky-700 text-[9px] font-bold hover:bg-sky-100 dark:hover:bg-sky-900/40"
-                                                            >
-                                                                Apply Suggestion
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
                                     </div>
                                 )}
 
                                 {pickerRole && (
                                     <div className="p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 space-y-2">
                                         <div className="flex items-center justify-between">
-                                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">Add field to {pickerRole}</p>
+                                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400">Add field</p>
                                             <button onClick={closeFieldPicker} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X size={12} /></button>
                                         </div>
                                         <div className="relative">
@@ -962,17 +1025,18 @@ const DataPanel = ({
                                             <button
                                                 key={agg}
                                                 onClick={() => {
-                                                    const nextAssignments = effectiveAssignments.map((a) => (
-                                                        [FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)
-                                                            ? { ...a, aggregation: agg }
-                                                            : a
-                                                    ));
+                                                    const nextAssignments = effectiveAssignments.map((a) => {
+                                                        if (![FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)) return a;
+                                                        const field = selectedDataset?.columns?.find((c) => c.name === a.field);
+                                                        const fieldType = a.field === '__count__' ? 'number' : inferUiFieldType(field || {});
+                                                        return { ...a, aggregation: toInternalAggregation(agg, fieldType) };
+                                                    });
                                                     syncConfigFromAssignments(nextAssignments);
                                                     onUpdateConfig({ aggregation: agg });
                                                 }}
-                                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${activeChartConfig.aggregation === agg ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 border-gray-800 dark:border-gray-200' : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-400'}`}
+                                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${toUiAggregation(activeChartConfig.aggregation) === agg ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 border-gray-800 dark:border-gray-200' : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-400'}`}
                                             >
-                                                {agg.replace('_', ' ')}
+                                                {toBusinessAggregationLabel(agg)}
                                             </button>
                                             ));
                                         })()}

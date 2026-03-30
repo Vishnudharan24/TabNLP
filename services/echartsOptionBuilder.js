@@ -1572,7 +1572,8 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 }],
             };
 
-        case ChartType.ORG_CHART: {
+        case ChartType.ORG_CHART:
+        case ChartType.ORG_TREE_STRUCTURED: {
             const orgRoot = processedData?.[0]?.__orgTree || { name: 'Organization', children: [] };
             const orgSearchQuery = String(resolvedConfig?.orgSearchQuery || '').trim();
             const selectedPathIds = Array.isArray(resolvedConfig?.orgSelectedPathIds) ? resolvedConfig.orgSelectedPathIds : [];

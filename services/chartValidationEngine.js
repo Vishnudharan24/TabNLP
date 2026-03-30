@@ -1,5 +1,6 @@
 import { ChartType } from '../types';
 import { FieldRoles, convertOldConfig, configFromAssignments } from './chartConfigSystem';
+import { getChartRequirementText } from './chartRecommender';
 
 const SAMPLE_LIMIT = 5000;
 
@@ -184,7 +185,6 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     const errors = [];
     const warnings = [];
     const suggestions = [];
-
     const safeRows = Array.isArray(data) ? data.slice(0, SAMPLE_LIMIT) : [];
 
     const normalized = convertOldConfig(config || {});
@@ -192,316 +192,122 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     const assignments = Array.isArray(normalized.assignments) ? normalized.assignments : [];
 
     const fieldMetaMap = new Map(
-        (Array.isArray(columns) ? columns : []).map((c) => {
-            const meta = classifyFieldType(c, safeRows);
-            return [meta.name, meta];
-        })
+        (Array.isArray(columns) ? columns : []).map((c) => [
+            c?.name,
+            classifyFieldType(c, safeRows),
+        ])
     );
 
-    const getFieldMeta = (fieldName) => {
-        if (!fieldName) return null;
+    const getFieldMeta = (name) => fieldMetaMap.get(name) || inferFieldTypeFromData(name, safeRows);
+    const byRole = (role) => assignments.filter(a => a?.role === role && a?.field);
+    const valueRoles = [FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X];
 
-        const exact = fieldMetaMap.get(fieldName);
-        if (exact) return exact;
-
-        const lowerName = String(fieldName).toLowerCase();
-        const ciMatch = Array.from(fieldMetaMap.values()).find((m) => String(m.name || '').toLowerCase() === lowerName);
-        if (ciMatch) return ciMatch;
-
-        return inferFieldTypeFromData(fieldName, safeRows);
-    };
-
-    const byRole = (role) => assignments.filter((a) => a?.role === role && a?.field).map((a) => a.field);
-    const firstRole = (roles = []) => {
-        for (const role of roles) {
-            const first = byRole(role)[0];
-            if (first) return first;
-        }
-        return '';
-    };
-
-    const dimensionField = firstRole([FieldRoles.TIME, FieldRoles.X, FieldRoles.LEGEND, FieldRoles.HIERARCHY]);
-    const valueAssignments = assignments.filter((a) => [FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a?.role) && a?.field);
-    const hasNumeric = assignments.some((a) => {
-        if (![FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a?.role)) return false;
-        if (!a?.field) return false;
-        if (a.field === '__count__') return true;
-
-        const agg = toUpper(a.aggregation);
-        if (agg === 'COUNT' || agg === 'GROUP_BY') return true;
-
+    assignments.forEach((a) => {
+        if (!a?.field || a.field === '__count__') return;
         const meta = getFieldMeta(a.field);
-        return meta?.type === 'numeric';
-    });
-
-    // Global aggregation rules
-    valueAssignments.forEach((a) => {
-        if (a.field === '__count__') return;
-
-        const field = getFieldMeta(a.field);
         const agg = toUpper(a.aggregation || config?.aggregation || 'SUM');
-        const aggForMessage = agg || 'SUM';
-
-        if (!field) {
+        if (!meta?.name) {
             errors.push(makeMessage('UNKNOWN_FIELD', `Assigned field '${a.field}' does not exist in dataset columns.`));
             return;
         }
 
-        if (field.type === 'id' && !['COUNT', 'GROUP_BY'].includes(agg)) {
-            errors.push(makeMessage(
-                'ID_INVALID_AGG',
-                `Aggregation ${aggForMessage} is not valid for ID field '${a.field}'. Use COUNT.`,
-                { aggregation: 'COUNT' }
-            ));
-        }
-
-        if (field.type === 'categorical' && ['SUM', 'AVG', 'MIN', 'MAX'].includes(agg)) {
-            errors.push(makeMessage(
-                'CATEGORICAL_INVALID_AGG',
-                `Aggregation ${aggForMessage} is not valid for categorical field '${a.field}'.`,
-                { aggregation: 'COUNT' }
-            ));
-        }
-
-        if (field.type === 'numeric' && agg === 'COUNT') {
-            warnings.push(makeMessage('COUNT_ON_NUMERIC', `Using COUNT on numeric field '${a.field}'. Consider SUM or AVG if needed.`));
+        if (valueRoles.includes(a.role)) {
+            if (meta.type === 'id' && !['COUNT', 'GROUP_BY'].includes(agg)) {
+                errors.push(makeMessage('ID_INVALID_AGG', `ID field '${a.field}' supports COUNT only.`, { aggregation: 'COUNT' }));
+            }
+            if (meta.type === 'categorical' && ['SUM', 'AVG', 'MIN', 'MAX'].includes(agg)) {
+                errors.push(makeMessage('CATEGORICAL_INVALID_AGG', `Field '${a.field}' is categorical and cannot use ${agg}.`, { aggregation: 'COUNT' }));
+            }
         }
     });
 
-    // Chart-specific rules
-    const dimMeta = getFieldMeta(dimensionField);
+    const hasNumeric = assignments.some((a) => {
+        if (!valueRoles.includes(a?.role)) return false;
+        if (a.field === '__count__') return true;
+        const meta = getFieldMeta(a.field);
+        return meta?.type === 'numeric' || ['COUNT', 'GROUP_BY'].includes(toUpper(a.aggregation));
+    });
 
-    const requireDateDimension = () => {
-        if (!dimensionField) {
-            errors.push(makeMessage('MISSING_DATE_AXIS', 'Missing date field for axis.'));
-            return;
-        }
-        if (dimMeta?.type !== 'date') {
-            warnings.push(makeMessage(
-                'NON_DATE_AXIS_ON_TREND',
-                `Field '${dimensionField}' is not a date field. Chart will use categorical axis; LINE/AREA may be less suitable.`,
-                { chartType: ChartType.BAR }
-            ));
-        }
-    };
-
-    const requireCategoricalDimension = () => {
-        if (!dimensionField) {
-            errors.push(makeMessage('MISSING_CATEGORY_AXIS', 'Missing categorical dimension field.'));
-            return;
-        }
-        if (!dimMeta || !['categorical', 'id'].includes(dimMeta.type)) {
-            errors.push(makeMessage('INVALID_CATEGORY_AXIS', `Field '${dimensionField}' is not categorical (detected: ${dimMeta?.type || 'unknown'}).`));
-        }
-    };
-
-    const categoryCount = getDistinctCount(safeRows, dimensionField);
-
-    switch (chartType) {
-        case ChartType.BAR: {
-            requireCategoricalDimension();
-            if (!hasNumeric) errors.push(makeMessage('BAR_MISSING_NUMERIC', 'Bar chart requires at least one numeric/count value.'));
-            if (categoryCount > 20) warnings.push(makeMessage('BAR_HIGH_CARDINALITY', `Bar chart has ${categoryCount} categories; labels may overlap.`));
-            break;
-        }
-        case ChartType.LINE:
-        case ChartType.AREA:
-        case ChartType.SPARKLINE: {
-            requireDateDimension();
-            if (!hasNumeric) errors.push(makeMessage('LINE_MISSING_NUMERIC', 'Line/Area/Sparkline requires at least one numeric value.'));
-            break;
-        }
-        case ChartType.PIE:
-        case ChartType.DONUT:
-        case ChartType.ROSE: {
-            requireCategoricalDimension();
-            if (!hasNumeric) errors.push(makeMessage('PIE_MISSING_NUMERIC', 'Pie/Donut requires at least one numeric/count value.'));
-            if (categoryCount > 10) {
-                errors.push(makeMessage('PIE_TOO_MANY_CATEGORIES', `Pie/Donut has ${categoryCount} categories; keep to 10 or fewer.`));
-            } else if (categoryCount > 6) {
-                warnings.push(makeMessage('PIE_HIGH_CARDINALITY', `Pie/Donut has ${categoryCount} categories; readability may degrade.`));
-            }
-            break;
-        }
-        case ChartType.SUNBURST: {
-            const hierarchyFields = byRole(FieldRoles.HIERARCHY);
-            if (hierarchyFields.length < 2) errors.push(makeMessage('SUNBURST_MIN_LEVELS', 'Sunburst requires at least 2 hierarchy levels.'));
-            if (hierarchyFields.length > 5) errors.push(makeMessage('SUNBURST_MAX_LEVELS', 'Sunburst supports at most 5 hierarchy levels.'));
-            if (!hasNumeric) errors.push(makeMessage('SUNBURST_MISSING_NUMERIC', 'Sunburst requires a numeric/count value.'));
-
-            if (hierarchyFields.length > 0) {
-                const leafDistinct = new Set(
-                    safeRows.map((row) => hierarchyFields.map((f) => String(row?.[f] ?? 'Unknown')).join('||'))
-                ).size;
-                if (leafDistinct > 120) warnings.push(makeMessage('SUNBURST_TOO_MANY_LEAVES', `Sunburst has ${leafDistinct} leaf nodes; interaction may be crowded.`));
-            }
-            break;
-        }
-        case ChartType.RADAR: {
-            requireCategoricalDimension();
-            const numericSeriesCount = valueAssignments.filter((a) => {
-                if (!a.field || a.field === '__count__') return true;
-                const meta = getFieldMeta(a.field);
-                return meta?.type === 'numeric' || ['COUNT', 'GROUP_BY'].includes(toUpper(a.aggregation));
-            }).length;
-            if (numericSeriesCount < 3) errors.push(makeMessage('RADAR_MIN_NUMERIC', 'Radar requires at least 3 numeric/count value fields.'));
-            break;
-        }
-        case ChartType.SCATTER: {
-            const xField = firstRole([FieldRoles.X]);
-            const yField = firstRole([FieldRoles.Y]);
-            const xMeta = getFieldMeta(xField);
-            const yMeta = getFieldMeta(yField);
-            if (!xField || !yField) errors.push(makeMessage('SCATTER_FIELDS_REQUIRED', 'Scatter requires X and Y fields.'));
-            if (xField && xMeta?.type !== 'numeric') errors.push(makeMessage('SCATTER_X_NUMERIC', `Scatter X field '${xField}' must be numeric.`));
-            if (yField && yMeta?.type !== 'numeric') errors.push(makeMessage('SCATTER_Y_NUMERIC', `Scatter Y field '${yField}' must be numeric.`));
-            break;
-        }
-        case ChartType.BUBBLE: {
-            const xField = firstRole([FieldRoles.X]);
-            const yField = firstRole([FieldRoles.Y]);
-            const sizeField = firstRole([FieldRoles.SIZE]);
-            [
-                { field: xField, label: 'X' },
-                { field: yField, label: 'Y' },
-                { field: sizeField, label: 'Size' },
-            ].forEach(({ field, label }) => {
-                const meta = getFieldMeta(field);
-                if (!field) errors.push(makeMessage('BUBBLE_FIELD_MISSING', `Bubble requires ${label} numeric field.`));
-                else if (meta?.type !== 'numeric') errors.push(makeMessage('BUBBLE_FIELD_NUMERIC', `Bubble ${label} field '${field}' must be numeric.`));
-            });
-            break;
-        }
-        case ChartType.TREEMAP: {
-            const hierarchyFields = byRole(FieldRoles.HIERARCHY);
-            if (hierarchyFields.length < 1 || hierarchyFields.length > 2) {
-                errors.push(makeMessage('TREEMAP_HIERARCHY_RANGE', 'Treemap requires 1 to 2 hierarchy fields.'));
-            }
-            if (!hasNumeric) errors.push(makeMessage('TREEMAP_MISSING_NUMERIC', 'Treemap requires a numeric/count value field.'));
-
-            if (hierarchyFields.length > 0) {
-                const nodeCount = new Set(safeRows.map((row) => hierarchyFields.map((f) => String(row?.[f] ?? 'Unknown')).join('||'))).size;
-                if (nodeCount > 80) warnings.push(makeMessage('TREEMAP_MANY_SMALL_NODES', `Treemap has ${nodeCount} nodes; many may render too small.`));
-            }
-            break;
-        }
-        case ChartType.HEATMAP: {
-            const xField = firstRole([FieldRoles.X]);
-            const yField = firstRole([FieldRoles.Y]);
-            const valueField = firstRole([FieldRoles.VALUE]);
-            if (!xField || !yField) errors.push(makeMessage('HEATMAP_AXES_REQUIRED', 'Heatmap requires two categorical axes.'));
-            if (xField && !['categorical', 'id', 'date'].includes(getFieldMeta(xField)?.type)) errors.push(makeMessage('HEATMAP_X_TYPE', `Heatmap X field '${xField}' should be categorical/date.`));
-            if (yField && !['categorical', 'id', 'date'].includes(getFieldMeta(yField)?.type)) errors.push(makeMessage('HEATMAP_Y_TYPE', `Heatmap Y field '${yField}' should be categorical/date.`));
-            if (!valueField && !hasNumeric) errors.push(makeMessage('HEATMAP_VALUE_REQUIRED', 'Heatmap requires a numeric/count value field.'));
-            break;
-        }
-        case ChartType.ORG_CHART: {
-            const nodeField = firstRole([FieldRoles.NODE]);
-            const parentField = firstRole([FieldRoles.PARENT]);
-
-            if (!nodeField) errors.push(makeMessage('ORG_NODE_REQUIRED', 'Org chart requires a Node field.'));
-            if (!parentField) errors.push(makeMessage('ORG_PARENT_REQUIRED', 'Org chart requires a Parent field.'));
-
-            if (nodeField && parentField) {
-                if (detectOrgCycle(safeRows, nodeField, parentField)) {
-                    errors.push(makeMessage('ORG_CYCLE_DETECTED', 'Org chart contains cyclic parent-child relationships.'));
-                }
-                const rootCount = detectMultipleRoots(safeRows, nodeField, parentField);
-                if (rootCount > 1) warnings.push(makeMessage('ORG_MULTIPLE_ROOTS', `Org chart has ${rootCount} roots.`));
-            }
-            break;
-        }
-        case ChartType.COMBO_BAR_LINE: {
-            if (!dimensionField) errors.push(makeMessage('COMBO_DIM_REQUIRED', 'Combo chart requires a category/date axis field.'));
-            else if (!['categorical', 'id', 'date'].includes(dimMeta?.type)) errors.push(makeMessage('COMBO_DIM_TYPE', `Combo axis field '${dimensionField}' should be categorical/date.`));
-
-            const numericCount = valueAssignments.filter((a) => {
-                if (!a.field || a.field === '__count__') return true;
-                return getFieldMeta(a.field)?.type === 'numeric' || ['COUNT', 'GROUP_BY'].includes(toUpper(a.aggregation));
-            }).length;
-
-            if (numericCount < 2) errors.push(makeMessage('COMBO_MIN_NUMERIC', 'Combo Bar+Line requires at least 2 numeric/count series.'));
-            break;
-        }
-        case ChartType.KPI_SINGLE:
-        case ChartType.GAUGE: {
-            if (!hasNumeric) errors.push(makeMessage('KPI_NUMERIC_REQUIRED', 'KPI/Gauge requires a numeric/count value field.'));
-            break;
-        }
-        case ChartType.TABLE:
-            break;
-        default:
-            break;
-    }
-
-    // High-cardinality generic warning
-    if ([ChartType.BAR, ChartType.PIE, ChartType.DONUT, ChartType.SUNBURST].includes(chartType) && categoryCount > 20) {
-        warnings.push(makeMessage('HIGH_CARDINALITY', `Dimension '${dimensionField || 'N/A'}' has ${categoryCount} categories.`));
-    }
-
-    // UX validation
-    if ([ChartType.BAR, ChartType.LINE, ChartType.AREA, ChartType.COMBO_BAR_LINE].includes(chartType) && categoryCount > 30) {
-        warnings.push(makeMessage('LABEL_OVERLAP_RISK', 'Axis labels are likely to overlap due to high category count.'));
-    }
+    const xField = byRole(FieldRoles.TIME)[0]?.field || byRole(FieldRoles.X)[0]?.field || byRole(FieldRoles.LEGEND)[0]?.field;
+    const xMeta = xField ? getFieldMeta(xField) : null;
+    const hierarchyCount = byRole(FieldRoles.HIERARCHY).length;
 
     if (safeRows.length === 0) {
         errors.push(makeMessage('EMPTY_DATASET', 'Dataset is empty.'));
     }
 
-    if ([ChartType.PIE, ChartType.DONUT].includes(chartType) && dimensionField) {
-        const counts = new Map();
-        safeRows.forEach((row) => {
-            const key = String(row?.[dimensionField] ?? 'Unknown');
-            counts.set(key, (counts.get(key) || 0) + 1);
-        });
-        const total = Array.from(counts.values()).reduce((a, b) => a + b, 0);
-        if (total > 0) {
-            const tiny = Array.from(counts.values()).filter((n) => (n / total) < 0.02).length;
-            if (tiny >= 3) warnings.push(makeMessage('TINY_PIE_SLICES', `${tiny} slices are below 2% and may be hard to read.`));
+    if (chartType === ChartType.BAR && (!xField || !hasNumeric)) {
+        errors.push(makeMessage('BAR_REQUIRED', getChartRequirementText(ChartType.BAR)));
+    }
+    if ([ChartType.LINE, ChartType.AREA].includes(chartType)) {
+        if (!xField || !hasNumeric) errors.push(makeMessage('TREND_REQUIRED', getChartRequirementText(chartType)));
+        if (xMeta?.type !== 'date') warnings.push(makeMessage('TREND_NO_TIME', 'Time field is preferred for trend charts.'));
+    }
+    if ([ChartType.PIE, ChartType.DONUT].includes(chartType) && (!byRole(FieldRoles.LEGEND)[0] || !hasNumeric)) {
+        errors.push(makeMessage('PIE_REQUIRED', getChartRequirementText(chartType)));
+    }
+    if (chartType === ChartType.SCATTER) {
+        const x = byRole(FieldRoles.X)[0]?.field;
+        const y = byRole(FieldRoles.Y)[0]?.field;
+        if (!x || !y || getFieldMeta(x)?.type !== 'numeric' || getFieldMeta(y)?.type !== 'numeric') {
+            errors.push(makeMessage('SCATTER_REQUIRED', getChartRequirementText(ChartType.SCATTER)));
+        }
+    }
+    if (chartType === ChartType.BUBBLE) {
+        const x = byRole(FieldRoles.X)[0]?.field;
+        const y = byRole(FieldRoles.Y)[0]?.field;
+        const s = byRole(FieldRoles.SIZE)[0]?.field;
+        if (!x || !y || !s) errors.push(makeMessage('BUBBLE_REQUIRED', getChartRequirementText(ChartType.BUBBLE)));
+    }
+    if ([ChartType.TREEMAP, ChartType.SUNBURST].includes(chartType) && (hierarchyCount < 1 || !hasNumeric)) {
+        errors.push(makeMessage('HIERARCHY_REQUIRED', getChartRequirementText(chartType)));
+    }
+    if (chartType === ChartType.COMBO_BAR_LINE) {
+        const seriesCount = byRole(FieldRoles.Y).length + byRole(FieldRoles.VALUE).length;
+        if (!xField || seriesCount < 2) errors.push(makeMessage('COMBO_REQUIRED', getChartRequirementText(ChartType.COMBO_BAR_LINE)));
+    }
+    if ([ChartType.GAUGE, ChartType.KPI_SINGLE].includes(chartType) && !hasNumeric) {
+        errors.push(makeMessage('KPI_REQUIRED', getChartRequirementText(chartType)));
+    }
+    if (chartType === ChartType.SPARKLINE) {
+        if (!byRole(FieldRoles.TIME)[0]?.field || !hasNumeric) errors.push(makeMessage('SPARKLINE_REQUIRED', getChartRequirementText(ChartType.SPARKLINE)));
+    }
+    if (chartType === ChartType.RADAR) {
+        const ySeries = byRole(FieldRoles.Y).length + byRole(FieldRoles.VALUE).length;
+        if (!xField || ySeries < 2) errors.push(makeMessage('RADAR_REQUIRED', getChartRequirementText(ChartType.RADAR)));
+    }
+    if ([ChartType.ORG_CHART, ChartType.ORG_TREE_STRUCTURED].includes(chartType)) {
+        const nodeField = byRole(FieldRoles.NODE)[0]?.field;
+        const parentField = byRole(FieldRoles.PARENT)[0]?.field;
+        if (!nodeField || !parentField) {
+            errors.push(makeMessage('ORG_REQUIRED', 'Org chart requires Node + Parent.'));
+        } else {
+            if (detectOrgCycle(safeRows, nodeField, parentField)) errors.push(makeMessage('ORG_CYCLE', 'Org chart contains a cycle.'));
+            const roots = detectMultipleRoots(safeRows, nodeField, parentField);
+            if (roots > 1) warnings.push(makeMessage('ORG_MULTI_ROOT', `Org chart has ${roots} roots.`));
         }
     }
 
-    // Wrong chart detection / suggestions
-    const profile = {
-        hasDate: Array.from(fieldMetaMap.values()).some((f) => f.type === 'date'),
-        hasNumericColumn: Array.from(fieldMetaMap.values()).some((f) => f.type === 'numeric'),
-        hasCategoricalColumn: Array.from(fieldMetaMap.values()).some((f) => ['categorical', 'id'].includes(f.type)),
-        categoricalCount: Array.from(fieldMetaMap.values()).filter((f) => ['categorical', 'id'].includes(f.type)).length,
-    };
-
-    if (profile.hasDate && profile.hasNumericColumn && ![ChartType.LINE, ChartType.AREA, ChartType.SPARKLINE].includes(chartType)) {
-        suggestions.push(makeMessage('SUGGEST_LINE', 'Date + numeric data detected. Consider a LINE chart.', { chartType: ChartType.LINE }));
+    const categoryCount = getDistinctCount(safeRows, xField);
+    if (categoryCount > 30 && [ChartType.BAR, ChartType.LINE, ChartType.AREA, ChartType.COMBO_BAR_LINE].includes(chartType)) {
+        warnings.push(makeMessage('LABEL_OVERLAP', 'Axis labels may overlap. Consider Top-N or sorting.'));
+    }
+    if (categoryCount > 10 && [ChartType.PIE, ChartType.DONUT].includes(chartType)) {
+        warnings.push(makeMessage('PIE_CROWDED', 'Too many categories for a pie/donut chart.'));
     }
 
-    if (profile.hasCategoricalColumn && !profile.hasNumericColumn && chartType !== ChartType.TABLE) {
-        suggestions.push(makeMessage('SUGGEST_TABLE', 'Only categorical data detected. TABLE may be a better fit.', { chartType: ChartType.TABLE, aggregation: 'COUNT' }));
+    const hasTime = Array.from(fieldMetaMap.values()).some(f => f.type === 'date');
+    if (hasTime && hasNumeric && ![ChartType.LINE, ChartType.AREA, ChartType.SPARKLINE].includes(chartType)) {
+        suggestions.push(makeMessage('SUGGEST_LINE', 'Time + measure detected. Consider LINE chart.', { chartType: ChartType.LINE }));
     }
-
-    const hierarchyFieldCount = byRole(FieldRoles.HIERARCHY).length;
-    if (hierarchyFieldCount >= 2 && ![ChartType.SUNBURST, ChartType.TREEMAP].includes(chartType)) {
-        suggestions.push(makeMessage('SUGGEST_HIERARCHY', 'Hierarchical fields detected. Consider SUNBURST or TREEMAP.', { chartType: ChartType.SUNBURST }));
+    if (hierarchyCount >= 2 && ![ChartType.TREEMAP, ChartType.SUNBURST].includes(chartType)) {
+        suggestions.push(makeMessage('SUGGEST_HIERARCHY', 'Hierarchy fields detected. Consider TREEMAP or SUNBURST.', { chartType: ChartType.TREEMAP }));
     }
-
-    const nodeAssigned = byRole(FieldRoles.NODE).length > 0;
-    const parentAssigned = byRole(FieldRoles.PARENT).length > 0;
-    if (nodeAssigned && parentAssigned && chartType !== ChartType.ORG_CHART) {
-        suggestions.push(makeMessage('SUGGEST_ORG', 'Node/Parent relationship detected. Consider ORG_CHART.', { chartType: ChartType.ORG_CHART }));
-    }
-
-    const unique = (items) => {
-        const seen = new Set();
-        return items.filter((it) => {
-            const key = `${it.code}::${it.message}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-    };
 
     return {
-        errors: unique(errors),
-        warnings: unique(warnings),
-        suggestions: unique(suggestions),
+        errors,
+        warnings,
+        suggestions,
         fieldProfile: Array.from(fieldMetaMap.values()),
         chartType,
         normalizedConfig: configFromAssignments(chartType, assignments),

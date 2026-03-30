@@ -26,20 +26,22 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         };
     }, [onChartInstanceChange, config.id]);
 
-    useEffect(() => {
-        if (config?.type === ChartType.ORG_CHART) {
-            setDrillPath([]);
-        }
-    }, [config?.type]);
+    const isOrgType = config?.type === ChartType.ORG_CHART || config?.type === ChartType.ORG_TREE_STRUCTURED;
 
     useEffect(() => {
-        if (config?.type !== ChartType.ORG_CHART) {
+        if (isOrgType) {
+            setDrillPath([]);
+        }
+    }, [isOrgType]);
+
+    useEffect(() => {
+        if (!isOrgType) {
             setOrgSearchQuery('');
             setOrgSelectedPathIds([]);
             setOrgSelectedPathNames([]);
             setOrgSelectedNodeId('');
         }
-    }, [config?.type]);
+    }, [isOrgType]);
 
     if (!dataset) return null;
 
@@ -77,6 +79,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                     { label: 'Value', anyOf: [FieldRoles.VALUE, FieldRoles.Y], required: true },
                 ];
             case ChartType.ORG_CHART:
+            case ChartType.ORG_TREE_STRUCTURED:
                 return [
                     { label: 'Node', anyOf: [FieldRoles.NODE], required: true },
                     { label: 'Parent', anyOf: [FieldRoles.PARENT], required: true },
@@ -222,6 +225,25 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const isGroupByMode = effectiveAggregationMode === 'GROUP_BY';
     const groupByTargetField = primaryValueAssignment?.field || normalizedConfig?.measures?.[0] || '__count__';
 
+    const sanitizedMeasureFields = useMemo(() => {
+        if (isGroupByMode) return ['Count'];
+
+        const rawMeasures = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
+            ? normalizedConfig.measures
+            : ['__count__'];
+
+        const numericColumns = new Set(
+            (Array.isArray(dataset?.columns) ? dataset.columns : [])
+                .filter((c) => c?.type === 'number')
+                .map((c) => c.name)
+        );
+
+        const filtered = rawMeasures.filter((m) => m === '__count__' || numericColumns.has(m));
+        const deduped = Array.from(new Set(filtered));
+
+        return deduped.length > 0 ? deduped : ['__count__'];
+    }, [isGroupByMode, normalizedConfig?.measures, dataset?.columns]);
+
     const semanticTitle = (() => {
         const configured = (config.title || '').trim();
         const isGeneric = !configured || /^new visual$/i.test(configured) || /^analytics card$/i.test(configured);
@@ -244,11 +266,17 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         ? (groupByTargetField && groupByTargetField !== '__count__'
             ? `Count of ${toTitleCase(groupByTargetField)}`
             : 'Count')
-        : (Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
-            ? normalizedConfig.measures.map(toTitleCase).join(', ')
+        : (Array.isArray(sanitizedMeasureFields) && sanitizedMeasureFields.length > 0
+            ? sanitizedMeasureFields.map(toTitleCase).join(', ')
             : 'None');
 
-    const aggregationText = toTitleCase(effectiveAggregationMode || 'N/A');
+    const aggregationText = (() => {
+        const agg = String(effectiveAggregationMode || '').toUpperCase();
+        if (agg === 'SUM') return 'Total';
+        if (agg === 'AVG') return 'Average';
+        if (agg === 'COUNT' || agg === 'GROUP_BY') return 'Count';
+        return toTitleCase(agg || 'N/A');
+    })();
 
     const applyFilters = (data) => {
         if (!normalizedConfig.filters || normalizedConfig.filters.length === 0) return data;
@@ -323,9 +351,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         const colorField = assignments.find(a => a?.role === FieldRoles.COLOR)?.field;
         const valueAssignment = assignments.find(a => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
 
-        const effectiveMeasures = isGroupByMode
-            ? ['Count']
-            : (Array.isArray(measures) && measures.length > 0 ? measures : ['__count__']);
+        const effectiveMeasures = sanitizedMeasureFields;
         const effectiveAggregation = effectiveAggregationMode;
 
         let filteredData = applyGlobalFilters(dataset.data);
@@ -342,7 +368,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             return hierarchy.length > 0 ? [{ __hierarchy: hierarchy }] : [];
         }
 
-        if (type === ChartType.ORG_CHART) {
+        if (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) {
             if (!nodeField || !parentField) return [];
             const { treeData, meta } = buildOrgTree(filteredData, nodeField, parentField, labelField, colorField);
             return [{ __orgTree: treeData, __orgMeta: meta || {} }];
@@ -403,7 +429,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     // Can we drill further?
     const canDrill = useMemo(() => {
-        if (normalizedConfig.type === ChartType.ORG_CHART) return false;
+        if (normalizedConfig.type === ChartType.ORG_CHART || normalizedConfig.type === ChartType.ORG_TREE_STRUCTURED) return false;
         const usedDims = [normalizedConfig.dimension, ...drillPath.map(d => d.dimensionCol)];
         return dataset.columns.some(c =>
             (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
@@ -418,7 +444,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const handlePointClick = useCallback((params) => {
         if (!params?.name) return;
 
-        const isOrgChart = normalizedConfig?.type === ChartType.ORG_CHART;
+        const isOrgChart = normalizedConfig?.type === ChartType.ORG_CHART || normalizedConfig?.type === ChartType.ORG_TREE_STRUCTURED;
 
         if (isOrgChart) {
             const info = Array.isArray(params?.treePathInfo) ? params.treePathInfo : [];
@@ -617,9 +643,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 ...normalizedConfig,
                 dimension: effectiveDimension,
                 measures,
-                orgSearchQuery: type === ChartType.ORG_CHART ? orgSearchQuery : '',
-                orgSelectedPathIds: type === ChartType.ORG_CHART ? orgSelectedPathIds : [],
-                orgSelectedNodeId: type === ChartType.ORG_CHART ? orgSelectedNodeId : '',
+                orgSearchQuery: (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) ? orgSearchQuery : '',
+                orgSelectedPathIds: (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) ? orgSelectedPathIds : [],
+                orgSelectedNodeId: (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) ? orgSelectedNodeId : '',
                 style: exportStyleOverrides,
             },
             theme,
@@ -655,7 +681,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                             <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold tracking-wide truncate">{semanticContext}</p>
                             {normalizedConfig.filters?.length > 0 && <Filter size={8} className="text-blue-500" />}
                             {canDrill && drillPath.length === 0 && <MousePointerClick size={8} className="text-violet-500" title="Click to drill down" />}
-                            {!canDrill && normalizedConfig.type !== ChartType.ORG_CHART && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
+                            {!canDrill && normalizedConfig.type !== ChartType.ORG_CHART && normalizedConfig.type !== ChartType.ORG_TREE_STRUCTURED && <MousePointerClick size={8} className="text-emerald-500" title="Click to cross-filter and drill-through" />}
                         </div>
                         <div className="flex flex-wrap items-start gap-2 mt-1.5 min-w-0">
                             <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-semibold whitespace-normal break-all max-w-full" title={`Dimension: ${effectiveDimension || 'N/A'}`}>
@@ -694,7 +720,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                                 })}
                             </div>
                         </div>
-                        {normalizedConfig.type === ChartType.ORG_CHART && (
+                        {(normalizedConfig.type === ChartType.ORG_CHART || normalizedConfig.type === ChartType.ORG_TREE_STRUCTURED) && (
                             <div className="mt-2 flex items-center gap-2">
                                 <input
                                     type="text"
@@ -713,7 +739,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                                 )}
                             </div>
                         )}
-                        {normalizedConfig.type === ChartType.ORG_CHART && orgSelectedPathNames.length > 0 && (
+                        {(normalizedConfig.type === ChartType.ORG_CHART || normalizedConfig.type === ChartType.ORG_TREE_STRUCTURED) && orgSelectedPathNames.length > 0 && (
                             <div className={`mt-2 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold overflow-x-auto ${isDark ? 'bg-gray-700/60 text-gray-200' : 'bg-gray-50 text-gray-700'}`}>
                                 {orgSelectedPathNames.map((part, idx) => (
                                     <React.Fragment key={`${part}-${idx}`}>

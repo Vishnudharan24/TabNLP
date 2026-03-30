@@ -135,9 +135,22 @@ const extractBackendSourceIds = (datasets = []) => (
     ))
 );
 
-const inferColumnType = (values = []) => {
+const inferColumnType = (columnName = '', values = []) => {
     const sample = values.filter(v => v !== null && v !== undefined && v !== '').slice(0, 50);
     if (sample.length === 0) return 'string';
+
+    const normalizedName = String(columnName || '').trim().toLowerCase();
+    const isExperienceColumn = /(experience|exp|tenure|service)/i.test(normalizedName);
+    const isIdLikeColumn = /(^id$|_id$|id_|code$|sku|employee.?id|product.?id|order.?id|customer.?id)/i.test(normalizedName);
+    const isCategoricalByName = /(name|product|item|category|brand|department|city|state|country|segment|status|type)/i.test(normalizedName);
+
+    const uniqueRatio = sample.length > 0
+        ? (new Set(sample.map(v => String(v).trim())).size / sample.length)
+        : 0;
+
+    const numericRatio = sample.length > 0
+        ? (sample.filter(v => typeof v === 'number' || (!Number.isNaN(Number(v)) && `${v}`.trim() !== '')).length / sample.length)
+        : 0;
 
     const toExperienceMonths = (value) => {
         if (value === null || value === undefined || value === '') return null;
@@ -160,11 +173,13 @@ const inferColumnType = (values = []) => {
         return Number.isFinite(numeric) ? numeric : null;
     };
 
-    const allExperienceLike = sample.every(v => toExperienceMonths(v) !== null);
+    const allExperienceLike = isExperienceColumn && sample.every(v => toExperienceMonths(v) !== null);
     if (allExperienceLike) return 'number';
 
-    const allNumbers = sample.every(v => typeof v === 'number' || (!Number.isNaN(Number(v)) && `${v}`.trim() !== ''));
-    if (allNumbers) return 'number';
+    if (isIdLikeColumn && numericRatio >= 0.8) return 'string';
+    if (isCategoricalByName) return 'string';
+
+    if (numericRatio >= 0.95 && uniqueRatio < 0.98) return 'number';
 
     const allDates = sample.every(v => !Number.isNaN(Date.parse(v)));
     if (allDates) return 'date';
@@ -185,7 +200,7 @@ const mapBackendDatasetToAppDataset = (item) => {
 
     const columns = detectedColumns.map((name) => ({
         name,
-        type: inferColumnType(rows.map(r => r?.[name])),
+        type: inferColumnType(name, rows.map(r => r?.[name])),
     }));
 
     return {
@@ -1044,7 +1059,7 @@ const App = () => {
     };
 
     const currentPageCharts = useMemo(() => charts.filter(c => c.pageId === activePageId), [charts, activePageId]);
-    const currentPageOrgCharts = useMemo(() => currentPageCharts.filter(c => c.type === ChartType.ORG_CHART), [currentPageCharts]);
+    const currentPageOrgCharts = useMemo(() => currentPageCharts.filter(c => c.type === ChartType.ORG_CHART || c.type === ChartType.ORG_TREE_STRUCTURED), [currentPageCharts]);
     const gridLayouts = useMemo(() => currentPageCharts.map(c => ({ i: c.id, ...c.layout })), [currentPageCharts]);
     const exportableVisualCount = useMemo(() => {
         if (exportScope === 'all') return charts.length;

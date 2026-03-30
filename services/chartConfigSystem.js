@@ -26,6 +26,7 @@ const normalizeChartType = (type) => {
     if (type === ChartType.BAR_CLUSTERED || type === ChartType.BAR_STACKED || type === ChartType.BAR_PERCENT || type === ChartType.BAR_HORIZONTAL || type === ChartType.BAR_HORIZONTAL_STACKED || type === ChartType.BAR_HORIZONTAL_PERCENT) return ChartType.BAR;
     if (type === ChartType.LINE_SMOOTH || type === ChartType.LINE_STRAIGHT || type === ChartType.LINE_STEP || type === ChartType.LINE_DASHED || type === ChartType.LINE_MULTI_AXIS) return ChartType.LINE;
     if (type === ChartType.AREA_SMOOTH || type === ChartType.AREA_STACKED || type === ChartType.AREA_PERCENT || type === ChartType.AREA_STEP) return ChartType.AREA;
+    if (type === ChartType.ORG_TREE_STRUCTURED) return ChartType.ORG_CHART;
     return type;
 };
 
@@ -558,7 +559,7 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
 
     const assignments = [];
 
-    if (type === ChartType.ORG_CHART) {
+    if (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) {
         const byName = safeColumns.map(c => ({ ...c, lower: String(c?.name || '').toLowerCase() }));
         const firstByRegex = (regex, pool = byName) => pool.find(c => regex.test(c.lower))?.name;
 
@@ -668,7 +669,7 @@ export function validateConfig(config = {}, columns = []) {
         warnings.push('Hierarchy chart has no hierarchy fields; using fallback grouping.');
     }
 
-    if (normalizeChartType(normalized.chartType) === ChartType.ORG_CHART) {
+    if (normalizeChartType(normalized.chartType) === ChartType.ORG_CHART || normalizeChartType(normalized.chartType) === ChartType.ORG_TREE_STRUCTURED) {
         const nodeCount = assignments.filter(a => a.role === FieldRoles.NODE).length;
         const parentCount = assignments.filter(a => a.role === FieldRoles.PARENT).length;
         if (nodeCount === 0) warnings.push('Org chart needs a Node field.');

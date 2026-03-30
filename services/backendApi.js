@@ -264,6 +264,27 @@ export const backendApi = {
         return this.getHrAnalytics('data-quality', payload, baseUrl, requestConfig);
     },
 
+    getChartRecommendations(payload, baseUrl, requestConfig) {
+        return request('/chart/recommend', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    getChartConfig(payload, baseUrl, requestConfig) {
+        return request('/chart/config', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    aggregateChart(payload, baseUrl, requestConfig) {
+        return request('/chart/aggregate', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
     getTestExcel(baseUrl, requestConfig) {
         return request('/test/file', { method: 'GET' }, baseUrl, requestConfig);
     },

@@ -49,6 +49,7 @@ export const ChartType = {
   TREEMAP: 'TREEMAP',
   HEATMAP: 'HEATMAP',
   ORG_CHART: 'ORG_CHART',
+  ORG_TREE_STRUCTURED: 'ORG_TREE_STRUCTURED',
 
   // Combinations
   COMBO_BAR_LINE: 'COMBO_BAR_LINE',

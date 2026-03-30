@@ -129,7 +129,7 @@ const OrgChartPage = ({
     const chartRef = useRef(null);
 
     const orgCharts = useMemo(
-        () => (Array.isArray(charts) ? charts.filter((c) => c?.type === ChartType.ORG_CHART) : []),
+        () => (Array.isArray(charts) ? charts.filter((c) => c?.type === ChartType.ORG_CHART || c?.type === ChartType.ORG_TREE_STRUCTURED) : []),
         [charts]
     );
 
