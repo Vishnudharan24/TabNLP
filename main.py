@@ -23,6 +23,11 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from services.data_services.ingestion_service import run_ingestion, run_uploaded_file_ingestion
 from services.hr.hr_analytics_service import compute_module
+from services.chart.visualization_engine import (
+    recommend_chart,
+    generate_chart_config,
+    aggregate_for_chart,
+)
 from db.db_store import (
     upsert_source_config,
     ensure_indexes,
@@ -109,6 +114,21 @@ class LoginRequest(BaseModel):
 class HrAnalyticsRequest(BaseModel):
     data: list[dict[str, Any]]
     mapping: dict[str, str]
+
+
+class ChartEngineRequest(BaseModel):
+    columns: list[dict[str, Any]]
+    data: list[dict[str, Any]]
+
+
+class ChartConfigRequest(ChartEngineRequest):
+    chart_type: str
+    selected_fields: Optional[dict[str, Any]] = None
+
+
+class ChartAggregateRequest(BaseModel):
+    data: list[dict[str, Any]]
+    config: dict[str, Any]
 
 
 def _serialize_source_config(source_config: dict):
@@ -590,6 +610,41 @@ async def _run_hr_analytics_module(module: str, payload: HrAnalyticsRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         _raise_internal_error(f"Failed to compute HR analytics module: {module}", e)
+
+
+@app.post("/chart/recommend")
+async def chart_recommend(payload: ChartEngineRequest, _current_user: dict = Depends(_require_current_user)):
+    try:
+        return {
+            "status": "success",
+            **recommend_chart(columns=payload.columns, data=payload.data),
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to recommend chart", e)
+
+
+@app.post("/chart/config")
+async def chart_config(payload: ChartConfigRequest, _current_user: dict = Depends(_require_current_user)):
+    try:
+        return {
+            "status": "success",
+            **generate_chart_config(
+                chart_type=payload.chart_type,
+                columns=payload.columns,
+                data=payload.data,
+                selected_fields=payload.selected_fields,
+            ),
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to generate chart config", e)
+
+
+@app.post("/chart/aggregate")
+async def chart_aggregate(payload: ChartAggregateRequest, _current_user: dict = Depends(_require_current_user)):
+    try:
+        return aggregate_for_chart(data=payload.data, config=payload.config)
+    except Exception as e:
+        _raise_internal_error("Failed to aggregate chart data", e)
 
 
 @app.post("/hr/analytics/summary")
