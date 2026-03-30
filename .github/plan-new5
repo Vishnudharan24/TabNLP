@@ -1,0 +1,337 @@
+You are a senior frontend + backend BI platform engineer.
+
+I have:
+
+BACKEND (READY)
+
+* Query pipeline (parse → normalize → resolve → aggregate → evaluate_measures → format_response)
+* Measure engine (AST + evaluator)
+* Semantic layer (measure registry + resolver + DAG)
+* API endpoint: POST /query (single source of truth)
+* Semantic APIs: /semantic/measures
+
+FRONTEND (NEEDS MIGRATION)
+
+* React + ECharts
+* Visualization.jsx still performs grouping/aggregation (OLD LOGIC)
+* DataPanel.jsx builds config (dimension + measure)
+* chartConfigSystem.js maps roles → config
+* backendApi.js exists
+
+---
+
+# 🎯 OBJECTIVE
+
+Refactor frontend to:
+
+👉 FULLY RELY ON BACKEND QUERY ENGINE
+👉 REMOVE ALL LOCAL DATA PROCESSING
+👉 SUPPORT SEMANTIC MEASURES
+
+---
+
+# 🚨 STRICT RULES
+
+1. REMOVE frontend aggregation logic completely
+2. DO NOT process data inside Visualization.jsx
+3. ALL charts must use backend /query response
+4. Maintain existing UI/UX
+5. Backward compatible with existing charts
+6. Keep ECharts rendering unchanged (only data source changes)
+
+---
+
+# 🔥 STEP 1 — DEFINE QUERY BUILDER (FRONTEND)
+
+Create or update:
+
+/frontend/services/queryBuilder.js
+
+---
+
+## INPUT
+
+chartConfig:
+{
+dimension,
+measures,
+filters,
+datasetId,
+chartType
+}
+
+---
+
+## OUTPUT
+
+{
+datasetId,
+chartType,
+dimensions: [{ field }],
+measures: [
+{ name } OR { expression }
+],
+filters: [...],
+sort,
+limit
+}
+
+---
+
+## IMPORTANT
+
+* If measure is semantic → send { name }
+* If direct → send { expression }
+* DO NOT send aggregation separately
+
+---
+
+# 🔥 STEP 2 — UPDATE backendApi.js
+
+Add:
+
+async function runQuery(query) {
+return fetch("/query", {
+method: "POST",
+body: JSON.stringify(query)
+}).then(res => res.json());
+}
+
+---
+
+# 🔥 STEP 3 — REWRITE Visualization.jsx (CRITICAL)
+
+---
+
+## REMOVE COMPLETELY:
+
+* processData()
+* groupBy logic
+* aggregation logic
+* sorting logic
+
+(Currently exists in Visualization.processData()) ❌
+
+---
+
+## NEW FLOW
+
+1. Receive chartConfig
+2. Build query using queryBuilder
+3. Call backend: runQuery(query)
+4. Get response:
+
+{
+columns,
+rows,
+meta
+}
+
+5. Convert to ECharts format
+6. Render chart
+
+---
+
+## IMPORTANT
+
+Visualization.jsx becomes:
+
+```text
+config → query → API → data → chart
+```
+
+---
+
+# 🔥 STEP 4 — DATA TRANSFORMATION LAYER
+
+Create helper:
+
+/frontend/services/dataAdapter.js
+
+---
+
+## PURPOSE
+
+Convert backend response → ECharts input
+
+---
+
+## EXAMPLE
+
+Input:
+
+{
+columns: ["state", "Sales"],
+rows: [["TN", 1000], ["KL", 900]]
+}
+
+Output:
+
+{
+xAxis: ["TN", "KL"],
+series: [1000, 900]
+}
+
+---
+
+## REQUIREMENTS
+
+* Handle multiple measures
+* Handle pie / bar / line / scatter
+* Keep generic
+
+---
+
+# 🔥 STEP 5 — SUPPORT SEMANTIC MEASURES IN UI
+
+Update DataPanel.jsx:
+
+---
+
+## CHANGE
+
+Instead of only fields:
+
+Show:
+
+* Fields (columns)
+* Measures (from /semantic/measures API)
+
+---
+
+## UI BEHAVIOR
+
+User selects:
+
+* dimension → field
+* measure → semantic name OR expression
+
+---
+
+## STORE
+
+chartConfig.measures = [
+{ name: "Profit Margin" }
+]
+
+---
+
+# 🔥 STEP 6 — LOAD SEMANTIC MEASURES
+
+On dataset selection:
+
+Call:
+
+GET /semantic/measures?datasetId=...
+
+Store in state:
+
+semanticMeasures
+
+---
+
+# 🔥 STEP 7 — UPDATE chartConfigSystem.js
+
+---
+
+## REMOVE:
+
+* aggregation assignment logic
+
+---
+
+## CHANGE:
+
+* measures = array of { name | expression }
+
+---
+
+# 🔥 STEP 8 — HANDLE FILTERS
+
+Convert UI filters → backend format:
+
+{
+field,
+operator,
+value
+}
+
+---
+
+## DO NOT APPLY FILTERS LOCALLY ❌
+
+---
+
+# 🔥 STEP 9 — ERROR HANDLING
+
+If backend returns:
+
+{
+error: {...}
+}
+
+→ show error panel in Visualization
+
+---
+
+# 🔥 STEP 10 — LOADING + CACHING
+
+Add:
+
+* loading spinner per chart
+* optional cache by query hash
+
+---
+
+# 🔥 STEP 11 — TEST CASES
+
+Test:
+
+1. Simple:
+   state + Total Sales
+
+2. Semantic:
+   state + Profit Margin
+
+3. Multi-measure:
+   Sales + Profit Margin
+
+4. Filters:
+   year = 2024
+
+5. Chart types:
+   bar, line, pie
+
+---
+
+# 🔥 STEP 12 — REMOVE LEGACY CODE
+
+DELETE:
+
+* Visualization.processData()
+* local aggregation helpers
+* unused grouping logic
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. Updated Visualization.jsx
+2. queryBuilder.js
+3. dataAdapter.js
+4. updated DataPanel.jsx
+5. updated backendApi.js
+6. removed legacy logic list
+7. end-to-end flow diagram
+
+---
+
+# 🚀 FINAL GOAL
+
+Transform frontend from:
+
+"data processor"
+
+→
+
+"query-driven visualization client (Power BI style)"

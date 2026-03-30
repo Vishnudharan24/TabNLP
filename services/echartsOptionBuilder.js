@@ -229,68 +229,6 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         };
     };
 
-    const applyTopNAndSortForBar = (option = {}, maxCategories = 20) => {
-        const series = Array.isArray(option?.series) ? option.series : [];
-        if (series.length === 0 || !series.every((s) => String(s?.type || '').includes('bar'))) return option;
-
-        const xAxis = Array.isArray(option.xAxis) ? option.xAxis[0] : option.xAxis;
-        const yAxis = Array.isArray(option.yAxis) ? option.yAxis[0] : option.yAxis;
-
-        const isHorizontal = xAxis?.type === 'value' && yAxis?.type === 'category';
-        const categoryAxisKey = isHorizontal ? 'yAxis' : 'xAxis';
-        const axis = isHorizontal ? yAxis : xAxis;
-        const categories = Array.isArray(axis?.data) ? axis.data : [];
-        if (categories.length === 0) return option;
-
-        const totals = categories.map((_, idx) => (
-            series.reduce((sum, s) => {
-                const point = Array.isArray(s?.data) ? s.data[idx] : 0;
-                const val = typeof point === 'object' ? Number(point?.value) : Number(point);
-                return sum + (Number.isFinite(val) ? val : 0);
-            }, 0)
-        ));
-
-        const sortedIdx = categories.map((_, idx) => idx).sort((a, b) => totals[b] - totals[a]);
-        const topIdx = sortedIdx.slice(0, Math.min(maxCategories, sortedIdx.length));
-        const restIdx = sortedIdx.slice(maxCategories);
-
-        const nextCategories = topIdx.map((i) => categories[i]);
-        if (restIdx.length > 0) nextCategories.push('Others');
-
-        const nextSeries = series.map((s) => {
-            const baseData = Array.isArray(s?.data) ? s.data : [];
-            const selected = topIdx.map((i) => baseData[i]);
-            if (restIdx.length > 0) {
-                const others = restIdx.reduce((sum, i) => {
-                    const raw = baseData[i];
-                    const value = typeof raw === 'object' ? Number(raw?.value) : Number(raw);
-                    return sum + (Number.isFinite(value) ? value : 0);
-                }, 0);
-                selected.push(others);
-            }
-
-            return {
-                ...s,
-                data: selected,
-            };
-        });
-
-        const nextOption = {
-            ...option,
-            series: nextSeries,
-        };
-
-        if (Array.isArray(option[categoryAxisKey])) {
-            nextOption[categoryAxisKey] = option[categoryAxisKey].map((a, idx) => (
-                idx === 0 ? { ...a, data: nextCategories } : a
-            ));
-        } else {
-            nextOption[categoryAxisKey] = { ...(option[categoryAxisKey] || {}), data: nextCategories };
-        }
-
-        return nextOption;
-    };
-
     const applySeriesPolish = (option = {}) => {
         const series = Array.isArray(option?.series) ? option.series : [];
         return {
@@ -374,17 +312,6 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     };
 
     const finalizeEnterpriseOption = (option = {}, type = resolvedVisualType) => {
-        const isBarType = [
-            ChartType.BAR,
-            ChartType.BAR_CLUSTERED,
-            ChartType.BAR_STACKED,
-            ChartType.BAR_PERCENT,
-            ChartType.BAR_HORIZONTAL,
-            ChartType.BAR_HORIZONTAL_PERCENT,
-            ChartType.BAR_HORIZONTAL_STACKED,
-            ChartType.COMBO_BAR_LINE,
-        ].includes(type);
-
         let next = { ...(option || {}) };
 
         const xAxes = toAxisArray(next.xAxis).map((axis) => formatLabels(axis, {
@@ -403,7 +330,6 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         if (xAxes.length > 0) next.xAxis = Array.isArray(next.xAxis) ? xAxes : xAxes[0];
         if (yAxes.length > 0) next.yAxis = Array.isArray(next.yAxis) ? yAxes : yAxes[0];
 
-        if (isBarType) next = applyTopNAndSortForBar(next, 20);
         next = applyGridSpacing(next);
         next = applyTooltip(next);
         next = applyLegendPolish(next);
@@ -970,55 +896,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         return type;
     };
 
-    const preprocessTopNBarData = (rows = [], maxCategories = 20) => {
-        const safeRows = Array.isArray(rows) ? [...rows] : [];
-        if (safeRows.length <= maxCategories) return safeRows;
-
-        const measureKeys = Array.isArray(measures) ? measures.filter(Boolean) : [];
-        if (measureKeys.length === 0) return safeRows;
-
-        const totals = safeRows.map((row) => measureKeys.reduce((sum, key) => {
-            const value = Number(row?.[key]);
-            return sum + (Number.isFinite(value) ? value : 0);
-        }, 0));
-
-        const sorted = safeRows
-            .map((row, idx) => ({ row, idx, score: totals[idx] }))
-            .sort((a, b) => b.score - a.score);
-
-        const top = sorted.slice(0, maxCategories).map((entry) => entry.row);
-        const others = sorted.slice(maxCategories);
-
-        if (others.length === 0) return top;
-
-        const othersRow = { name: 'Others' };
-        measureKeys.forEach((key) => {
-            othersRow[key] = others.reduce((sum, entry) => {
-                const value = Number(entry?.row?.[key]);
-                return sum + (Number.isFinite(value) ? value : 0);
-            }, 0);
-        });
-
-        return [...top, othersRow];
-    };
-
     const resolvedVisualType = normalizeVisualType(visualType, config);
-    const barLikeTypes = new Set([
-        ChartType.BAR,
-        ChartType.BAR_CLUSTERED,
-        ChartType.BAR_STACKED,
-        ChartType.BAR_PERCENT,
-        ChartType.BAR_HORIZONTAL,
-        ChartType.BAR_HORIZONTAL_STACKED,
-        ChartType.BAR_HORIZONTAL_PERCENT,
-        ChartType.COMBO_BAR_LINE,
-    ]);
-
-    if (barLikeTypes.has(resolvedVisualType)) {
-        processedData = preprocessTopNBarData(processedData, 20);
-        categories = processedData.map(d => d.name);
-        xAxisCategory.data = categories;
-    }
 
     switch (resolvedVisualType) {
         // ═══════════════════ BAR CHARTS ═══════════════════

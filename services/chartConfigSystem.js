@@ -22,6 +22,32 @@ const toUpperAgg = (agg) => {
     return ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'GROUP_BY'].includes(value) ? value : undefined;
 };
 
+const toLegacyMeasureExpression = (field, aggregation) => {
+    const agg = toUpperAgg(aggregation);
+    if (field === '__count__') return 'COUNT(*)';
+    if (!agg) return undefined;
+    if (agg === 'GROUP_BY') return `COUNT(${field})`;
+    return `${agg}(${field})`;
+};
+
+const normalizeLegacyAssignment = (assignment = {}) => {
+    const next = { ...assignment };
+    const role = String(next?.role || '');
+    const isMeasureRole = ['x', 'y', 'value', 'size'].includes(role);
+    const field = String(next?.field || '');
+
+    if (isMeasureRole && !next?.expression && field) {
+        const expression = toLegacyMeasureExpression(field, next?.aggregation);
+        if (expression) next.expression = expression;
+    }
+
+    if ('aggregation' in next) {
+        delete next.aggregation;
+    }
+
+    return next;
+};
+
 const normalizeChartType = (type) => {
     if (type === ChartType.BAR_CLUSTERED || type === ChartType.BAR_STACKED || type === ChartType.BAR_PERCENT || type === ChartType.BAR_HORIZONTAL || type === ChartType.BAR_HORIZONTAL_STACKED || type === ChartType.BAR_HORIZONTAL_PERCENT) return ChartType.BAR;
     if (type === ChartType.LINE_SMOOTH || type === ChartType.LINE_STRAIGHT || type === ChartType.LINE_STEP || type === ChartType.LINE_DASHED || type === ChartType.LINE_MULTI_AXIS) return ChartType.LINE;
@@ -316,7 +342,7 @@ export function convertOldConfig(oldConfig = {}) {
     if (Array.isArray(oldConfig.assignments) && oldConfig.assignments.length > 0) {
         return {
             chartType: oldConfig.type || oldConfig.chartType || ChartType.BAR,
-            assignments: oldConfig.assignments,
+            assignments: oldConfig.assignments.map(normalizeLegacyAssignment),
         };
     }
 
@@ -326,15 +352,15 @@ export function convertOldConfig(oldConfig = {}) {
 
     const dim = oldConfig.dimension || oldConfig.xAxisField || '';
     const measures = Array.isArray(oldConfig.measures) ? oldConfig.measures.filter(Boolean) : [];
-    const agg = toUpperAgg(oldConfig.aggregation) || 'SUM';
+    const agg = toUpperAgg(oldConfig.aggregation);
 
     if ([ChartType.SUNBURST, ChartType.TREEMAP].includes(normalizedType)) {
         const hierarchyFields = Array.isArray(oldConfig.hierarchyFields) && oldConfig.hierarchyFields.length > 0
             ? oldConfig.hierarchyFields
             : (dim ? [dim] : []);
         hierarchyFields.forEach((field) => assignments.push({ field, role: FieldRoles.HIERARCHY }));
-        if (measures[0]) assignments.push({ field: measures[0], role: FieldRoles.VALUE, aggregation: agg });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.VALUE, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
+        else assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
         return { chartType, assignments };
     }
 
@@ -354,29 +380,29 @@ export function convertOldConfig(oldConfig = {}) {
 
     if ([ChartType.PIE, ChartType.DONUT].includes(normalizedType)) {
         if (dim) assignments.push({ field: dim, role: FieldRoles.LEGEND });
-        if (measures[0]) assignments.push({ field: measures[0], role: FieldRoles.VALUE, aggregation: agg });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.VALUE, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
+        else assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
         return { chartType, assignments };
     }
 
     if (normalizedType === ChartType.BUBBLE) {
-        if (measures[0]) assignments.push({ field: measures[0], role: FieldRoles.X, aggregation: agg });
-        if (measures[1] || measures[0]) assignments.push({ field: measures[1] || measures[0], role: FieldRoles.Y, aggregation: agg });
-        if (measures[2] || measures[1] || measures[0]) assignments.push({ field: measures[2] || measures[1] || measures[0], role: FieldRoles.SIZE, aggregation: agg });
+        if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.X, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
+        if (measures[1] || measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[1] || measures[0], role: FieldRoles.Y, ...(toLegacyMeasureExpression(measures[1] || measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[1] || measures[0], agg) } : {}) }));
+        if (measures[2] || measures[1] || measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[2] || measures[1] || measures[0], role: FieldRoles.SIZE, ...(toLegacyMeasureExpression(measures[2] || measures[1] || measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[2] || measures[1] || measures[0], agg) } : {}) }));
         if (dim) assignments.push({ field: dim, role: FieldRoles.COLOR });
         return { chartType, assignments };
     }
 
     if (normalizedType === ChartType.SCATTER) {
-        if (measures[0]) assignments.push({ field: measures[0], role: FieldRoles.X, aggregation: agg });
-        if (measures[1] || measures[0]) assignments.push({ field: measures[1] || measures[0], role: FieldRoles.Y, aggregation: agg });
+        if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.X, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
+        if (measures[1] || measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[1] || measures[0], role: FieldRoles.Y, ...(toLegacyMeasureExpression(measures[1] || measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[1] || measures[0], agg) } : {}) }));
         if (dim) assignments.push({ field: dim, role: FieldRoles.COLOR });
         return { chartType, assignments };
     }
 
     if ([ChartType.GAUGE, ChartType.KPI_SINGLE].includes(normalizedType)) {
-        if (measures[0]) assignments.push({ field: measures[0], role: FieldRoles.VALUE, aggregation: agg });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.VALUE, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
+        else assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
         return { chartType, assignments };
     }
 
@@ -387,10 +413,10 @@ export function convertOldConfig(oldConfig = {}) {
         assignments.push({ field: dim, role: dimRole });
     }
 
-    measures.forEach((field) => assignments.push({ field, role: FieldRoles.Y, aggregation: agg }));
+    measures.forEach((field) => assignments.push(normalizeLegacyAssignment({ field, role: FieldRoles.Y, ...(toLegacyMeasureExpression(field, agg) ? { expression: toLegacyMeasureExpression(field, agg) } : {}) })));
 
     if (assignments.length === 0) {
-        assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
     }
 
     return { chartType, assignments };
@@ -417,14 +443,11 @@ export function configFromAssignments(chartType, assignments = []) {
             if (!measures.includes(field)) measures.push(field);
         });
 
-    const agg = toUpperAgg(safe.find(a => ['y', 'value', 'size', 'x'].includes(a.role) && a.aggregation)?.aggregation) || 'SUM';
-
     if (chartType === ChartType.ORG_CHART) {
         return {
             type: chartType,
             dimension: orgNode || '',
             measures: ['__count__'],
-            aggregation: 'COUNT',
             xAxisField: orgNode || '',
             yAxisField: orgParent || '',
             legendField: orgColor || '',
@@ -442,7 +465,6 @@ export function configFromAssignments(chartType, assignments = []) {
         type: chartType,
         dimension: x,
         measures: measures.length > 0 ? measures : ['__count__'],
-        aggregation: agg,
         xAxisField: first(FieldRoles.X) || first(FieldRoles.TIME) || '',
         yAxisField: first(FieldRoles.Y) || first(FieldRoles.VALUE) || '',
         legendField: first(FieldRoles.LEGEND) || first(FieldRoles.COLOR) || '',
@@ -450,89 +472,6 @@ export function configFromAssignments(chartType, assignments = []) {
         hierarchyFields: hierarchy,
         assignments: safe,
     };
-}
-
-export function buildHierarchy(data = [], hierarchyFields = [], valueField = '__count__', aggregation = 'COUNT') {
-    const levels = (Array.isArray(hierarchyFields) ? hierarchyFields : []).filter(Boolean);
-    const rows = Array.isArray(data) ? data : [];
-    if (levels.length === 0) return [];
-
-    const valueAgg = toUpperAgg(aggregation) || 'COUNT';
-
-    const nodeMap = new Map();
-
-    const getNodeKey = (pathParts) => pathParts.join('||');
-
-    const getValue = (row) => {
-        if (valueField === '__count__') return 1;
-        const n = Number(row?.[valueField]);
-        return Number.isFinite(n) ? n : 0;
-    };
-
-    rows.forEach((row) => {
-        let parentKey = '__root__';
-        const pathParts = [];
-
-        levels.forEach((field, levelIndex) => {
-            const raw = row?.[field];
-            const name = String(raw === null || raw === undefined || raw === '' ? 'Unknown' : raw);
-            pathParts.push(name);
-            const key = getNodeKey(pathParts);
-
-            if (!nodeMap.has(key)) {
-                nodeMap.set(key, {
-                    key,
-                    name,
-                    level: levelIndex,
-                    children: new Map(),
-                    sum: 0,
-                    count: 0,
-                    min: Infinity,
-                    max: -Infinity,
-                    parentKey,
-                });
-            }
-
-            const node = nodeMap.get(key);
-            const value = getValue(row);
-            node.sum += value;
-            node.count += 1;
-            node.min = Math.min(node.min, value);
-            node.max = Math.max(node.max, value);
-
-            if (parentKey !== '__root__') {
-                const parent = nodeMap.get(parentKey);
-                if (parent) parent.children.set(key, node);
-            }
-
-            parentKey = key;
-        });
-    });
-
-    const roots = Array.from(nodeMap.values())
-        .filter(node => node.parentKey === '__root__')
-        .map((node) => {
-            const toOutput = (n) => {
-                const resolvedValue = valueAgg === 'AVG'
-                    ? (n.count > 0 ? n.sum / n.count : 0)
-                    : valueAgg === 'MIN'
-                        ? (n.min === Infinity ? 0 : n.min)
-                        : valueAgg === 'MAX'
-                            ? (n.max === -Infinity ? 0 : n.max)
-                            : (valueAgg === 'COUNT' || valueAgg === 'GROUP_BY')
-                                ? n.count
-                                : n.sum;
-
-                return {
-                    name: n.name,
-                    value: resolvedValue,
-                    children: Array.from(n.children.values()).map(toOutput),
-                };
-            };
-            return toOutput(node);
-        });
-
-    return roots;
 }
 
 export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
@@ -586,29 +525,29 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
 
     if (type === ChartType.PIE || type === ChartType.DONUT) {
         if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.LEGEND });
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE, aggregation: 'SUM' });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE });
+        else assignments.push({ field: '__count__', role: FieldRoles.VALUE });
         return assignments;
     }
 
     if (type === ChartType.SUNBURST || type === ChartType.TREEMAP) {
         [firstCat, secondCat, sortedCategorical[2]?.name].filter(Boolean).forEach((field) => assignments.push({ field, role: FieldRoles.HIERARCHY }));
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE, aggregation: 'SUM' });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE });
+        else assignments.push({ field: '__count__', role: FieldRoles.VALUE });
         return assignments;
     }
 
     if (type === ChartType.SCATTER) {
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.X, aggregation: 'SUM' });
-        if (secondNum || firstNum) assignments.push({ field: secondNum || firstNum || '__count__', role: FieldRoles.Y, aggregation: 'SUM' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.X });
+        if (secondNum || firstNum) assignments.push({ field: secondNum || firstNum || '__count__', role: FieldRoles.Y });
         if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.COLOR });
         return assignments;
     }
 
     if (type === ChartType.BUBBLE) {
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.X, aggregation: 'SUM' });
-        assignments.push({ field: secondNum || firstNum || '__count__', role: FieldRoles.Y, aggregation: firstNum ? 'SUM' : 'COUNT' });
-        assignments.push({ field: thirdNum || secondNum || firstNum || '__count__', role: FieldRoles.SIZE, aggregation: firstNum ? 'SUM' : 'COUNT' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.X });
+        assignments.push({ field: secondNum || firstNum || '__count__', role: FieldRoles.Y });
+        assignments.push({ field: thirdNum || secondNum || firstNum || '__count__', role: FieldRoles.SIZE });
         if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.COLOR });
         return assignments;
     }
@@ -616,22 +555,22 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
     if (type === ChartType.HEATMAP) {
         if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.X });
         if (secondCat || firstCat) assignments.push({ field: secondCat || firstCat || '__bucket__', role: FieldRoles.Y });
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE, aggregation: 'SUM' });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE });
+        else assignments.push({ field: '__count__', role: FieldRoles.VALUE });
         return assignments;
     }
 
     if (type === ChartType.GAUGE || type === ChartType.KPI_SINGLE) {
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE, aggregation: 'SUM' });
-        else assignments.push({ field: '__count__', role: FieldRoles.VALUE, aggregation: 'COUNT' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.VALUE });
+        else assignments.push({ field: '__count__', role: FieldRoles.VALUE });
         return assignments;
     }
 
     if (type === ChartType.RADAR) {
         if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.LEGEND });
-        [firstNum, secondNum, thirdNum].filter(Boolean).forEach((field) => assignments.push({ field, role: FieldRoles.Y, aggregation: 'SUM' }));
+        [firstNum, secondNum, thirdNum].filter(Boolean).forEach((field) => assignments.push({ field, role: FieldRoles.Y }));
         if (assignments.filter(a => a.role === FieldRoles.Y).length === 0) {
-            assignments.push({ field: '__count__', role: FieldRoles.Y, aggregation: 'COUNT' });
+            assignments.push({ field: '__count__', role: FieldRoles.Y });
         }
         return assignments;
     }
@@ -639,8 +578,8 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
     if (type === ChartType.SPARKLINE || type === ChartType.LINE || type === ChartType.AREA) {
         if (firstTime) assignments.push({ field: firstTime, role: FieldRoles.TIME });
         else if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.X });
-        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.Y, aggregation: 'SUM' });
-        else assignments.push({ field: '__count__', role: FieldRoles.Y, aggregation: 'COUNT' });
+        if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.Y });
+        else assignments.push({ field: '__count__', role: FieldRoles.Y });
         if (secondCat) assignments.push({ field: secondCat, role: FieldRoles.LEGEND });
         return assignments;
     }
@@ -648,8 +587,8 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
     // BAR + generic fallback
     if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.X });
     else if (firstTime) assignments.push({ field: firstTime, role: FieldRoles.TIME });
-    if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.Y, aggregation: 'SUM' });
-    else assignments.push({ field: '__count__', role: FieldRoles.Y, aggregation: 'COUNT' });
+    if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.Y });
+    else assignments.push({ field: '__count__', role: FieldRoles.Y });
     if (secondCat) assignments.push({ field: secondCat, role: FieldRoles.LEGEND });
 
     return assignments;

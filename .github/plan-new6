@@ -1,0 +1,125 @@
+You are a senior frontend architect.
+
+My frontend has already migrated to a query-driven BI architecture.
+
+Now I need to perform a **safe cleanup of legacy aggregation logic** without breaking backward compatibility.
+
+---
+
+# 🎯 OBJECTIVE
+
+Remove ALL remaining frontend-side aggregation, grouping, and transformation logic that is now handled by backend.
+
+---
+
+# 🚨 STRICT RULES
+
+1. DO NOT break existing charts
+2. DO NOT change UI behavior
+3. Preserve backward compatibility for saved configs
+4. Only remove UNUSED or DUPLICATE logic
+
+---
+
+# 🔥 STEP 1 — IDENTIFY LEGACY LOGIC
+
+Search and remove:
+
+* groupBy implementations
+* aggregation functions (SUM, AVG, COUNT)
+* sorting logic tied to measures
+* top-N slicing in Visualization
+* any processData() remnants
+
+---
+
+# 🔥 STEP 2 — CLEAN chartConfigSystem.js
+
+Remove:
+
+* aggregation assignment logic
+* fallback aggregation defaults
+
+Keep only:
+
+* dimension mapping
+* measure references ({ name | expression })
+
+---
+
+# 🔥 STEP 3 — CLEAN DataPanel.jsx
+
+Remove:
+
+* aggregation dropdowns for numeric fields
+* auto-aggregation suggestions
+
+Keep:
+
+* field selection
+* semantic measure selection
+
+---
+
+# 🔥 STEP 4 — CLEAN Validation Layer
+
+Update auditChartConfiguration():
+
+* remove aggregation validation rules
+* keep only:
+
+  * missing fields
+  * invalid combinations
+  * chart suitability
+
+---
+
+# 🔥 STEP 5 — ENSURE PURE QUERY FLOW
+
+Final frontend flow must be:
+
+config → queryBuilder → backend → adapter → chart
+
+NO data transformation in UI.
+
+---
+
+# 🔥 STEP 6 — ADD SAFETY FALLBACK
+
+If old chart config contains:
+
+{
+field: "sales",
+aggregation: "SUM"
+}
+
+Convert to:
+
+{
+expression: "SUM(sales)"
+}
+
+---
+
+# 🔥 STEP 7 — FINAL VERIFICATION
+
+Test:
+
+* old saved dashboards
+* new semantic dashboards
+* mixed configs
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+* cleaned files list
+* removed functions list
+* before/after comparison
+* confirmation no frontend aggregation exists
+
+---
+
+# 🚀 FINAL GOAL
+
+Frontend becomes a **pure visualization client**, not a data engine.

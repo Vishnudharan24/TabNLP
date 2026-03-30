@@ -13,7 +13,6 @@ import {
     assignRoles,
     getChartRequirementText,
     isFieldCompatibleWithRole,
-    getAllowedAggregationsForField,
 } from '../services/chartRecommender';
 import { autoAssignFields, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
 
@@ -94,14 +93,14 @@ const ALL_CHART_TYPES = [
     ChartType.TABLE,
 ];
 
-const AGG_OPTIONS = ['SUM', 'AVG', 'COUNT'];
+const SEMANTIC_PREFIX = '__semantic__:';
 
-const AGGREGATION_LABELS = {
-    SUM: 'Total',
-    COUNT: 'Count',
-    AVG: 'Average',
-    GROUP_BY: 'Count',
+const encodeSemanticField = (name = '') => `${SEMANTIC_PREFIX}${String(name || '').trim()}`;
+const decodeSemanticField = (field = '') => {
+    const text = String(field || '');
+    return text.startsWith(SEMANTIC_PREFIX) ? text.slice(SEMANTIC_PREFIX.length) : text;
 };
+const isSemanticField = (field = '') => String(field || '').startsWith(SEMANTIC_PREFIX);
 
 const ROLE_LABELS = {
     [FieldRoles.X]: 'Dimension',
@@ -165,8 +164,6 @@ const getFieldTypeMeta = (type) => {
     };
 };
 
-const getAggregationOptionsForFieldType = () => AGG_OPTIONS;
-
 const getRoleHelpText = (key) => {
     if (key === 'axis') return 'Select a category field';
     if (key === 'values') return 'Select a numeric field';
@@ -176,31 +173,14 @@ const getRoleHelpText = (key) => {
     return 'Select a field';
 };
 
-const toBusinessAggregationLabel = (agg) => AGGREGATION_LABELS[String(agg || '').toUpperCase()] || String(agg || '').replace('_', ' ');
-
-const toInternalAggregation = (uiAgg, fieldType) => {
-    const upper = String(uiAgg || 'COUNT').toUpperCase();
-    if (fieldType === 'number') return upper;
-    return upper === 'COUNT' ? 'GROUP_BY' : 'GROUP_BY';
-};
-
-const toUiAggregation = (internalAgg = '') => {
-    const agg = String(internalAgg || '').toUpperCase();
-    if (agg === 'GROUP_BY') return 'COUNT';
-    if (agg === 'SUM' || agg === 'AVG' || agg === 'COUNT') return agg;
-    return 'COUNT';
-};
-
-const FieldChip = ({ field, role, aggregation, fieldType, onRemove, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) => {
+const FieldChip = ({ field, displayName, role, fieldType, onRemove, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) => {
     const meta = getFieldTypeMeta(fieldType);
-    const showAgg = ['y', 'value', 'x', 'size'].includes(role) && aggregation;
 
     return (
         <div className="group flex items-center gap-1.5 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80">
             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${meta.chipClass}`}>{meta.icon}</span>
-            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[130px]" title={field}>{field}</span>
+            <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[130px]" title={displayName || field}>{displayName || field}</span>
             <span className="text-[9px] font-bold uppercase text-gray-400 dark:text-gray-500">{ROLE_LABELS[role] || role}</span>
-            {showAgg && <span className="text-[9px] font-semibold text-violet-500">({toBusinessAggregationLabel(aggregation)})</span>}
             {(canMoveUp || canMoveDown) && (
                 <>
                     <button onClick={onMoveUp} disabled={!canMoveUp} className="text-[10px] px-1 text-gray-400 disabled:opacity-30 hover:text-gray-600 dark:hover:text-gray-300">↑</button>
@@ -269,6 +249,7 @@ const DataPanel = ({
     datasets,
     selectedDatasetId,
     setSelectedDatasetId,
+    semanticMeasures = [],
     activeChartConfig,
     onUpdateConfig,
     onUpdateLayout,
@@ -296,11 +277,6 @@ const DataPanel = ({
         return 'string';
     };
 
-    const getUiAggOptionsForFieldType = (fieldType = 'string') => {
-        const allowed = getAllowedAggregationsForField({ type: fieldType });
-        const normalized = Array.from(new Set(allowed.map(a => toUiAggregation(a))));
-        return normalized.filter(a => AGG_OPTIONS.includes(a));
-    };
     const filteredColumns = selectedDataset?.columns.filter(col =>
         col.name.toLowerCase().includes(fieldSearch.toLowerCase())
     ) || [];
@@ -323,12 +299,12 @@ const DataPanel = ({
     const syncConfigFromAssignments = (nextAssignments = [], nextType) => {
         if (!activeChartConfig) return;
         const merged = configFromAssignments(nextType || activeChartConfig.type, nextAssignments);
+        const normalizedMeasures = (Array.isArray(merged.measures) ? merged.measures : []).map((m) => decodeSemanticField(m));
         onUpdateConfig({
             type: nextType || activeChartConfig.type,
             assignments: nextAssignments,
             dimension: merged.dimension,
-            measures: merged.measures,
-            aggregation: merged.aggregation,
+            measures: normalizedMeasures,
             xAxisField: merged.xAxisField,
             yAxisField: merged.yAxisField,
             legendField: merged.legendField,
@@ -371,7 +347,7 @@ const DataPanel = ({
         });
         const dim = (auto?.xAxisField || auto?.timeField || auto?.dimension || '').trim();
         const measure = Array.isArray(auto?.measures) && auto.measures.length > 0 ? auto.measures[0] : '__count__';
-        const prettyMeasure = measure === '__count__' ? 'Count' : `${toBusinessAggregationLabel(auto?.aggregation || 'COUNT')}(${measure})`;
+        const prettyMeasure = measure === '__count__' ? 'Count' : measure;
         return {
             type: top.type,
             assignments: auto?.assignments || [],
@@ -442,7 +418,6 @@ const DataPanel = ({
             const next = [...currentAssignments, {
                 field: col.name,
                 role: orgRole,
-                aggregation: undefined,
             }];
             syncConfigFromAssignments(next);
             return;
@@ -465,15 +440,9 @@ const DataPanel = ({
             return;
         }
 
-        const uiFieldType = inferUiFieldType(col);
-        const allowedAgg = getAllowedAggregationsForField({ type: uiFieldType });
-
         const next = [...currentAssignments, {
             field: col.name,
             role: nextRole,
-            aggregation: ['y', 'value', 'x', 'size'].includes(nextRole)
-                ? (allowedAgg.includes(activeChartConfig.aggregation) ? activeChartConfig.aggregation : allowedAgg[0])
-                : undefined,
         }];
         syncConfigFromAssignments(next);
     };
@@ -506,6 +475,19 @@ const DataPanel = ({
         return ROLE_SECTION_DEFS;
     }, [activeChartConfig?.type]);
 
+    const semanticMeasureLookup = useMemo(() => {
+        const out = new Map();
+        (Array.isArray(semanticMeasures) ? semanticMeasures : []).forEach((item) => {
+            const name = String(item?.name || '').trim();
+            if (!name) return;
+            out.set(name, {
+                name,
+                expression: String(item?.expression || '').trim(),
+            });
+        });
+        return out;
+    }, [semanticMeasures]);
+
     const openFieldPicker = (role) => {
         setPickerRole(role);
         setPickerSearch('');
@@ -525,16 +507,47 @@ const DataPanel = ({
             ? new Set(effectiveAssignments.filter(a => a.role === pickerRole).map(a => a.field))
             : new Set(effectiveAssignments.map(a => a.field));
         const includeCount = ['y', 'value', 'x', 'size'].includes(pickerRole);
+        const includeSemantic = ['y', 'value', 'size'].includes(pickerRole);
 
         const allowed = selectedDataset.columns.filter((col) => isFieldCompatibleWithRole(activeChartConfig?.type, pickerRole, col));
 
-        return allowed
+        const baseFields = allowed
             .filter(col => !used.has(col.name))
             .filter(col => col.name.toLowerCase().includes(pickerSearch.toLowerCase()))
-            .concat(includeCount && !used.has('__count__') ? [{ name: '__count__', type: 'number' }] : []);
-    }, [pickerRole, selectedDataset, effectiveAssignments, pickerSearch, activeChartConfig?.type]);
+            .map((col) => ({
+                name: col.name,
+                label: col.name,
+                type: col.type,
+                isSemantic: false,
+            }));
 
-    const handlePickFieldForRole = (fieldName, role = pickerRole) => {
+        const countField = includeCount && !used.has('__count__')
+            ? [{ name: '__count__', label: '__count__', type: 'number', isSemantic: false }]
+            : [];
+
+        const semanticFieldCandidates = includeSemantic
+            ? Array.from(semanticMeasureLookup.values())
+                .map((measure) => ({
+                    name: encodeSemanticField(measure.name),
+                    label: measure.name,
+                    type: 'number',
+                    isSemantic: true,
+                    semanticMeasureName: measure.name,
+                    semanticMeasureExpression: measure.expression,
+                }))
+                .filter((measure) => !used.has(measure.name))
+                .filter((measure) => measure.label.toLowerCase().includes(pickerSearch.toLowerCase()))
+            : [];
+
+        return [...baseFields, ...countField, ...semanticFieldCandidates];
+    }, [pickerRole, selectedDataset, effectiveAssignments, pickerSearch, activeChartConfig?.type, semanticMeasureLookup]);
+
+    const handlePickFieldForRole = (candidateInput, role = pickerRole) => {
+        const pickedCandidate = typeof candidateInput === 'string'
+            ? candidateFieldsForRole.find((item) => item.name === candidateInput) || { name: candidateInput, label: candidateInput, isSemantic: isSemanticField(candidateInput) }
+            : candidateInput;
+
+        const fieldName = pickedCandidate?.name;
         if (!role || !fieldName) return;
         if (effectiveAssignments.some(a => a.field === fieldName && a.role === role)) return;
 
@@ -550,22 +563,14 @@ const DataPanel = ({
             ? effectiveAssignments.filter(a => a.role !== resolvedRole)
             : [...effectiveAssignments];
 
-        const pickedAllowedAgg = getAllowedAggregationsForField(pickedCol || {});
         const next = [...base, {
             field: fieldName,
             role: resolvedRole,
-            aggregation: ['y', 'value', 'x', 'size'].includes(resolvedRole)
-                ? (pickedAllowedAgg.includes(activeChartConfig?.aggregation) ? activeChartConfig?.aggregation : pickedAllowedAgg[0])
-                : undefined,
+            semanticMeasureName: pickedCandidate?.isSemantic ? pickedCandidate?.semanticMeasureName : undefined,
+            semanticMeasureExpression: pickedCandidate?.isSemantic ? pickedCandidate?.semanticMeasureExpression : undefined,
         }];
         syncConfigFromAssignments(next);
         closeFieldPicker();
-    };
-
-    const updateAssignment = (index, updates) => {
-        const next = [...effectiveAssignments];
-        next[index] = { ...next[index], ...updates };
-        syncConfigFromAssignments(next);
     };
 
     const removeAssignment = (index) => {
@@ -892,6 +897,44 @@ const DataPanel = ({
                                                     </div>
                                                 ))}
                                             </div>
+
+                                            {Array.isArray(semanticMeasures) && semanticMeasures.length > 0 && (
+                                                <div className="space-y-1">
+                                                    <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Semantic Measures</p>
+                                                    <div className="space-y-1">
+                                                        {semanticMeasures.map((measure) => {
+                                                            const measureName = String(measure?.name || '').trim();
+                                                            if (!measureName) return null;
+                                                            const semanticField = encodeSemanticField(measureName);
+                                                            const selected = effectiveAssignments.some(a => a.field === semanticField);
+                                                            return (
+                                                                <button
+                                                                    key={measureName}
+                                                                    onClick={() => {
+                                                                        const defaultRole = activeChartConfig?.type === ChartType.BUBBLE
+                                                                            ? FieldRoles.SIZE
+                                                                            : FieldRoles.VALUE;
+                                                                        handlePickFieldForRole({
+                                                                            name: semanticField,
+                                                                            label: measureName,
+                                                                            type: 'number',
+                                                                            isSemantic: true,
+                                                                            semanticMeasureName: measureName,
+                                                                            semanticMeasureExpression: String(measure?.expression || ''),
+                                                                        }, defaultRole);
+                                                                    }}
+                                                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${selected ? 'bg-violet-100 dark:bg-violet-900/30 ring-1 ring-violet-300 dark:ring-violet-700' : 'hover:bg-violet-50 dark:hover:bg-violet-900/20'}`}
+                                                                    title={measure?.expression || measureName}
+                                                                >
+                                                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-200">Σ</span>
+                                                                    <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">{measureName}</span>
+                                                                    <span className="ml-auto text-[9px] font-black text-violet-600 dark:text-violet-300">SEM</span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </>
                                     )}
                                 </div>
@@ -926,8 +969,8 @@ const DataPanel = ({
                                                                 <div className="flex-1">
                                                                     <FieldChip
                                                                         field={chip.field}
+                                                                        displayName={chip.semanticMeasureName || decodeSemanticField(chip.field)}
                                                                         role={chip.role}
-                                                                        aggregation={chip.aggregation}
                                                                         fieldType={chipType}
                                                                         canMoveUp={chip.role === FieldRoles.HIERARCHY && idx > 0}
                                                                         canMoveDown={chip.role === FieldRoles.HIERARCHY && idx < chips.length - 1}
@@ -936,15 +979,6 @@ const DataPanel = ({
                                                                         onRemove={() => removeAssignment(chip.idx)}
                                                                     />
                                                                 </div>
-                                                                {['y', 'value', 'x', 'size'].includes(chip.role) && activeChartConfig?.type !== ChartType.ORG_CHART && activeChartConfig?.type !== ChartType.ORG_TREE_STRUCTURED && (
-                                                                    <select
-                                                                        value={toUiAggregation(chip.aggregation || 'COUNT')}
-                                                                        onChange={(e) => updateAssignment(chip.idx, { aggregation: toInternalAggregation(e.target.value, chipType) })}
-                                                                        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md py-1 px-1.5 text-[10px] font-semibold text-gray-700 dark:text-gray-200"
-                                                                    >
-                                                                        {getUiAggOptionsForFieldType(chipType).map(agg => <option key={agg} value={agg}>{toBusinessAggregationLabel(agg)}</option>)}
-                                                                    </select>
-                                                                )}
                                                             </div>
                                                         );
                                                     })}
@@ -982,7 +1016,7 @@ const DataPanel = ({
                                                     if (e.key === 'Enter') {
                                                         e.preventDefault();
                                                         const picked = candidateFieldsForRole[pickerCursor];
-                                                        if (picked?.name) handlePickFieldForRole(picked.name);
+                                                        if (picked?.name) handlePickFieldForRole(picked);
                                                     }
                                                     if (e.key === 'Escape') {
                                                         e.preventDefault();
@@ -1002,11 +1036,16 @@ const DataPanel = ({
                                                 return (
                                                     <button
                                                         key={`${field.name}-${idx}`}
-                                                        onClick={() => handlePickFieldForRole(field.name)}
+                                                        onClick={() => handlePickFieldForRole(field)}
                                                         className={`w-full text-left px-2.5 py-1.5 text-[11px] flex items-center gap-2 ${active ? 'bg-blue-50 dark:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/60'}`}
                                                     >
                                                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${meta.chipClass}`}>{meta.icon}</span>
-                                                        <span className="truncate text-gray-700 dark:text-gray-200">{field.name}</span>
+                                                        <span className="truncate text-gray-700 dark:text-gray-200">{field.label || field.name}</span>
+                                                        {field.isSemantic && (
+                                                            <span className="ml-auto text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-200">
+                                                                SEM
+                                                            </span>
+                                                        )}
                                                     </button>
                                                 );
                                             })}
@@ -1015,34 +1054,6 @@ const DataPanel = ({
                                 )}
                             </div>
 
-                            {/* Aggregation selector */}
-                            {activeChartConfig && activeChartConfig.type !== ChartType.ORG_CHART && (
-                                <div className="space-y-3">
-                                    <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Aggregation</h4>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {(() => {
-                                            return AGG_OPTIONS.map(agg => (
-                                            <button
-                                                key={agg}
-                                                onClick={() => {
-                                                    const nextAssignments = effectiveAssignments.map((a) => {
-                                                        if (![FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)) return a;
-                                                        const field = selectedDataset?.columns?.find((c) => c.name === a.field);
-                                                        const fieldType = a.field === '__count__' ? 'number' : inferUiFieldType(field || {});
-                                                        return { ...a, aggregation: toInternalAggregation(agg, fieldType) };
-                                                    });
-                                                    syncConfigFromAssignments(nextAssignments);
-                                                    onUpdateConfig({ aggregation: agg });
-                                                }}
-                                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${toUiAggregation(activeChartConfig.aggregation) === agg ? 'bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 border-gray-800 dark:border-gray-200' : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-400'}`}
-                                            >
-                                                {toBusinessAggregationLabel(agg)}
-                                            </button>
-                                            ));
-                                        })()}
-                                    </div>
-                                </div>
-                            )}
                         </>
                     ) : (
                         <div className="space-y-6">

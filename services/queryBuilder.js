@@ -1,10 +1,39 @@
 import { ChartType } from '../types';
 import { FieldRoles, configFromAssignments, convertOldConfig } from './chartConfigSystem';
 
+const SEMANTIC_PREFIX = '__semantic__:';
+
+const parseSemanticMeasureFromAssignment = (assignment = {}) => {
+    if (assignment?.semanticMeasureName) {
+        return {
+            name: String(assignment.semanticMeasureName),
+            expression: assignment.semanticMeasureExpression || undefined,
+        };
+    }
+
+    const field = String(assignment?.field || '');
+    if (!field.startsWith(SEMANTIC_PREFIX)) return null;
+
+    const name = field.slice(SEMANTIC_PREFIX.length).trim();
+    if (!name) return null;
+
+    return {
+        name,
+        expression: assignment?.semanticMeasureExpression || undefined,
+    };
+};
+
 const toUpperAgg = (aggregation) => {
     const value = String(aggregation || '').toUpperCase();
     if (['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'GROUP_BY'].includes(value)) return value;
     return 'COUNT';
+};
+
+const toLegacyMeasureExpression = (field, aggregation) => {
+    const agg = toUpperAgg(aggregation);
+    if (field === '__count__') return 'COUNT(*)';
+    if (agg === 'GROUP_BY') return `COUNT(${field})`;
+    return `${agg}(${field})`;
 };
 
 const normalizeAssignments = (config) => {
@@ -61,17 +90,41 @@ const collectMeasuresFromAssignments = (assignments = [], fallbackAggregation = 
 
     assignments.forEach((a) => {
         if (!a?.field || ![FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)) return;
+
+        const semantic = parseSemanticMeasureFromAssignment(a);
+        if (semantic?.name) {
+            const key = `${semantic.name}::${semantic.expression || ''}`;
+            if (!picked.some(item => `${item.name}::${item.expression || ''}` === key)) {
+                picked.push({
+                    name: semantic.name,
+                    ...(semantic.expression ? { expression: semantic.expression } : {}),
+                });
+            }
+            return;
+        }
+
+        if (typeof a?.expression === 'string' && a.expression.trim()) {
+            const alias = a?.name || (a.field === '__count__' ? 'Count' : a.field);
+            const expression = a.expression.trim();
+            const key = `${alias}::${expression}`;
+            if (!picked.some(item => `${item.name}::${item.expression}` === key)) {
+                picked.push({ name: alias, expression });
+            }
+            return;
+        }
+
         const field = a.field;
         const aggregation = toUpperAgg(a.aggregation || fallbackAggregation);
         const alias = field === '__count__' ? 'Count' : field;
-        const key = `${field}::${aggregation}::${alias}`;
-        if (!picked.some(item => `${item.field}::${item.aggregation}::${item.alias}` === key)) {
-            picked.push({ field, aggregation, alias });
+        const expression = toLegacyMeasureExpression(field, aggregation);
+        const key = `${alias}::${expression}`;
+        if (!picked.some(item => `${item.name}::${item.expression}` === key)) {
+            picked.push({ name: alias, expression });
         }
     });
 
     if (picked.length === 0) {
-        picked.push({ field: '__count__', aggregation: 'COUNT', alias: 'Count' });
+        picked.push({ name: 'Count', expression: 'COUNT(*)' });
     }
 
     return picked;
@@ -154,7 +207,7 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
     const measures = chartType === ChartType.TABLE
         ? []
         : collectMeasuresFromAssignments(assignments, normalized.aggregation || 'COUNT');
-    const sortField = measures[0]?.alias || measures[0]?.field || dimensions[0] || 'Count';
+    const sortField = measures[0]?.name || measures[0]?.expression || dimensions[0] || 'Count';
 
     return {
         datasetId,

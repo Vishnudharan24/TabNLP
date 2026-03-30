@@ -8,8 +8,15 @@ import { configFromAssignments, convertOldConfig, FieldRoles } from '../services
 import { auditChartConfiguration } from '../services/chartValidationEngine';
 import { buildQuery } from '../services/queryBuilder';
 import { backendApi } from '../services/backendApi';
+import { adaptQueryResponse } from '../services/dataAdapter';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
+
+const SEMANTIC_PREFIX = '__semantic__:';
+const toDisplayMeasureName = (value = '') => {
+    const text = String(value || '');
+    return text.startsWith(SEMANTIC_PREFIX) ? text.slice(SEMANTIC_PREFIX.length) : text;
+};
 
 const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant', onDataPointClick, isExportRenderMode = false }) => {
     const { theme } = useTheme();
@@ -189,25 +196,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         .trim()
         .replace(/\b\w/g, (char) => char.toUpperCase());
 
-    const primaryValueAssignment = (Array.isArray(normalizedConfig?.assignments) ? normalizedConfig.assignments : [])
-        .find((a) => a?.role === FieldRoles.VALUE || a?.role === FieldRoles.Y);
-
-    const effectiveAggregationMode = toTitleCase(
-        primaryValueAssignment?.aggregation || normalizedConfig?.aggregation || ''
-    ).toUpperCase() || (
-        !Array.isArray(normalizedConfig?.measures) || normalizedConfig.measures.length === 0
-            ? 'COUNT'
-            : (normalizedConfig?.aggregation || 'SUM')
-    );
-
-    const isGroupByMode = effectiveAggregationMode === 'GROUP_BY';
-    const groupByTargetField = primaryValueAssignment?.field || normalizedConfig?.measures?.[0] || '__count__';
-
     const sanitizedMeasureFields = useMemo(() => {
-        if (isGroupByMode) return ['Count'];
-
         const rawMeasures = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
-            ? normalizedConfig.measures
+            ? normalizedConfig.measures.map(toDisplayMeasureName)
             : ['__count__'];
 
         const numericColumns = new Set(
@@ -220,18 +211,16 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         const deduped = Array.from(new Set(filtered));
 
         return deduped.length > 0 ? deduped : ['__count__'];
-    }, [isGroupByMode, normalizedConfig?.measures, dataset?.columns]);
+    }, [normalizedConfig?.measures, dataset?.columns]);
 
     const semanticTitle = (() => {
         const configured = (config.title || '').trim();
         const isGeneric = !configured || /^new visual$/i.test(configured) || /^analytics card$/i.test(configured);
         if (!isGeneric) return configured;
 
-        const firstMeasure = isGroupByMode
-            ? (groupByTargetField && groupByTargetField !== '__count__'
-                ? `Count Of ${toTitleCase(groupByTargetField)}`
-                : 'Count')
-            : (normalizedConfig?.measures?.[0] ? toTitleCase(normalizedConfig.measures[0]) : 'Value');
+        const firstMeasure = normalizedConfig?.measures?.[0]
+            ? toTitleCase(toDisplayMeasureName(normalizedConfig.measures[0]))
+            : 'Value';
         const dim = effectiveDimension ? toTitleCase(effectiveDimension) : 'Category';
         return `${firstMeasure} by ${dim}`;
     })();
@@ -240,21 +229,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         ? `Grouped by ${toTitleCase(effectiveDimension)}`
         : toTitleCase(config.type.replace(/_/g, ' '));
 
-    const valueFieldsText = isGroupByMode
-        ? (groupByTargetField && groupByTargetField !== '__count__'
-            ? `Count of ${toTitleCase(groupByTargetField)}`
-            : 'Count')
-        : (Array.isArray(sanitizedMeasureFields) && sanitizedMeasureFields.length > 0
-            ? sanitizedMeasureFields.map(toTitleCase).join(', ')
-            : 'None');
-
-    const aggregationText = (() => {
-        const agg = String(effectiveAggregationMode || '').toUpperCase();
-        if (agg === 'SUM') return 'Total';
-        if (agg === 'AVG') return 'Average';
-        if (agg === 'COUNT' || agg === 'GROUP_BY') return 'Count';
-        return toTitleCase(agg || 'N/A');
-    })();
+    const valueFieldsText = Array.isArray(sanitizedMeasureFields) && sanitizedMeasureFields.length > 0
+        ? sanitizedMeasureFields.map(toTitleCase).join(', ')
+        : 'None';
 
     const queryPayload = useMemo(() => buildQuery({
         config: normalizedConfig,
@@ -293,20 +270,10 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             setQueryError('');
             try {
                 const response = await backendApi.runQuery(queryPayload);
-                const columns = Array.isArray(response?.columns) ? response.columns : [];
-                const rowMatrix = Array.isArray(response?.rows) ? response.rows : [];
-                const rows = rowMatrix.map((row) => {
-                    if (Array.isArray(row)) {
-                        return Object.fromEntries(columns.map((col, idx) => [col, row[idx]]));
-                    }
-                    if (row && typeof row === 'object') {
-                        return row;
-                    }
-                    return {};
-                });
+                const adapted = adaptQueryResponse(response);
                 if (!isCancelled) {
-                    setQueryColumns(columns);
-                    setChartData(rows);
+                    setQueryColumns(adapted.columns);
+                    setChartData(adapted.rows);
                 }
             } catch (error) {
                 if (!isCancelled) {
@@ -498,11 +465,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         );
 
         const { type } = normalizedConfig;
-        const measures = isGroupByMode
-            ? ['Count']
-            : (Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
-                ? normalizedConfig.measures
-                : ['__count__']);
+        const measures = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
+            ? normalizedConfig.measures.map(toDisplayMeasureName)
+            : ['__count__'];
         const configuredFontSize = Math.max(10, Number(normalizedConfig?.style?.fontSize || 11));
         const configuredFontFamily = normalizedConfig?.style?.fontFamily || 'Plus Jakarta Sans, sans-serif';
 
@@ -639,9 +604,6 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                             </span>
                             <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-semibold truncate max-w-full" title={`Values: ${valueFieldsText}`}>
                                 {`Values: ${valueFieldsText}`}
-                            </span>
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-semibold" title={`Aggregation: ${aggregationText}`}>
-                                {`Aggregation: ${aggregationText}`}
                             </span>
                         </div>
                         <div className="mt-2">

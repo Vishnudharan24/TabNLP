@@ -320,6 +320,7 @@ const App = () => {
     const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
     const [routePath, setRoutePath] = useState(() => normalizeRoutePath(window.location.pathname || '/'));
     const [orgExplorerChartId, setOrgExplorerChartId] = useState(null);
+    const [semanticMeasuresByDataset, setSemanticMeasuresByDataset] = useState({});
 
     const navigatePath = (path) => {
         const internalTarget = path || '/';
@@ -599,6 +600,36 @@ const App = () => {
         if (datasets.length === 0) return;
         setSelectedDatasetId(datasets[0].id);
     }, [datasets, selectedDatasetId]);
+
+    useEffect(() => {
+        let isCancelled = false;
+
+        const loadSemanticMeasures = async () => {
+            if (!selectedDatasetId || !authToken) return;
+            try {
+                const response = await backendApi.getSemanticMeasures(selectedDatasetId);
+                if (isCancelled) return;
+                const measures = Array.isArray(response?.measures) ? response.measures : [];
+                setSemanticMeasuresByDataset((prev) => ({
+                    ...prev,
+                    [selectedDatasetId]: measures,
+                }));
+            } catch {
+                if (isCancelled) return;
+                setSemanticMeasuresByDataset((prev) => ({
+                    ...prev,
+                    [selectedDatasetId]: [],
+                }));
+            }
+        };
+
+        loadSemanticMeasures();
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [selectedDatasetId, authToken]);
+
     const selectedDataset = useMemo(
         () => datasets.find(d => d.id === selectedDatasetId) || datasets[0] || null,
         [datasets, selectedDatasetId]
@@ -1383,7 +1414,7 @@ const App = () => {
                                     {currentPageCharts.length === 0 && <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}><BarChartIcon size={48} className="opacity-20 mb-4" /><p className="text-sm font-medium">Add visuals to start your report.</p></div>}
                                 </div>
 
-                                <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
+                                <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} semanticMeasures={semanticMeasuresByDataset[selectedDatasetId] || []} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
                             </div>
                         </div>
                     )}

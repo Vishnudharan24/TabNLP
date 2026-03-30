@@ -285,6 +285,13 @@ export const backendApi = {
         }, baseUrl, requestConfig);
     },
 
+    getSemanticMeasures(datasetId, baseUrl, requestConfig) {
+        const query = new URLSearchParams({ datasetId: String(datasetId || '') }).toString();
+        return request(`/semantic/measures?${query}`, {
+            method: 'GET',
+        }, baseUrl, requestConfig);
+    },
+
     getTestExcel(baseUrl, requestConfig) {
         return request('/test/file', { method: 'GET' }, baseUrl, requestConfig);
     },

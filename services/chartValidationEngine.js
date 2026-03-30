@@ -4,8 +4,6 @@ import { getChartRequirementText } from './chartRecommender';
 
 const SAMPLE_LIMIT = 5000;
 
-const toUpper = (value) => String(value || '').trim().toUpperCase();
-
 const normalizeChartType = (type) => {
     if ([
         ChartType.BAR,
@@ -140,20 +138,6 @@ const inferFieldTypeFromData = (fieldName, rows = []) => {
 
 const makeMessage = (code, message, fix) => ({ code, message, ...(fix ? { fix } : {}) });
 
-const hasNumericMeasure = (assignments, fieldMap) => {
-    return assignments.some((a) => {
-        if (![FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a?.role)) return false;
-        if (!a?.field) return false;
-        if (a.field === '__count__') return true;
-
-        const agg = toUpper(a.aggregation);
-        if (agg === 'COUNT' || agg === 'GROUP_BY') return true;
-
-        const meta = fieldMap.get(a.field);
-        return meta?.type === 'numeric';
-    });
-};
-
 const getDistinctCount = (rows, field) => {
     if (!field) return 0;
     return new Set(
@@ -230,27 +214,18 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     assignments.forEach((a) => {
         if (!a?.field || a.field === '__count__') return;
         const meta = getFieldMeta(a.field);
-        const agg = toUpper(a.aggregation || config?.aggregation || 'SUM');
         if (!meta?.name) {
             errors.push(makeMessage('UNKNOWN_FIELD', `Assigned field '${a.field}' does not exist in dataset columns.`));
-            return;
-        }
-
-        if (valueRoles.includes(a.role)) {
-            if (meta.type === 'id' && !['COUNT', 'GROUP_BY'].includes(agg)) {
-                errors.push(makeMessage('ID_INVALID_AGG', `ID field '${a.field}' supports COUNT only.`, { aggregation: 'COUNT' }));
-            }
-            if (meta.type === 'categorical' && ['SUM', 'AVG', 'MIN', 'MAX'].includes(agg)) {
-                errors.push(makeMessage('CATEGORICAL_INVALID_AGG', `Field '${a.field}' is categorical and cannot use ${agg}.`, { aggregation: 'COUNT' }));
-            }
         }
     });
 
     const hasNumeric = assignments.some((a) => {
         if (!valueRoles.includes(a?.role)) return false;
+        if (a?.semanticMeasureName) return true;
+        if (String(a?.field || '').startsWith('__semantic__:')) return true;
         if (a.field === '__count__') return true;
         const meta = getFieldMeta(a.field);
-        return meta?.type === 'numeric' || ['COUNT', 'GROUP_BY'].includes(toUpper(a.aggregation));
+        return meta?.type === 'numeric';
     });
 
     const xField = byRole(FieldRoles.TIME)[0]?.field || byRole(FieldRoles.X)[0]?.field || byRole(FieldRoles.LEGEND)[0]?.field;
@@ -315,7 +290,7 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
 
     const categoryCount = getDistinctCount(safeRows, xField);
     if (categoryCount > 30 && [ChartType.BAR, ChartType.LINE, ChartType.AREA, ChartType.COMBO_BAR_LINE].includes(chartType)) {
-        warnings.push(makeMessage('LABEL_OVERLAP', 'Axis labels may overlap. Consider Top-N or sorting.'));
+        warnings.push(makeMessage('LABEL_OVERLAP', 'Axis labels may overlap. Consider filtering data at source.'));
     }
     if (categoryCount > 10 && [ChartType.PIE, ChartType.DONUT].includes(chartType)) {
         warnings.push(makeMessage('PIE_CROWDED', 'Too many categories for a pie/donut chart.'));
