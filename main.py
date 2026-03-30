@@ -12,6 +12,8 @@ from fastapi import HTTPException
 from fastapi import Request
 from fastapi import Header
 from fastapi import Depends
+from fastapi import UploadFile
+from fastapi import File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -19,7 +21,7 @@ from typing import Optional, Literal, Any
 from pathlib import Path
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
-from services.data_services.ingestion_service import run_ingestion
+from services.data_services.ingestion_service import run_ingestion, run_uploaded_file_ingestion
 from services.hr.hr_analytics_service import compute_module
 from db.db_store import (
     upsert_source_config,
@@ -375,6 +377,36 @@ async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, _cu
 async def ingest_by_source_config(source_id: str, _current_user: dict = Depends(_require_current_user)):
     try:
         return await run_ingestion(source_id=source_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _raise_internal_error("Ingestion failed", e)
+
+
+@app.post("/ingest/upload")
+async def ingest_uploaded_file(file: UploadFile = File(...), current_user: dict = Depends(_require_current_user)):
+    try:
+        source_id = (current_user.get("name") or "").strip()
+        if not source_id:
+            raise ValueError("Authenticated user name is required for upload source id")
+
+        file_bytes = await file.read()
+        source_details = {
+            "source_type": "upload",
+            "uploader": {
+                "id": str(current_user.get("_id")),
+                "name": source_id,
+                "email": current_user.get("email"),
+            },
+        }
+
+        return await run_uploaded_file_ingestion(
+            file_bytes=file_bytes,
+            file_name=file.filename or "uploaded_file",
+            content_type=file.content_type or "",
+            source_id=source_id,
+            source_details=source_details,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

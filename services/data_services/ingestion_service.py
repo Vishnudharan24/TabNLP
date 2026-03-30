@@ -60,3 +60,43 @@ async def run_ingestion(source_id=None, url=None):
         "document_id": storage_result["document_id"],
         "ingested_at": storage_result["ingested_at"],
     }
+
+
+async def run_uploaded_file_ingestion(
+    *,
+    file_bytes: bytes,
+    file_name: str,
+    content_type: str,
+    source_id: str,
+    source_details: dict | None = None,
+):
+    if not file_bytes:
+        raise ValueError("Uploaded file is empty")
+
+    source_descriptor = file_name or "uploaded_file"
+
+    df = await asyncio.to_thread(
+        parse_data,
+        file_bytes,
+        content_type or "",
+        source_descriptor,
+    )
+
+    metadata = generate_metadata(
+        source_descriptor,
+        df,
+        source_type="upload",
+        source_details=source_details or {"source_type": "upload"},
+        response_headers={"content-type": content_type or ""},
+    )
+    metadata["source_id"] = source_id
+
+    storage_result = await store_dataset(metadata, df, source_id=source_id)
+
+    return {
+        "status": "success",
+        "source_id": storage_result["source_id"],
+        "version": storage_result["version"],
+        "document_id": storage_result["document_id"],
+        "ingested_at": storage_result["ingested_at"],
+    }
