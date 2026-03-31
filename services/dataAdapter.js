@@ -209,12 +209,25 @@ export const adaptQueryResponse = (response, config = {}) => {
     const records = rowMatrix.map((row) => toRowObject(columns, row));
 
     const chartTypeUpper = chartType.toUpperCase();
+    const isTable = chartTypeUpper === 'TABLE';
     const isPie = ['PIE', 'DONUT', 'ROSE', 'PIE_SEMI', 'DONUT_SEMI'].includes(chartTypeUpper);
     const isScatter = chartTypeUpper === 'SCATTER';
     const isBubble = chartTypeUpper === 'BUBBLE';
     const isCombo = chartTypeUpper.startsWith('COMBO');
     const isHierarchyChart = chartTypeUpper === 'TREEMAP' || chartTypeUpper === 'SUNBURST';
     const isOrgChart = chartTypeUpper === 'ORG_CHART' || chartTypeUpper === 'ORG_TREE_STRUCTURED';
+
+    if (isTable) {
+        return {
+            columns: [...columns],
+            rows: records,
+            records,
+            transformed: {
+                table: true,
+            },
+            meta: response?.meta || {},
+        };
+    }
 
     if (isHierarchyChart) {
         const hierarchyIdx = getColumnIndex(columns, '__hierarchy');

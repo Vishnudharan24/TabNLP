@@ -705,22 +705,40 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
 
             try {
                 const payload = { data: datasetData, mapping };
-                const responses = await Promise.all(MODULES.map((moduleName) => backendApi.getHrAnalytics(moduleName, payload)));
+                const responses = await Promise.allSettled(
+                    MODULES.map((moduleName) => backendApi.getHrAnalytics(moduleName, payload))
+                );
 
                 if (!mounted) return;
 
                 const nextAnalytics = {};
                 const validationList = [];
+                let successCount = 0;
 
-                responses.forEach((res) => {
-                    nextAnalytics[res.module] = res.data || {};
-                    if (res.validation) {
-                        validationList.push({ module: res.module, ...res.validation });
+                responses.forEach((res, idx) => {
+                    if (res.status === 'fulfilled') {
+                        const value = res.value;
+                        nextAnalytics[value.module] = value.data || {};
+                        if (value.validation) {
+                            validationList.push({ module: value.module, ...value.validation });
+                        }
+                        successCount += 1;
+                    } else {
+                        const moduleName = MODULES[idx];
+                        validationList.push({
+                            module: moduleName,
+                            missingFields: [],
+                            missingColumns: [],
+                            typeWarnings: [],
+                            isValid: false,
+                            error: res.reason?.message || 'Module unavailable',
+                        });
                     }
                 });
 
                 setAnalytics(nextAnalytics);
                 setValidation(validationList);
+                setError(successCount > 0 ? '' : 'Failed to load HR analytics');
             } catch (e) {
                 if (!mounted) return;
                 setError(e?.message || 'Failed to load HR analytics');

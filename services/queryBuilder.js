@@ -55,6 +55,15 @@ const toServerFilter = (filter) => {
         };
     }
 
+    if (filter.type === 'exclude') {
+        const values = Array.isArray(filter.values) ? filter.values.map(v => String(v)) : [];
+        return {
+            field: filter.column,
+            operator: 'NOT_IN',
+            value: values,
+        };
+    }
+
     if (filter.type === 'range') {
         return {
             field: filter.column,
@@ -63,10 +72,28 @@ const toServerFilter = (filter) => {
         };
     }
 
+    const operator = filter.operator || 'EQUALS';
+    const opUpper = String(operator).toUpperCase();
+    const rawValue = filter.value;
+
+    if (opUpper === 'BETWEEN') {
+        return {
+            field: filter.column,
+            operator: 'BETWEEN',
+            value: [filter.value, filter.valueSecondary],
+        };
+    }
+
+    if (!['IS_EMPTY', 'IS_TRUE', 'IS_FALSE'].includes(opUpper)) {
+        if (rawValue === '' || rawValue === null || rawValue === undefined) {
+            return null;
+        }
+    }
+
     return {
         field: filter.column,
-        operator: filter.operator || 'EQUALS',
-        value: filter.value,
+        operator,
+        value: rawValue,
     };
 };
 
@@ -201,8 +228,25 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
         columnType: 'string',
     }));
 
+    const datasetColumns = new Set(
+        (Array.isArray(dataset?.columns) ? dataset.columns : []).map((c) => c?.name)
+    );
+
+    const scopedGlobalFilters = (Array.isArray(globalFilters) ? globalFilters : []).filter((filter) => {
+        if (!filter) return false;
+        if (filter.datasetId && filter.datasetId !== datasetId) return false;
+        if (filter.column && datasetColumns.size > 0 && !datasetColumns.has(filter.column)) return false;
+        return true;
+    });
+
+    const scopedLocalFilters = localFilters.filter((filter) => {
+        if (!filter) return false;
+        if (filter.column && datasetColumns.size > 0 && !datasetColumns.has(filter.column)) return false;
+        return true;
+    });
+
     const allFilters = dedupeFilters(
-        [...globalFilters, ...localFilters, ...drillFilters]
+        [...scopedGlobalFilters, ...scopedLocalFilters, ...drillFilters]
             .map(toServerFilter)
             .filter(Boolean)
     );

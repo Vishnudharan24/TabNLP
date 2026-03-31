@@ -1604,12 +1604,15 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             };
 
         case ChartType.BUBBLE:
+            const bubbleXField = config?.xAxisField || measures[0] || '';
+            const bubbleYField = config?.yAxisField || measures[1] || measures[0] || '';
+            const bubbleSizeField = config?.sizeField || measures[2] || measures[0] || '';
             const bubbleSeries = Array.isArray(config?.transformed?.series)
                 ? config.transformed.series
                 : processedData.map(d => [
-                    d[measures[0]] || 0,
-                    d[measures[1]] || 0,
-                    d[measures[2]] || d[measures[0]] || 10,
+                    d[bubbleXField] || 0,
+                    d[bubbleYField] || 0,
+                    d[bubbleSizeField] || d[bubbleXField] || 10,
                 ]);
             const bubbleScale = Number.isFinite(config?.transformed?.bubbleOptions?.sizeScale)
                 ? config.transformed.bubbleOptions.sizeScale
@@ -1627,16 +1630,16 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                         return `
                             <div style="font-weight:700;margin-bottom:6px;color:${textColor}">${name || 'Point'}</div>
                             <div style="display:flex;gap:8px;flex-direction:column;color:${subTextColor}">
-                                <div><strong style="color:${textColor}">${measures[0] || 'X'}:</strong> ${numberFormatter(x || 0)}</div>
-                                <div><strong style="color:${textColor}">${measures[1] || 'Y'}:</strong> ${numberFormatter(y || 0)}</div>
-                                <div><strong style="color:${textColor}">${measures[2] || 'Size'}:</strong> ${numberFormatter(z || 0)}</div>
+                                <div><strong style="color:${textColor}">${bubbleXField || 'X'}:</strong> ${numberFormatter(x || 0)}</div>
+                                <div><strong style="color:${textColor}">${bubbleYField || 'Y'}:</strong> ${numberFormatter(y || 0)}</div>
+                                <div><strong style="color:${textColor}">${bubbleSizeField || 'Size'}:</strong> ${numberFormatter(z || 0)}</div>
                             </div>
                         `;
                     },
                 },
                 grid: gridStyle,
-                xAxis: { ...yAxisValue, name: measures[0] || '', nameLocation: 'center', nameGap: 30, nameTextStyle: axisLabelStyle },
-                yAxis: { ...yAxisValue, name: measures[1] || '', nameTextStyle: axisLabelStyle },
+                xAxis: { ...yAxisValue, name: bubbleXField || '', nameLocation: 'center', nameGap: 30, nameTextStyle: axisLabelStyle },
+                yAxis: { ...yAxisValue, name: bubbleYField || '', nameTextStyle: axisLabelStyle },
                 series: [{
                     type: 'scatter',
                     data: bubbleSeries.map((point) => {

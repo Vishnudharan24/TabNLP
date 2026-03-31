@@ -12,7 +12,6 @@ import DataPanel from './components/DataPanel';
 import DataPreview from './components/DataPreview';
 import DataMerger from './components/DataMerger';
 import DataProfiler from './components/DataProfiler';
-import GlobalFilterBar from './components/GlobalFilterBar';
 import RelationshipDiagram from './components/RelationshipDiagram';
 import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
 import AuthScreen from './components/AuthScreen';
@@ -1093,6 +1092,9 @@ const App = () => {
             if (gf.type === 'include' && Array.isArray(gf.values) && gf.values.length > 0) {
                 return gf.values.includes(String(val));
             }
+            if (gf.type === 'exclude' && Array.isArray(gf.values) && gf.values.length > 0) {
+                return !gf.values.includes(String(val));
+            }
             if (gf.type === 'range') {
                 const num = Number(val);
                 if (Number.isNaN(num)) return false;
@@ -1110,6 +1112,7 @@ const App = () => {
             id: interactionFilterId,
             source: 'interaction',
             sourceChartId: chartId,
+            datasetId,
             column: dimension,
             columnType: 'string',
             type: 'include',
@@ -1383,17 +1386,6 @@ const App = () => {
                                     </button>
                                 </div>
                             </div>
-
-                            {/* Global Filter Bar */}
-                            <GlobalFilterBar
-                                datasets={datasets}
-                                globalFilters={globalFilters}
-                                onAddFilter={handleAddGlobalFilter}
-                                onUpdateFilter={handleUpdateGlobalFilter}
-                                onRemoveFilter={handleRemoveGlobalFilter}
-                                onClearAll={handleClearGlobalFilters}
-                                onClearInteractions={handleClearInteractionFilters}
-                            />
 
                             <div className="flex-1 flex overflow-hidden p-6 gap-6">
                                 <div ref={reportCanvasRef} className={`flex-1 overflow-y-scroll overflow-x-hidden report-canvas-scrollbar designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : (theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent')}`}>

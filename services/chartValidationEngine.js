@@ -268,8 +268,8 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
         }
     }
     if (chartType === ChartType.BUBBLE) {
-        const x = byRole(FieldRoles.X)[0]?.field;
-        const y = byRole(FieldRoles.Y)[0]?.field;
+        const x = byRole(FieldRoles.X)[0]?.field || byRole(FieldRoles.TIME)[0]?.field;
+        const y = byRole(FieldRoles.Y)[0]?.field || byRole(FieldRoles.VALUE)[0]?.field;
         const s = byRole(FieldRoles.SIZE)[0]?.field;
         if (!x || !y || !s) errors.push(makeMessage('BUBBLE_REQUIRED', getChartRequirementText(ChartType.BUBBLE)));
     }

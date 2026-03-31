@@ -150,6 +150,13 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                     { label: 'Legend', anyOf: [FieldRoles.LEGEND, FieldRoles.COLOR], required: false },
                     { label: 'Values', anyOf: [FieldRoles.Y, FieldRoles.VALUE], required: true, multi: true },
                 ];
+            case ChartType.BUBBLE:
+                return [
+                    { label: 'X Axis', anyOf: [FieldRoles.X], required: true },
+                    { label: 'Y Axis', anyOf: [FieldRoles.Y, FieldRoles.VALUE], required: true },
+                    { label: 'Size', anyOf: [FieldRoles.SIZE], required: true },
+                    { label: 'Legend', anyOf: [FieldRoles.LEGEND, FieldRoles.COLOR], required: false },
+                ];
             default:
                 return [
                     { label: 'X Axis', anyOf: [FieldRoles.X, FieldRoles.TIME], required: true },
@@ -286,6 +293,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                         .map((m) => (typeof m === 'string' ? m : m?.name))
                         .filter(Boolean)
                     : [];
+                const resolvedX = normalizedConfig?.xAxisField || measureNames[0];
+                const resolvedY = normalizedConfig?.yAxisField || measureNames[1] || measureNames[0];
+                const resolvedSize = normalizedConfig?.sizeField || measureNames[2] || measureNames[0];
                 const adapterConfig = {
                     chartType,
                     dimensionFields: Array.isArray(queryPayload?.dimensions) ? queryPayload.dimensions : [effectiveDimension].filter(Boolean),
@@ -298,15 +308,15 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                         hierarchyFields: normalizedConfig?.hierarchyFields,
                     ...(chartType === ChartType.SCATTER
                         ? {
-                            xMeasure: measureNames[0],
-                            yMeasure: measureNames[1] || measureNames[0],
+                            xMeasure: resolvedX,
+                            yMeasure: resolvedY,
                         }
                         : {}),
                     ...(chartType === ChartType.BUBBLE
                         ? {
-                            xMeasure: measureNames[0],
-                            yMeasure: measureNames[1] || measureNames[0],
-                            sizeMeasure: measureNames[2] || measureNames[0],
+                            xMeasure: resolvedX,
+                            yMeasure: resolvedY,
+                            sizeMeasure: resolvedSize,
                         }
                         : {}),
                 };

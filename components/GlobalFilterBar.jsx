@@ -3,7 +3,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Filter, Plus, X, ChevronDown, Search, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
-const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter, onRemoveFilter, onClearAll, onClearInteractions }) => {
+const GlobalFilterBar = ({ datasets, selectedDatasetId, globalFilters, onAddFilter, onUpdateFilter, onRemoveFilter, onClearAll, onClearInteractions }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
     const [showAddMenu, setShowAddMenu] = useState(false);
@@ -11,53 +11,45 @@ const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter,
     const menuRef = useRef(null);
 
     // Get all unique columns across all datasets
+    const selectedDataset = useMemo(() => datasets.find(ds => ds.id === selectedDatasetId) || null, [datasets, selectedDatasetId]);
+
     const availableColumns = useMemo(() => {
-        const colMap = new Map();
-        datasets.forEach(ds => {
-            ds.columns.forEach(col => {
-                if (!colMap.has(col.name)) {
-                    colMap.set(col.name, { ...col, datasets: [ds.name] });
-                } else {
-                    colMap.get(col.name).datasets.push(ds.name);
-                }
-            });
-        });
-        return Array.from(colMap.values());
-    }, [datasets]);
+        if (!selectedDataset) return [];
+        return selectedDataset.columns.map(col => ({ ...col, datasets: [selectedDataset.name] }));
+    }, [selectedDataset]);
 
     const getUniqueValues = (columnName) => {
         const values = new Set();
-        datasets.forEach(ds => {
-            if (ds.columns.some(c => c.name === columnName)) {
-                ds.data.forEach(row => {
-                    if (row[columnName] != null && row[columnName] !== '') {
-                        values.add(String(row[columnName]));
-                    }
-                });
-            }
-        });
+        if (!selectedDataset) return [];
+        if (selectedDataset.columns.some(c => c.name === columnName)) {
+            selectedDataset.data.forEach(row => {
+                if (row[columnName] != null && row[columnName] !== '') {
+                    values.add(String(row[columnName]));
+                }
+            });
+        }
         return [...values].sort();
     };
 
     const getNumericRange = (columnName) => {
         let min = Infinity, max = -Infinity;
-        datasets.forEach(ds => {
-            if (ds.columns.some(c => c.name === columnName)) {
-                ds.data.forEach(row => {
-                    const val = Number(row[columnName]);
-                    if (!isNaN(val)) {
-                        min = Math.min(min, val);
-                        max = Math.max(max, val);
-                    }
-                });
-            }
-        });
+        if (!selectedDataset) return { min: 0, max: 100 };
+        if (selectedDataset.columns.some(c => c.name === columnName)) {
+            selectedDataset.data.forEach(row => {
+                const val = Number(row[columnName]);
+                if (!isNaN(val)) {
+                    min = Math.min(min, val);
+                    max = Math.max(max, val);
+                }
+            });
+        }
         return { min: min === Infinity ? 0 : min, max: max === -Infinity ? 100 : max };
     };
 
     const handleAddFilter = (col) => {
         const filter = {
             id: Math.random().toString(36).substr(2, 9),
+            datasetId: selectedDataset?.id || null,
             column: col.name,
             columnType: col.type,
         };
@@ -86,7 +78,7 @@ const GlobalFilterBar = ({ datasets, globalFilters, onAddFilter, onUpdateFilter,
 
     const interactionFiltersCount = globalFilters.filter(f => f?.source === 'interaction').length;
 
-    if (datasets.length === 0) return null;
+    if (datasets.length === 0 || !selectedDataset) return null;
 
     return (
         <>
@@ -181,12 +173,19 @@ const FilterPill = ({ filter, isEditing, onEdit, onUpdate, onRemove, getUniqueVa
             if (filter.values.length === 1) return filter.values[0];
             return `${filter.values.length} selected`;
         }
+        if (filter.type === 'exclude') {
+            if (!filter.values || filter.values.length === 0) return 'None';
+            if (filter.values.length === 1) return `Exclude ${filter.values[0]}`;
+            return `Exclude ${filter.values.length}`;
+        }
         return '';
     }, [filter]);
 
     const isActive = filter.type === 'include'
         ? filter.values && filter.values.length > 0
-        : (filter.rangeMin > filter.min || filter.rangeMax < filter.max);
+        : filter.type === 'exclude'
+            ? filter.values && filter.values.length > 0
+            : (filter.rangeMin > filter.min || filter.rangeMax < filter.max);
 
     return (
         <div className="relative z-40">
@@ -206,8 +205,28 @@ const FilterPill = ({ filter, isEditing, onEdit, onUpdate, onRemove, getUniqueVa
 
             {isEditing && (
                 <div onClick={e => e.stopPropagation()} className={`absolute top-full left-0 mt-1 w-64 rounded-xl shadow-xl border z-50 overflow-hidden ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-                    {filter.type === 'include' ? (
+                    {(filter.type === 'include' || filter.type === 'exclude') ? (
                         <div>
+                            <div className={`p-2 border-b ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+                                <div className={`flex items-center gap-1 rounded-lg p-1 ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
+                                    <button
+                                        onClick={() => onUpdate({ type: 'include', values: filter.values || [] })}
+                                        className={`flex-1 text-[10px] font-bold py-1 rounded-md ${filter.type === 'include'
+                                            ? (isDark ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
+                                            : (isDark ? 'text-gray-300 hover:bg-gray-600' : 'text-gray-600 hover:bg-gray-200')}`}
+                                    >
+                                        Include
+                                    </button>
+                                    <button
+                                        onClick={() => onUpdate({ type: 'exclude', values: filter.values || [] })}
+                                        className={`flex-1 text-[10px] font-bold py-1 rounded-md ${filter.type === 'exclude'
+                                            ? (isDark ? 'bg-rose-600 text-white' : 'bg-rose-500 text-white')
+                                            : (isDark ? 'text-gray-300 hover:bg-gray-600' : 'text-gray-600 hover:bg-gray-200')}`}
+                                    >
+                                        Exclude
+                                    </button>
+                                </div>
+                            </div>
                             <div className={`p-2 border-b ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
                                 <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
                                     <Search size={12} className={isDark ? 'text-gray-500' : 'text-gray-400'} />
@@ -239,7 +258,7 @@ const FilterPill = ({ filter, isEditing, onEdit, onUpdate, onRemove, getUniqueVa
                             <div className={`p-2 border-t flex items-center gap-2 ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
                                 <button onClick={() => onUpdate({ values: filter.allValues || getUniqueValues(filter.column) })}
                                     className={`flex-1 text-center py-1.5 rounded-lg text-[10px] font-bold ${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                                    Select All
+                                    {filter.type === 'exclude' ? 'Exclude All' : 'Select All'}
                                 </button>
                                 <button onClick={() => onUpdate({ values: [] })}
                                     className={`flex-1 text-center py-1.5 rounded-lg text-[10px] font-bold ${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
