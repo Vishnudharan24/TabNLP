@@ -53,6 +53,7 @@ const normalizeChartType = (type) => {
     if (type === ChartType.LINE_SMOOTH || type === ChartType.LINE_STRAIGHT || type === ChartType.LINE_STEP || type === ChartType.LINE_DASHED || type === ChartType.LINE_MULTI_AXIS) return ChartType.LINE;
     if (type === ChartType.AREA_SMOOTH || type === ChartType.AREA_STACKED || type === ChartType.AREA_PERCENT || type === ChartType.AREA_STEP) return ChartType.AREA;
     if (type === ChartType.ORG_TREE_STRUCTURED) return ChartType.ORG_CHART;
+    if (type === ChartType.SPARKLINE) return ChartType.KPI_SINGLE;
     return type;
 };
 
@@ -340,14 +341,18 @@ export function searchNode(tree, query = '') {
 
 export function convertOldConfig(oldConfig = {}) {
     if (Array.isArray(oldConfig.assignments) && oldConfig.assignments.length > 0) {
+        const chartType = oldConfig.type || oldConfig.chartType || ChartType.BAR;
+        const isDeprecatedSparkline = chartType === ChartType.SPARKLINE;
         return {
-            chartType: oldConfig.type || oldConfig.chartType || ChartType.BAR,
+            chartType: isDeprecatedSparkline ? ChartType.KPI_SINGLE : (oldConfig.type || oldConfig.chartType || ChartType.BAR),
             assignments: oldConfig.assignments.map(normalizeLegacyAssignment),
         };
     }
 
     const chartType = oldConfig.type || oldConfig.chartType || ChartType.BAR;
     const normalizedType = normalizeChartType(chartType);
+    const isDeprecatedSparkline = chartType === ChartType.SPARKLINE;
+    const resolvedChartType = isDeprecatedSparkline ? ChartType.KPI_SINGLE : normalizedType;
     const assignments = [];
 
     const dim = oldConfig.dimension || oldConfig.xAxisField || '';
@@ -361,7 +366,7 @@ export function convertOldConfig(oldConfig = {}) {
         hierarchyFields.forEach((field) => assignments.push({ field, role: FieldRoles.HIERARCHY }));
         if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.VALUE, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
         else assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
-        return { chartType, assignments };
+        return { chartType: resolvedChartType, assignments };
     }
 
     if (normalizedType === ChartType.ORG_CHART) {
@@ -375,14 +380,14 @@ export function convertOldConfig(oldConfig = {}) {
         if (labelField) assignments.push({ field: labelField, role: FieldRoles.LABEL });
         if (colorField) assignments.push({ field: colorField, role: FieldRoles.COLOR });
 
-        return { chartType, assignments };
+        return { chartType: resolvedChartType, assignments };
     }
 
     if ([ChartType.PIE, ChartType.DONUT].includes(normalizedType)) {
         if (dim) assignments.push({ field: dim, role: FieldRoles.LEGEND });
         if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.VALUE, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
         else assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
-        return { chartType, assignments };
+        return { chartType: resolvedChartType, assignments };
     }
 
     if (normalizedType === ChartType.BUBBLE) {
@@ -390,24 +395,24 @@ export function convertOldConfig(oldConfig = {}) {
         if (measures[1] || measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[1] || measures[0], role: FieldRoles.Y, ...(toLegacyMeasureExpression(measures[1] || measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[1] || measures[0], agg) } : {}) }));
         if (measures[2] || measures[1] || measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[2] || measures[1] || measures[0], role: FieldRoles.SIZE, ...(toLegacyMeasureExpression(measures[2] || measures[1] || measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[2] || measures[1] || measures[0], agg) } : {}) }));
         if (dim) assignments.push({ field: dim, role: FieldRoles.COLOR });
-        return { chartType, assignments };
+        return { chartType: resolvedChartType, assignments };
     }
 
     if (normalizedType === ChartType.SCATTER) {
         if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.X, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
         if (measures[1] || measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[1] || measures[0], role: FieldRoles.Y, ...(toLegacyMeasureExpression(measures[1] || measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[1] || measures[0], agg) } : {}) }));
         if (dim) assignments.push({ field: dim, role: FieldRoles.COLOR });
-        return { chartType, assignments };
+        return { chartType: resolvedChartType, assignments };
     }
 
     if ([ChartType.GAUGE, ChartType.KPI_SINGLE].includes(normalizedType)) {
         if (measures[0]) assignments.push(normalizeLegacyAssignment({ field: measures[0], role: FieldRoles.VALUE, ...(toLegacyMeasureExpression(measures[0], agg) ? { expression: toLegacyMeasureExpression(measures[0], agg) } : {}) }));
         else assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
-        return { chartType, assignments };
+        return { chartType: resolvedChartType, assignments };
     }
 
     if (dim) {
-        const dimRole = normalizedType === ChartType.LINE || normalizedType === ChartType.AREA || normalizedType === ChartType.SPARKLINE
+        const dimRole = normalizedType === ChartType.LINE || normalizedType === ChartType.AREA
             ? FieldRoles.TIME
             : FieldRoles.X;
         assignments.push({ field: dim, role: dimRole });
@@ -419,7 +424,7 @@ export function convertOldConfig(oldConfig = {}) {
         assignments.push(normalizeLegacyAssignment({ field: '__count__', role: FieldRoles.VALUE, expression: 'COUNT(*)' }));
     }
 
-    return { chartType, assignments };
+    return { chartType: resolvedChartType, assignments };
 }
 
 export function configFromAssignments(chartType, assignments = []) {
@@ -578,7 +583,7 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
         return assignments;
     }
 
-    if (type === ChartType.SPARKLINE || type === ChartType.LINE || type === ChartType.AREA) {
+    if (type === ChartType.LINE || type === ChartType.AREA) {
         if (firstTime) assignments.push({ field: firstTime, role: FieldRoles.TIME });
         else if (firstCat) assignments.push({ field: firstCat, role: FieldRoles.X });
         if (firstNum) assignments.push({ field: firstNum, role: FieldRoles.Y });

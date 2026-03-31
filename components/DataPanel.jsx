@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import {
     BarChart, LineChart, PieChart, Table as TableIcon, Search, Database,
     Calendar, Layers, Box, Maximize2, Settings2, ArrowRight,
-    CheckCircle2, Target, Grid3X3, Activity, PieChart as PieIcon, LayoutGrid, Type,
+    CheckCircle2, Target, Grid3X3, PieChart as PieIcon, LayoutGrid, Type,
     CreditCard, Filter, X, Plus, ChevronDown, ChevronUp, Star, TrendingUp, Wand2,
     ScatterChart, Gauge, Radar, Columns3, AreaChart
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
     isFieldCompatibleWithRole,
 } from '../services/chartRecommender';
 import { autoAssignFields, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
+import { TYPO } from '../styles/typography';
 
 const CHART_ICON_MAP = {
     BAR: BarChart,
@@ -35,7 +36,6 @@ const CHART_ICON_MAP = {
     RADIAL: Radar,
     GAUGE: Gauge,
     KPI: CreditCard,
-    SPARKLINE: Activity,
     TABLE: TableIcon,
     CARD: CreditCard,
 };
@@ -65,7 +65,6 @@ const CHART_DISPLAY_NAMES = {
     KPI_SINGLE: 'KPI',
     TABLE: 'Table',
     GAUGE: 'Gauge',
-    SPARKLINE: 'Sparkline',
 };
 
 function getChartName(type) {
@@ -87,7 +86,6 @@ const ALL_CHART_TYPES = [
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
     ChartType.GAUGE,
-    ChartType.SPARKLINE,
     ChartType.RADAR,
     ChartType.KPI_SINGLE,
     ChartType.TABLE,
@@ -602,7 +600,7 @@ const DataPanel = ({
     };
 
     return (
-        <aside className="side-panel-normalized shrink-0 h-full flex flex-col gap-6 overflow-hidden relative" style={{ width: `${sidebarWidth}px` }}>
+        <aside className="side-panel-normalized shrink-0 h-full flex flex-col gap-6 overflow-hidden relative" style={{ width: `${sidebarWidth}px`, fontFamily: TYPO.fontFamily }}>
             {showNewChartPrompt && (
                 <div className="absolute inset-0 z-50 flex items-start justify-center pt-24 bg-black/30 dark:bg-black/50 backdrop-blur-sm rounded-2xl">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 w-64 space-y-4 animate-in">
@@ -1075,27 +1073,20 @@ const DataPanel = ({
                                     </div>
 
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Font Family</label>
-                                        <select
-                                            value={chartStyle.fontFamily || 'Plus Jakarta Sans, sans-serif'}
-                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, fontFamily: e.target.value } })}
-                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
-                                        >
-                                            <option value="Plus Jakarta Sans, sans-serif">Plus Jakarta Sans</option>
-                                            <option value="Inter, sans-serif">Inter</option>
-                                            <option value="Roboto, sans-serif">Roboto</option>
-                                            <option value="Arial, sans-serif">Arial</option>
-                                        </select>
+                                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Font System</label>
+                                        <div className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200">
+                                            {TYPO.fontFamily}
+                                        </div>
                                     </div>
 
                                     <div className="space-y-2">
-                                        <div className="flex justify-between"><span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Font Size</span><span className="text-xs font-black text-gray-700 dark:text-gray-200">{chartStyle.fontSize || 11}px</span></div>
+                                        <div className="flex justify-between"><span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Base Size</span><span className="text-xs font-black text-gray-700 dark:text-gray-200">{Math.max(11, Number(chartStyle.fontSize || TYPO.axis.fontSize))}px</span></div>
                                         <input
                                             type="range"
-                                            min="10"
-                                            max="18"
-                                            value={chartStyle.fontSize || 11}
-                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, fontSize: parseInt(e.target.value) } })}
+                                            min="11"
+                                            max="24"
+                                            value={Math.max(11, Number(chartStyle.fontSize || TYPO.axis.fontSize))}
+                                            onChange={(e) => onUpdateConfig({ style: { ...chartStyle, fontSize: parseInt(e.target.value, 10) } })}
                                             className="w-full accent-gray-700 dark:accent-gray-300"
                                         />
                                     </div>
@@ -1126,6 +1117,20 @@ const DataPanel = ({
                                             </select>
                                         </div>
                                     </div>
+
+                                    {(activeChartConfig?.type === ChartType.PIE || activeChartConfig?.type === ChartType.DONUT || activeChartConfig?.type === ChartType.ROSE) && (
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Pie Label Position</label>
+                                            <select
+                                                value={chartStyle.pieLabelPosition || 'inside'}
+                                                onChange={(e) => onUpdateConfig({ style: { ...chartStyle, pieLabelPosition: e.target.value } })}
+                                                className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
+                                            >
+                                                <option value="inside">Inside</option>
+                                                <option value="outside">Outside</option>
+                                            </select>
+                                        </div>
+                                    )}
 
                                     <div className="space-y-2 pt-1">
                                         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Color Mode</label>

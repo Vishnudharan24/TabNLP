@@ -9,8 +9,10 @@ import { auditChartConfiguration } from '../services/chartValidationEngine';
 import { buildQuery } from '../services/queryBuilder';
 import { backendApi } from '../services/backendApi';
 import { adaptQueryResponse } from '../services/dataAdapter';
+import DrillDownTable from '../frontend/components/DrillDownTable';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
+import { TYPO } from '../styles/typography';
 
 const SEMANTIC_PREFIX = '__semantic__:';
 const toDisplayMeasureName = (value = '') => {
@@ -30,6 +32,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const [queryColumns, setQueryColumns] = useState([]);
     const [isQueryLoading, setIsQueryLoading] = useState(false);
     const [queryError, setQueryError] = useState('');
+    const [drillDownOpen, setDrillDownOpen] = useState(false);
+    const [drillDownFilters, setDrillDownFilters] = useState([]);
+    const [drillDownTitle, setDrillDownTitle] = useState('');
     const chartRef = useRef(null);
 
     useEffect(() => {
@@ -60,13 +65,16 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     if (!dataset) return null;
 
     const normalizedConfig = useMemo(() => {
+        const legacy = convertOldConfig(config);
         const assignments = Array.isArray(config?.assignments) && config.assignments.length > 0
             ? config.assignments
-            : (convertOldConfig(config).assignments || []);
+            : (legacy.assignments || []);
+        const resolvedType = legacy.chartType || config.type;
 
         return {
             ...config,
-            ...configFromAssignments(config.type, assignments),
+            type: resolvedType,
+            ...configFromAssignments(resolvedType, assignments),
             assignments,
         };
     }, [config]);
@@ -132,7 +140,6 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             case ChartType.AREA_SMOOTH:
             case ChartType.AREA_STACKED:
             case ChartType.AREA_PERCENT:
-            case ChartType.SPARKLINE:
                 return [
                     { label: 'Axis (Time/X)', anyOf: [FieldRoles.TIME, FieldRoles.X], required: true },
                     { label: 'Y Axis', anyOf: [FieldRoles.Y, FieldRoles.VALUE], required: true, multi: true },
@@ -273,13 +280,38 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             setQueryError('');
             try {
                 const response = await backendApi.runQuery(queryPayload);
-                const adapted = adaptQueryResponse(response, {
-                    chartType: normalizedConfig?.type || config?.type,
+                const chartType = normalizedConfig?.type || config?.type;
+                const measureNames = Array.isArray(queryPayload?.measures)
+                    ? queryPayload.measures
+                        .map((m) => (typeof m === 'string' ? m : m?.name))
+                        .filter(Boolean)
+                    : [];
+                const adapterConfig = {
+                    chartType,
                     dimensionFields: Array.isArray(queryPayload?.dimensions) ? queryPayload.dimensions : [effectiveDimension].filter(Boolean),
                     measures: Array.isArray(queryPayload?.measures)
                         ? queryPayload.measures.map((m) => (typeof m === 'string' ? { name: m } : m)).filter(Boolean)
                         : [],
-                });
+                        bubbleOptions: normalizedConfig?.style?.bubble,
+                        hierarchyTopN: normalizedConfig?.style?.sunburst?.topN,
+                        hierarchyThreshold: normalizedConfig?.style?.sunburst?.threshold,
+                        hierarchyFields: normalizedConfig?.hierarchyFields,
+                    ...(chartType === ChartType.SCATTER
+                        ? {
+                            xMeasure: measureNames[0],
+                            yMeasure: measureNames[1] || measureNames[0],
+                        }
+                        : {}),
+                    ...(chartType === ChartType.BUBBLE
+                        ? {
+                            xMeasure: measureNames[0],
+                            yMeasure: measureNames[1] || measureNames[0],
+                            sizeMeasure: measureNames[2] || measureNames[0],
+                        }
+                        : {}),
+                };
+
+                const adapted = adaptQueryResponse(response, adapterConfig);
                 if (!isCancelled) {
                     setQueryColumns(adapted.columns);
                     setChartData(adapted.rows);
@@ -342,6 +374,34 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             setOrgSelectedNodeId(clickedId || nextIds[nextIds.length - 1] || '');
         }
 
+        if (normalizedConfig?.type === ChartType.SUNBURST) {
+            const pathInfo = Array.isArray(params?.treePathInfo) ? params.treePathInfo.slice(1) : [];
+            const hierarchyFields = Array.isArray(normalizedConfig?.hierarchyFields) ? normalizedConfig.hierarchyFields : [];
+            const filters = [];
+            const pathNames = [];
+
+            pathInfo.forEach((entry, idx) => {
+                const name = String(entry?.name || '').trim();
+                if (!name) return;
+                const field = entry?.data?.__field || hierarchyFields[idx];
+                if (!field) return;
+
+                pathNames.push(name);
+                if (name === 'Others' && Array.isArray(entry?.data?.__members) && entry.data.__members.length > 0) {
+                    filters.push({ field, operator: 'IN', value: entry.data.__members });
+                } else if (name !== 'Others') {
+                    filters.push({ field, operator: 'EQUALS', value: name });
+                }
+            });
+
+            if (filters.length > 0) {
+                setDrillDownFilters(filters);
+                setDrillDownTitle(pathNames.join(' ▸ ') || 'Drill Down');
+                setDrillDownOpen(true);
+            }
+            return;
+        }
+
         if (onDataPointClick) {
             onDataPointClick({
                 chartId: config.id,
@@ -358,7 +418,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         if (canDrill) {
             handleDrillDown(params);
         }
-    }, [onDataPointClick, config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown, normalizedConfig?.type, normalizedConfig?.nodeField]);
+    }, [onDataPointClick, config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown, normalizedConfig?.type, normalizedConfig?.nodeField, normalizedConfig?.hierarchyFields, setDrillDownOpen]);
 
     const handleDrillUp = (index) => {
         setDrillPath(prev => prev.slice(0, index));
@@ -390,7 +450,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 label: {
                     ...currentLabel,
                     show: true,
-                    fontSize: Math.max(Number(currentLabel.fontSize || 10), 11),
+                    fontSize: Math.max(Number(currentLabel.fontSize || TYPO.label.fontSize), 11),
                     formatter: currentLabel.formatter || ((params) => {
                         const value = params?.value;
                         if (Array.isArray(value)) return value[value.length - 1];
@@ -416,7 +476,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 axisLabel: {
                     ...(item?.axisLabel || {}),
                     show: true,
-                    fontSize: Math.max(Number(item?.axisLabel?.fontSize || 11), 12),
+                    fontSize: Math.max(Number(item?.axisLabel?.fontSize || TYPO.axis.fontSize), 12),
                 },
             });
             return Array.isArray(axis) ? axis.map(patchOne) : patchOne(axis);
@@ -430,7 +490,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 show: true,
                 textStyle: {
                     ...(option.legend?.textStyle || {}),
-                    fontSize: Math.max(Number(option.legend?.textStyle?.fontSize || 11), 12),
+                    fontSize: Math.max(Number(option.legend?.textStyle?.fontSize || TYPO.legend.fontSize), 12),
                 },
             } : option.legend,
             xAxis: patchAxis(option.xAxis),
@@ -479,9 +539,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         const measures = Array.isArray(normalizedConfig?.measures) && normalizedConfig.measures.length > 0
             ? normalizedConfig.measures.map(toDisplayMeasureName)
             : ['__count__'];
-        const configuredFontSize = Math.max(10, Number(normalizedConfig?.style?.fontSize || 11));
-        const configuredFontFamily = normalizedConfig?.style?.fontFamily || 'Plus Jakarta Sans, sans-serif';
-
+        const configuredFontSize = Math.max(11, Number(normalizedConfig?.style?.fontSize || TYPO.axis.fontSize));
         // Table type — keep HTML renderer
         if (type === ChartType.TABLE) {
             const tableColumns = queryColumns.length > 0
@@ -493,17 +551,18 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                     className="h-full overflow-auto font-medium text-gray-600 dark:text-gray-300"
                     style={{
                         fontSize: `${configuredFontSize}px`,
-                        fontFamily: configuredFontFamily,
+                        fontWeight: TYPO.tableCell.fontWeight,
+                        fontFamily: TYPO.fontFamily,
                     }}
                 >
-                    <table className="w-full text-left border-collapse" style={{ fontFamily: configuredFontFamily }}>
+                    <table className="w-full text-left border-collapse" style={{ fontFamily: TYPO.fontFamily }}>
                         <thead>
                             <tr className="border-b border-gray-200 dark:border-gray-700">
                                 {tableColumns.map((col) => (
                                     <th
                                         key={col}
                                         className="py-3 px-4 font-semibold text-gray-500 dark:text-gray-400 sticky top-0 bg-white dark:bg-gray-800"
-                                        style={{ fontSize: `${Math.max(10, configuredFontSize - 1)}px` }}
+                                        style={{ fontSize: `${Math.max(11, configuredFontSize + 1)}px`, fontWeight: TYPO.tableHeader.fontWeight }}
                                     >
                                         {col}
                                     </th>
@@ -520,7 +579,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                                             <td
                                                 key={col}
                                                 className={`py-3 px-4 ${col === tableColumns[0] ? 'font-bold text-gray-900 dark:text-gray-100' : ''}`}
-                                                style={{ fontSize: `${configuredFontSize}px` }}
+                                                style={{ fontSize: `${configuredFontSize}px`, fontWeight: TYPO.tableCell.fontWeight }}
                                             >
                                                 {isNumeric ? value.toLocaleString() : String(value ?? '')}
                                             </td>
@@ -542,10 +601,16 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 relative overflow-hidden">
                     <div className="absolute inset-0 opacity-5 bg-gray-500 dark:bg-gray-300"></div>
                     <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 tracking-wider mb-3 relative z-10">{config.title || measures[0]}</p>
-                    <h2 className="text-6xl font-black text-gray-900 dark:text-gray-100 tracking-tight leading-none mb-5 relative z-10 animate-fade-in">
+                    <h2
+                        className="text-gray-900 dark:text-gray-100 tracking-tight leading-none mb-5 relative z-10 animate-fade-in"
+                        style={{ fontSize: `${Math.max(24, Math.round(configuredFontSize * 2.5))}px`, fontWeight: TYPO.kpiValue.fontWeight, fontFamily: TYPO.fontFamily }}
+                    >
                         {primaryValue > 1000 ? (primaryValue / 1000).toFixed(1) + 'k' : primaryValue.toLocaleString()}
                     </h2>
-                    <div className="px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest relative z-10 shadow-lg bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800">
+                    <div
+                        className="px-4 py-2 rounded-full uppercase tracking-widest relative z-10 shadow-lg bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800"
+                        style={{ fontSize: `${configuredFontSize}px`, fontWeight: TYPO.kpiLabel.fontWeight, fontFamily: TYPO.fontFamily }}
+                    >
                         Filtered Total
                     </div>
                 </div>
@@ -585,15 +650,30 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         }
 
         return (
-            <ReactECharts
-                option={option}
-                style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
-                notMerge={true}
-                lazyUpdate={true}
-                onChartReady={handleChartReady}
-                onEvents={onEvents}
-            />
+            <>
+                {normalizedConfig.type === ChartType.SUNBURST && (
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                        Total Records: {Number(chartTransformed?.total || 0).toLocaleString()}
+                    </div>
+                )}
+                <ReactECharts
+                    option={option}
+                    style={{ height: '100%', width: '100%' }}
+                    opts={{ renderer: 'canvas' }}
+                    notMerge={true}
+                    lazyUpdate={true}
+                    onChartReady={handleChartReady}
+                    onEvents={onEvents}
+                />
+                <DrillDownTable
+                    open={drillDownOpen}
+                    datasetId={config.datasetId}
+                    columns={dataset?.columns?.map((c) => c.name) || []}
+                    filters={drillDownFilters}
+                    title={drillDownTitle}
+                    onClose={() => setDrillDownOpen(false)}
+                />
+            </>
         );
     };
 

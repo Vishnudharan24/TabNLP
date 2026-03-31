@@ -85,11 +85,23 @@ const dedupeFilters = (filters = []) => {
     return out;
 };
 
-const collectMeasuresFromAssignments = (assignments = [], fallbackAggregation = 'COUNT') => {
+const collectMeasuresFromAssignments = (assignments = [], fallbackAggregation = 'COUNT', chartType = '', dataset = null) => {
+    const normalizedType = String(chartType || '').toUpperCase();
+    const includeXAsMeasure = normalizedType === ChartType.SCATTER || normalizedType === ChartType.BUBBLE;
+    const numericColumns = new Set(
+        (Array.isArray(dataset?.columns) ? dataset.columns : [])
+            .filter((c) => c?.type === 'number')
+            .map((c) => c.name)
+    );
+    const measureRoles = includeXAsMeasure
+        ? [FieldRoles.X, FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE]
+        : [FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE];
+
     const picked = [];
 
     assignments.forEach((a) => {
-        if (!a?.field || ![FieldRoles.Y, FieldRoles.VALUE, FieldRoles.SIZE, FieldRoles.X].includes(a.role)) return;
+        if (!a?.field || !measureRoles.includes(a.role)) return;
+        if (includeXAsMeasure && a.role === FieldRoles.X && a.field !== '__count__' && !numericColumns.has(a.field)) return;
 
         const semantic = parseSemanticMeasureFromAssignment(a);
         if (semantic?.name) {
@@ -162,6 +174,7 @@ const collectDimensions = ({ chartType, assignments, normalized, effectiveDimens
         ].filter(Boolean)));
     }
 
+
     const defaultDimension = effectiveDimension || nextDrillDimension(dataset, normalized.dimension, []);
 
     const dimensionalRoles = [FieldRoles.X, FieldRoles.TIME, FieldRoles.LEGEND, FieldRoles.COLOR];
@@ -206,8 +219,9 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
 
     const measures = chartType === ChartType.TABLE
         ? []
-        : collectMeasuresFromAssignments(assignments, normalized.aggregation || 'COUNT');
+        : collectMeasuresFromAssignments(assignments, normalized.aggregation || 'COUNT', chartType, dataset);
     const sortField = measures[0]?.name || measures[0]?.expression || dimensions[0] || 'Count';
+    const sortOrder = 'desc';
 
     return {
         datasetId,
@@ -217,7 +231,7 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
         filters: allFilters,
         sort: {
             field: sortField,
-            order: 'desc',
+            order: sortOrder,
         },
         limit: chartType === ChartType.TABLE ? 1000 : 200,
     };

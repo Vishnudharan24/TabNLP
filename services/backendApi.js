@@ -124,6 +124,69 @@ async function request(path, options = {}, baseUrl, requestConfig = {}) {
     throw lastError || new Error('Request failed');
 }
 
+async function requestBlob(path, options = {}, baseUrl, requestConfig = {}) {
+    const {
+        retries = DEFAULT_RETRY_COUNT,
+        timeoutMs = DEFAULT_TIMEOUT_MS,
+        retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
+        signal,
+    } = requestConfig;
+
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const { signal: requestSignal, cleanup } = withCancellationAndTimeout(signal, timeoutMs);
+        const persistedToken = localStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+        const providedHeaders = options.headers || {};
+        const isFormDataBody = typeof FormData !== 'undefined' && options?.body instanceof FormData;
+        const hasAuthorizationHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'authorization');
+        const hasContentTypeHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'content-type');
+
+        try {
+            const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+                headers: {
+                    ...(!isFormDataBody && !hasContentTypeHeader ? { 'Content-Type': 'application/json' } : {}),
+                    ...(persistedToken && !hasAuthorizationHeader ? { Authorization: `Bearer ${persistedToken}` } : {}),
+                    ...(options.headers || {}),
+                },
+                ...options,
+                signal: requestSignal,
+            });
+
+            if (!response.ok && RETRYABLE_STATUS.has(response.status)) {
+                const retryableHttpError = new Error(`Retryable HTTP status ${response.status}`);
+                retryableHttpError.retryable = true;
+                retryableHttpError.status = response.status;
+                throw retryableHttpError;
+            }
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(text || `Request failed with status ${response.status}`);
+            }
+
+            return await response.blob();
+        } catch (error) {
+            lastError = error;
+
+            if (isAbortLikeError(error)) {
+                throw new Error('Request was cancelled or timed out');
+            }
+
+            const canRetry = attempt < retries && isRetryableError(error);
+            if (!canRetry) {
+                throw error;
+            }
+
+            await sleep(computeBackoffDelay(attempt, retryBaseDelayMs));
+        } finally {
+            cleanup();
+        }
+    }
+
+    throw lastError || new Error('Request failed');
+}
+
 export const backendApi = {
     createAbortController() {
         return new AbortController();
@@ -280,6 +343,13 @@ export const backendApi = {
 
     runQuery(payload, baseUrl, requestConfig) {
         return request('/query', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    exportQuery(payload, baseUrl, requestConfig) {
+        return requestBlob('/query/export', {
             method: 'POST',
             body: JSON.stringify(payload),
         }, baseUrl, requestConfig);

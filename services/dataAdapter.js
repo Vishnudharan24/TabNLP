@@ -57,12 +57,122 @@ const toNumeric = (value) => {
     return Number.isFinite(n) ? n : 0;
 };
 
+const cloneHierarchyNode = (node = {}) => ({
+    ...node,
+    value: toNumeric(node.value),
+    children: Array.isArray(node.children)
+        ? node.children.map(cloneHierarchyNode)
+        : undefined,
+});
+
+const nodeTotal = (node = {}) => {
+    const own = toNumeric(node.value);
+    const childrenTotal = Array.isArray(node.children)
+        ? node.children.reduce((sum, child) => sum + nodeTotal(child), 0)
+        : 0;
+    return Math.max(own, childrenTotal);
+};
+
+const collectLeafNames = (node = {}, out = []) => {
+    if (!Array.isArray(node.children) || node.children.length === 0) {
+        if (node?.name) out.push(String(node.name));
+        return out;
+    }
+    node.children.forEach((child) => collectLeafNames(child, out));
+    return out;
+};
+
+const groupChildren = (children = [], parentValue = 0, topN = 5, threshold = 0.02) => {
+    if (!Array.isArray(children) || children.length === 0) return [];
+    const sorted = [...children].sort((a, b) => toNumeric(b.value) - toNumeric(a.value));
+    const keep = [];
+    const others = [];
+
+    sorted.forEach((child, idx) => {
+        const ratio = parentValue > 0 ? toNumeric(child.value) / parentValue : 1;
+        if (idx < topN && ratio >= threshold) {
+            keep.push(child);
+        } else {
+            others.push(child);
+        }
+    });
+
+    if (others.length > 0) {
+        const othersValue = others.reduce((sum, item) => sum + toNumeric(item.value), 0);
+        const members = others.flatMap((item) => collectLeafNames(item, []));
+        keep.push({
+            name: 'Others',
+            value: othersValue,
+            children: [],
+            __members: Array.from(new Set(members)),
+        });
+    }
+
+    return keep;
+};
+
+const enrichHierarchy = (node = {}, depth = 0, total = 0, options = {}) => {
+    const { topN = 5, threshold = 0.02, fields = [] } = options;
+    const value = nodeTotal(node);
+    const percent = total > 0 ? (value / total) * 100 : 0;
+    const children = Array.isArray(node.children) ? node.children : [];
+    const grouped = children.length > 0 ? groupChildren(children, value, topN, threshold) : [];
+    return {
+        ...node,
+        value,
+        percent,
+        __field: fields[depth] || null,
+        __depth: depth,
+        children: grouped.length > 0
+            ? grouped.map((child) => enrichHierarchy(child, depth + 1, total, options))
+            : undefined,
+    };
+};
+
 const toRowObject = (columns, row) => {
     if (Array.isArray(row)) {
         return Object.fromEntries(columns.map((col, idx) => [col, row[idx]]));
     }
     if (row && typeof row === 'object') return { ...row };
     return Object.fromEntries(columns.map((col) => [col, undefined]));
+};
+
+const jitter = (value, magnitude = 0.02) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    return numeric + (Math.random() - 0.5) * magnitude * numeric;
+};
+
+const groupClusters = (points = [], thresholdX = 0, thresholdY = 0) => {
+    const buckets = new Map();
+    const safeThresholdX = Number.isFinite(thresholdX) && thresholdX > 0 ? thresholdX : 0;
+    const safeThresholdY = Number.isFinite(thresholdY) && thresholdY > 0 ? thresholdY : 0;
+
+    points.forEach((point) => {
+        const x = Number(point[0]) || 0;
+        const y = Number(point[1]) || 0;
+        const keyX = safeThresholdX > 0 ? Math.round(x / safeThresholdX) : Math.round(x * 1000);
+        const keyY = safeThresholdY > 0 ? Math.round(y / safeThresholdY) : Math.round(y * 1000);
+        const key = `${keyX}:${keyY}`;
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(point);
+    });
+
+    return Array.from(buckets.values());
+};
+
+const spreadCluster = (cluster = [], radiusX = 0, radiusY = 0) => {
+    if (cluster.length <= 1) return cluster;
+    const angleStep = (2 * Math.PI) / cluster.length;
+    const baseX = Number(cluster[0][0]) || 0;
+    const baseY = Number(cluster[0][1]) || 0;
+
+    return cluster.map((point, i) => {
+        const angle = i * angleStep;
+        const dx = Math.cos(angle) * radiusX;
+        const dy = Math.sin(angle) * radiusY;
+        return [baseX + dx, baseY + dy, point[2], point[3]];
+    });
 };
 
 const normalizeConfig = (config = {}) => {
@@ -95,9 +205,6 @@ export const adaptQueryResponse = (response, config = {}) => {
 
     const normalizedConfig = normalizeConfig(config);
     const { chartType, dimensionFields, measures } = normalizedConfig;
-
-    const dimIndexes = dimensionFields.map((d) => getColumnIndex(columns, d));
-    const measureIndexes = measures.map((m) => getColumnIndex(columns, m.name));
     const rowMatrix = rows.map((row) => Array.isArray(row) ? [...row] : columns.map((c) => row?.[c]));
     const records = rowMatrix.map((row) => toRowObject(columns, row));
 
@@ -106,6 +213,73 @@ export const adaptQueryResponse = (response, config = {}) => {
     const isScatter = chartTypeUpper === 'SCATTER';
     const isBubble = chartTypeUpper === 'BUBBLE';
     const isCombo = chartTypeUpper.startsWith('COMBO');
+    const isHierarchyChart = chartTypeUpper === 'TREEMAP' || chartTypeUpper === 'SUNBURST';
+    const isOrgChart = chartTypeUpper === 'ORG_CHART' || chartTypeUpper === 'ORG_TREE_STRUCTURED';
+
+    if (isHierarchyChart) {
+        const hierarchyIdx = getColumnIndex(columns, '__hierarchy');
+        const hierarchy = rowMatrix?.[0]?.[hierarchyIdx];
+
+        const hierarchyOptions = {
+            topN: Number.isFinite(normalizedConfig?.hierarchyTopN) ? normalizedConfig.hierarchyTopN : 5,
+            threshold: Number.isFinite(normalizedConfig?.hierarchyThreshold) ? normalizedConfig.hierarchyThreshold : 0.02,
+            fields: Array.isArray(normalizedConfig?.hierarchyFields) ? normalizedConfig.hierarchyFields : [],
+        };
+
+        const baseNodes = Array.isArray(hierarchy) ? hierarchy.map(cloneHierarchyNode) : [];
+        const total = baseNodes.reduce((sum, node) => sum + nodeTotal(node), 0);
+        const processedHierarchy = baseNodes.map((node) => enrichHierarchy(node, 0, total, hierarchyOptions));
+
+        const adaptedRows = [
+            {
+                name: dimensionFields?.[0] || 'Hierarchy',
+                __hierarchy: processedHierarchy,
+            },
+        ];
+
+        return {
+            columns: [...columns],
+            rows: adaptedRows,
+            records,
+            transformed: {
+                hierarchy: adaptedRows[0].__hierarchy,
+                total,
+            },
+            meta: response?.meta || {},
+        };
+    }
+
+    if (isOrgChart) {
+        const treeIdx = getColumnIndex(columns, '__orgTree');
+        const metaIdx = columns.some((c) => String(c || '').toLowerCase() === '__orgmeta'.toLowerCase())
+            ? getColumnIndex(columns, '__orgMeta')
+            : -1;
+
+        const orgTree = rowMatrix?.[0]?.[treeIdx];
+        const orgMeta = metaIdx >= 0 ? rowMatrix?.[0]?.[metaIdx] : null;
+
+        const adaptedRows = [
+            {
+                name: 'Organization',
+                __orgTree: orgTree || null,
+                __orgMeta: orgMeta || null,
+            },
+        ];
+
+        return {
+            columns: [...columns],
+            rows: adaptedRows,
+            records,
+            transformed: {
+                orgTree,
+                orgMeta,
+            },
+            meta: response?.meta || {},
+        };
+    }
+
+    const dimIndexes = dimensionFields.map((d) => getColumnIndex(columns, d));
+    const measureIndexes = measures.map((m) => getColumnIndex(columns, m.name));
 
     if (!isScatter && !isBubble && dimensionFields.length === 0) {
         throw new Error(`Invalid config: dimensionFields are required for chartType '${chartType}'`);
@@ -129,15 +303,54 @@ export const adaptQueryResponse = (response, config = {}) => {
         const sizeName = String(normalizedConfig.sizeMeasure || measures[2]?.name || '').trim();
         const sizeIdx = sizeName ? getColumnIndex(columns, sizeName) : null;
 
-        const scatterSeries = rowMatrix.map((row) => {
+        const bubbleOptions = normalizedConfig.bubbleOptions || {};
+        const enableJitter = bubbleOptions.enableJitter !== false;
+        const enableClusterSpread = bubbleOptions.enableClusterSpread !== false;
+        const jitterStrength = Number.isFinite(bubbleOptions.jitterStrength) ? bubbleOptions.jitterStrength : 0.02;
+        const clusterThreshold = Number.isFinite(bubbleOptions.clusterThreshold) ? bubbleOptions.clusterThreshold : 0.01;
+
+        const rawPoints = rowMatrix.map((row, idx) => {
             const x = toNumeric(row[xIdx]);
             const y = toNumeric(row[yIdx]);
-            if (isBubble) {
-                const z = sizeIdx === null ? 0 : toNumeric(row[sizeIdx]);
-                return [x, y, z];
-            }
-            return [x, y];
+            const z = sizeIdx === null ? 0 : toNumeric(row[sizeIdx]);
+            const name = labels[idx] || '';
+            return [x, y, z, name];
         });
+
+        const xValues = rawPoints.map((p) => p[0]);
+        const yValues = rawPoints.map((p) => p[1]);
+        const xMin = Math.min(...xValues);
+        const xMax = Math.max(...xValues);
+        const yMin = Math.min(...yValues);
+        const yMax = Math.max(...yValues);
+        const xRange = Math.max(1, xMax - xMin);
+        const yRange = Math.max(1, yMax - yMin);
+        const thresholdX = xRange * clusterThreshold;
+        const thresholdY = yRange * clusterThreshold;
+        const spreadRadiusX = xRange * 0.015;
+        const spreadRadiusY = yRange * 0.015;
+
+        const clustered = enableClusterSpread
+            ? groupClusters(rawPoints, thresholdX, thresholdY)
+            : rawPoints.map((p) => [p]);
+
+        const processed = clustered.flatMap((cluster) => {
+            if (cluster.length === 1) return cluster;
+            return spreadCluster(cluster, spreadRadiusX, spreadRadiusY);
+        }).map((point) => {
+            const [x, y, z, name] = point;
+            const jitteredX = enableJitter ? jitter(x, jitterStrength) : x;
+            const jitteredY = enableJitter ? jitter(y, jitterStrength) : y;
+            return {
+                name: name || '',
+                value: [jitteredX, jitteredY, z],
+                raw: [x, y, z],
+            };
+        });
+
+        const scatterSeries = isBubble
+            ? processed
+            : rawPoints.map((p) => [p[0], p[1]]);
 
         const adaptedRows = records.map((record, idx) => ({
             ...record,
@@ -153,6 +366,7 @@ export const adaptQueryResponse = (response, config = {}) => {
                 xMeasure: xName,
                 yMeasure: yName,
                 ...(isBubble ? { sizeMeasure: sizeName || null } : {}),
+                ...(isBubble ? { bubbleOptions: { enableJitter, enableClusterSpread, jitterStrength, clusterThreshold } } : {}),
             },
             meta: response?.meta || {},
         };
@@ -243,3 +457,4 @@ export const adaptQueryResponse = (response, config = {}) => {
         meta: response?.meta || {},
     };
 };
+

@@ -6,6 +6,7 @@ import {
     CHART_COLORS_NEUTRAL,
     CHART_COLORS_DARK_NEUTRAL,
 } from '../constants';
+import { TYPO } from '../styles/typography';
 
 /**
  * Builds an Apache ECharts option object based on visual type, data, and theme.
@@ -115,9 +116,12 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const colors = colorMode === 'single' && normalizedSingle
         ? [normalizedSingle]
         : (colorMode === 'multi' && normalizedMulti.length > 0 ? normalizedMulti : basePalette);
-    const fontFamily = style.fontFamily || 'Plus Jakarta Sans, sans-serif';
-    const fontSize = Number(style.fontSize) || (isClearMode ? 12 : 11);
+    const fontFamily = TYPO.fontFamily;
+    const fontSize = Math.max(11, Number(style.fontSize || TYPO.axis.fontSize || 12));
+    const axisBase = Number(TYPO.axis.fontSize || 12);
+    const scaledFont = (size) => Math.max(11, Math.round((fontSize / axisBase) * Number(size || axisBase)));
     const labelMode = style.labelMode || 'auto';
+    const pieLabelPosition = String(style.pieLabelPosition || 'inside').toLowerCase() === 'outside' ? 'outside' : 'inside';
     const tooltipEnabled = style.tooltipEnabled !== false;
     const tooltipDecimals = Number.isFinite(Number(style.tooltipDecimals)) ? Number(style.tooltipDecimals) : 2;
     let categories = processedData.map(d => d.name);
@@ -142,14 +146,24 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         show: tooltipEnabled,
         backgroundColor: isDark ? '#1e293b' : '#ffffff',
         borderColor: isDark ? '#334155' : '#e2e8f0',
-        textStyle: { color: textColor, fontSize, fontFamily },
+        textStyle: {
+            color: textColor,
+            fontSize: scaledFont(TYPO.tooltip.fontSize),
+            fontWeight: TYPO.tooltip.fontWeight,
+            fontFamily,
+        },
         borderWidth: 1,
         padding: [12, 16],
         extraCssText: 'border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);',
         valueFormatter: (value) => numberFormatter(value),
     } }).tooltip;
     const legendStyle = {
-        textStyle: { color: subTextColor, fontSize, fontFamily },
+        textStyle: {
+            color: subTextColor,
+            fontSize: scaledFont(TYPO.legend.fontSize),
+            fontWeight: TYPO.legend.fontWeight,
+            fontFamily,
+        },
         type: 'scroll',
         bottom: 0,
         itemGap: isClearMode ? 18 : 16,
@@ -157,12 +171,19 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         itemWidth: isClearMode ? 14 : 12,
         itemHeight: isClearMode ? 9 : 8,
     };
-    const gridStyle = applyGridSpacing({ grid: { left: 52, right: 22, top: 24, bottom: 48, containLabel: true } }).grid;
-    const axisLabelStyle = { color: subTextColor, fontSize, fontFamily };
+    const dynamicLeftPadding = Math.max(60, Math.round(24 + fontSize * 2.6));
+    const dynamicYAxisNameGap = Math.max(48, Math.round(fontSize * 3.2));
+    const gridStyle = applyGridSpacing({ grid: { left: dynamicLeftPadding, right: 22, top: 24, bottom: 48, containLabel: true } }).grid;
+    const axisLabelStyle = {
+        color: subTextColor,
+        fontSize,
+        fontWeight: TYPO.axis.fontWeight,
+        fontFamily,
+    };
     const axisNameStyle = {
         color: textColor,
-        fontSize: Math.max(fontSize + 1, 12),
-        fontWeight: 700,
+        fontSize,
+        fontWeight: TYPO.axis.fontWeight,
         fontFamily,
     };
     const axisLineStyle = { lineStyle: { color: gridBorderColor } };
@@ -218,7 +239,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     function applyGridSpacing(option = {}) {
         const baseGrid = {
             top: 40,
-            left: 60,
+            left: dynamicLeftPadding,
             right: 30,
             bottom: 80,
             containLabel: true,
@@ -251,7 +272,12 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 backgroundColor: isDark ? '#111827' : '#ffffff',
                 borderColor: isDark ? '#374151' : '#d1d5db',
                 borderWidth: 1,
-                textStyle: { color: textColor, fontSize, fontFamily },
+                textStyle: {
+                    color: textColor,
+                    fontSize: scaledFont(TYPO.tooltip.fontSize),
+                    fontWeight: TYPO.tooltip.fontWeight,
+                    fontFamily,
+                },
                 extraCssText: 'border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.16);max-width:340px;white-space:normal;',
                 formatter: (params) => {
                     const list = Array.isArray(params) ? params : [params];
@@ -433,7 +459,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         type: 'value',
         name: axisNameFromMeasure,
         nameLocation: 'middle',
-        nameGap: 48,
+        nameGap: dynamicYAxisNameGap,
         nameTextStyle: axisNameStyle,
         axisLabel: axisLabelStyle,
         axisLine: { show: false },
@@ -460,6 +486,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         subtext: isDark ? '#94A3B8' : '#111827',
         tooltipBg: isDark ? '#0F172A' : '#FFFFFF',
         tooltipBorder: isDark ? '#334155' : '#E5E7EB',
+        labelBg: isDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.95)',
         markerBorder: isDark ? '#0F172A' : '#FFFFFF',
         axisPointer: isDark ? '#60A5FA' : '#93C5FD',
         splitLine: isDark ? 'rgba(148,163,184,0.16)' : '#E5E7EB',
@@ -514,6 +541,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
         const isPrimarySeries = index === 0;
         const insights = isPrimarySeries ? getLineInsights(values) : null;
         const lineColor = colors[index % colors.length] || '#3B82F6';
+        const showPointLabels = categories.length <= 30;
 
         return {
             name: measure,
@@ -562,7 +590,19 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     ],
                 },
             },
-            label: resolveLabel({ show: false }),
+            label: resolveLabel({
+                show: showPointLabels,
+                position: 'top',
+                color: lineUi.text,
+                fontWeight: 700,
+                fontSize: 11,
+                backgroundColor: lineUi.labelBg,
+                borderColor: lineUi.tooltipBorder,
+                borderWidth: 1,
+                borderRadius: 8,
+                padding: [3, 6],
+                formatter: ({ value }) => formatMetric(value),
+            }),
             emphasis: {
                 focus: 'series',
                 scale: true,
@@ -1114,23 +1154,28 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     top: 8,
                     textStyle: {
                         color: lineUi.text,
-                        fontSize: 16,
-                        fontWeight: 700,
-                        fontFamily: 'Plus Jakarta Sans, sans-serif',
+                        fontSize: scaledFont(TYPO.title.fontSize),
+                        fontWeight: TYPO.title.fontWeight,
+                        fontFamily,
                     },
                     subtextStyle: {
                         color: lineUi.subtext,
-                        fontSize: 12,
-                        fontWeight: 500,
+                        fontSize: scaledFont(TYPO.subtitle.fontSize),
+                        fontWeight: TYPO.subtitle.fontWeight,
                         opacity: 0.75,
-                        fontFamily: 'Plus Jakarta Sans, sans-serif',
+                        fontFamily,
                     },
                 },
                 tooltip: {
                     ...tooltipStyle,
                     backgroundColor: lineUi.tooltipBg,
                     borderColor: lineUi.tooltipBorder,
-                    textStyle: { color: lineUi.text, fontSize: 12, fontFamily: 'Plus Jakarta Sans, sans-serif' },
+                    textStyle: {
+                        color: lineUi.text,
+                        fontSize: scaledFont(TYPO.tooltip.fontSize),
+                        fontWeight: TYPO.tooltip.fontWeight,
+                        fontFamily,
+                    },
                     axisPointer: {
                         type: 'line',
                         lineStyle: { color: lineUi.axisPointer, width: 1.5 },
@@ -1245,81 +1290,185 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
 
         // ═══════════════════ CIRCULAR CHARTS ═══════════════════
         case ChartType.PIE:
+            {
+            const pieTotal = processedData.reduce((sum, d) => sum + Number(d?.[measures[0]] || 0), 0);
             return {
                 ...base,
+                title: {
+                    text: `Total: ${numberFormatter(pieTotal)}`,
+                    left: 'center',
+                    top: 2,
+                    textStyle: {
+                        color: textColor,
+                        fontSize: scaledFont(TYPO.title.fontSize),
+                        fontWeight: TYPO.title.fontWeight,
+                        fontFamily,
+                    },
+                },
                 tooltip: { ...tooltipStyle, trigger: 'item' },
-                legend: legendStyle,
+                legend: { ...legendStyle, bottom: 8 },
                 series: [{
                     type: 'pie',
-                    radius: ['0%', '75%'],
+                    radius: ['0%', '80%'],
+                    center: ['50%', '46%'],
                     data: processedData.map((d, i) => ({
                         name: d.name,
                         value: d[measures[0]] || 0,
                     })),
-                    label: resolveLabel({ color: subTextColor, fontSize: Math.max(10, fontSize - 1) }),
+                    label: resolveLabel({
+                        show: true,
+                        position: pieLabelPosition,
+                        color: pieLabelPosition === 'inside' ? '#ffffff' : subTextColor,
+                        fontSize: scaledFont(13),
+                        fontWeight: 600,
+                        formatter: ({ name, value, percent }) => `${name}: ${numberFormatter(value)} (${Number(percent || 0).toFixed(1)}%)`,
+                    }),
+                    labelLine: { show: pieLabelPosition === 'outside' },
                     itemStyle: { borderRadius: 4, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                     emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.15)' } },
                 }],
             };
+            }
 
         case ChartType.DONUT:
+            {
+            const donutTotal = processedData.reduce((sum, d) => sum + Number(d?.[measures[0]] || 0), 0);
             return {
                 ...base,
+                title: {
+                    text: `Total: ${numberFormatter(donutTotal)}`,
+                    left: 'center',
+                    top: 2,
+                    textStyle: {
+                        color: textColor,
+                        fontSize: scaledFont(TYPO.title.fontSize),
+                        fontWeight: TYPO.title.fontWeight,
+                        fontFamily,
+                    },
+                },
                 tooltip: { ...tooltipStyle, trigger: 'item' },
-                legend: legendStyle,
+                legend: { ...legendStyle, bottom: 8 },
                 series: [{
                     type: 'pie',
-                    radius: ['50%', '78%'],
+                    radius: ['52%', '82%'],
+                    center: ['50%', '46%'],
                     data: processedData.map((d) => ({
                         name: d.name,
                         value: d[measures[0]] || 0,
                     })),
-                    label: resolveLabel({ show: false }),
+                    label: resolveLabel({
+                        show: true,
+                        color: subTextColor,
+                        fontSize: scaledFont(13),
+                        fontWeight: 600,
+                        formatter: ({ name, value, percent }) => `${name}: ${numberFormatter(value)} (${Number(percent || 0).toFixed(1)}%)`,
+                    }),
                     itemStyle: { borderRadius: 6, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 3 },
                     emphasis: {
-                        label: resolveLabel({ show: true, fontSize: Math.max(12, fontSize + 1), fontWeight: 'bold', color: textColor }),
+                        label: resolveLabel({ show: true, fontSize: scaledFont(13), fontWeight: 600, color: textColor }),
                         itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.15)' },
                     },
                 }],
             };
+            }
 
         case ChartType.ROSE:
+            {
+            const roseTotal = processedData.reduce((sum, d) => sum + Number(d?.[measures[0]] || 0), 0);
             return {
                 ...base,
+                title: {
+                    text: `Total: ${numberFormatter(roseTotal)}`,
+                    left: 'center',
+                    top: 2,
+                    textStyle: {
+                        color: textColor,
+                        fontSize: scaledFont(TYPO.title.fontSize),
+                        fontWeight: TYPO.title.fontWeight,
+                        fontFamily,
+                    },
+                },
                 tooltip: { ...tooltipStyle, trigger: 'item' },
-                legend: legendStyle,
+                legend: { ...legendStyle, bottom: 8 },
                 series: [{
                     type: 'pie',
                     roseType: 'area',
-                    radius: ['20%', '75%'],
+                    radius: ['20%', '80%'],
+                    center: ['50%', '46%'],
                     data: processedData.map(d => ({
                         name: d.name,
                         value: d[measures[0]] || 0,
                     })),
-                    label: resolveLabel({ color: subTextColor, fontSize: Math.max(10, fontSize - 1) }),
+                    label: resolveLabel({
+                        show: true,
+                        color: subTextColor,
+                        fontSize: scaledFont(13),
+                        fontWeight: 600,
+                        formatter: ({ name, value, percent }) => `${name}: ${numberFormatter(value)} (${Number(percent || 0).toFixed(1)}%)`,
+                    }),
                     itemStyle: { borderRadius: 6, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                 }],
             };
+            }
 
         case ChartType.SUNBURST:
             {
-                const rawSunburstData = Array.isArray(processedData?.[0]?.__hierarchy)
-                    ? processedData[0].__hierarchy
-                    : processedData.map((d, i) => ({
-                        name: d.name,
-                        value: d[measures[0]] || 0,
-                        children: measures.length > 1 ? measures.slice(1).map(m => ({
-                            name: m,
-                            value: d[m] || 0,
-                        })) : undefined,
-                    }));
+                const rawSunburstData = Array.isArray(config?.transformed?.hierarchy)
+                    ? config.transformed.hierarchy
+                    : (Array.isArray(processedData?.[0]?.__hierarchy)
+                        ? processedData[0].__hierarchy
+                        : processedData.map((d) => ({
+                            name: d.name,
+                            value: d[measures[0]] || 0,
+                            children: measures.length > 1 ? measures.slice(1).map(m => ({
+                                name: m,
+                                value: d[m] || 0,
+                            })) : undefined,
+                        })));
 
-                const sunburstData = preprocessSunburstData(rawSunburstData, {
-                    threshold: 0.03,
-                    maxDepth: 3,
-                });
+                const sunburstData = rawSunburstData;
+                const totalSunburst = Number(config?.transformed?.total)
+                    || sunburstData.reduce((sum, node) => sum + toNumeric(node.value), 0);
 
-                const totalSunburst = sunburstData.reduce((sum, node) => sum + toNumeric(node.value), 0);
+                const colorMap = new Map();
+                const basePalette = Array.isArray(colors) && colors.length > 0
+                    ? colors
+                    : ['#4F46E5', '#22C55E', '#F97316', '#06B6D4', '#A855F7', '#EAB308'];
+
+                const adjustColor = (hex, factor = 0.2) => {
+                    const cleaned = String(hex || '').replace('#', '');
+                    if (cleaned.length !== 6) return hex;
+                    const r = parseInt(cleaned.slice(0, 2), 16);
+                    const g = parseInt(cleaned.slice(2, 4), 16);
+                    const b = parseInt(cleaned.slice(4, 6), 16);
+                    const mix = (c) => Math.round(c + (255 - c) * factor);
+                    return `#${[mix(r), mix(g), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+                };
+
+                const colorize = (nodes = [], depth = 0, parentColor = null) => {
+                    return (Array.isArray(nodes) ? nodes : []).map((node) => {
+                        let baseColor = parentColor;
+                        if (depth === 0) {
+                            if (!colorMap.has(node.name)) {
+                                colorMap.set(node.name, basePalette[colorMap.size % basePalette.length]);
+                            }
+                            baseColor = colorMap.get(node.name);
+                        }
+                        const nodeColor = baseColor ? adjustColor(baseColor, depth * 0.18) : undefined;
+                        return {
+                            ...node,
+                            itemStyle: {
+                                ...(node?.itemStyle || {}),
+                                ...(nodeColor ? { color: nodeColor } : {}),
+                            },
+                            children: Array.isArray(node.children)
+                                ? colorize(node.children, depth + 1, baseColor)
+                                : undefined,
+                        };
+                    });
+                };
+
+                const coloredData = colorize(sunburstData, 0, null);
 
             return {
                 ...base,
@@ -1331,23 +1480,27 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                             ? params.treePathInfo.slice(1).map(p => p.name).filter(Boolean).join(' ▸ ')
                             : (params?.name || '');
                         const value = toNumeric(params?.value);
-                        const pctRaw = totalSunburst > 0 ? ((value / totalSunburst) * 100) : 0;
-                        const pct = Number.isFinite(pctRaw) ? pctRaw.toFixed(2) : '0.00';
+                        const pct = Number.isFinite(params?.data?.percent)
+                            ? params.data.percent.toFixed(1)
+                            : (totalSunburst > 0 ? ((value / totalSunburst) * 100).toFixed(1) : '0.0');
                         return `
                             <div style="font-weight:700;margin-bottom:6px">${path || params?.name || 'Node'}</div>
                             <div>Count: ${numberFormatter(value)}</div>
                             <div>Percentage: ${pct}%</div>
+                            <div style="opacity:0.75;margin-top:4px"><i>Click to view details</i></div>
                         `;
                     },
                 },
                 series: [{
                     type: 'sunburst',
-                    data: sunburstData,
-                    radius: ['0%', '90%'],
+                    data: coloredData,
+                    radius: ['0%', '100%'],
+                    center: ['50%', '50%'],
                     sort: null,
                     colorMappingBy: 'index',
-                    nodeClick: 'zoomToNode',
+                    nodeClick: 'rootToNode',
                     emphasis: { focus: 'ancestor' },
+                    blur: { itemStyle: { opacity: 0.3 } },
                     levels: [
                         {},
                         {
@@ -1358,7 +1511,13 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                                 borderColor: isDark ? '#0f172a' : '#ffffff',
                             },
                             label: {
-                                show: false,
+                                show: true,
+                                minAngle: 6,
+                                formatter: (params) => {
+                                    const name = params?.name || '';
+                                    const pctValue = Number.isFinite(params?.data?.percent) ? params.data.percent : 0;
+                                    return `${name}\n${pctValue.toFixed(0)}%`;
+                                },
                                 rotate: 'tangential',
                                 color: textColor,
                                 fontSize: Math.max(10, fontSize),
@@ -1373,7 +1532,9 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                                 borderColor: isDark ? '#0f172a' : '#ffffff',
                             },
                             label: {
-                                show: false,
+                                show: true,
+                                minAngle: 6,
+                                formatter: (params) => String(params?.name || ''),
                                 rotate: 'radial',
                                 color: textColor,
                                 fontSize: Math.max(9, fontSize - 1),
@@ -1388,7 +1549,13 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                                 borderColor: isDark ? '#0f172a' : '#ffffff',
                             },
                             label: {
-                                show: false,
+                                show: true,
+                                minAngle: 6,
+                                formatter: (params) => String(params?.name || ''),
+                                rotate: 'tangential',
+                                color: textColor,
+                                fontSize: Math.max(9, fontSize - 2),
+                                overflow: 'truncate',
                             },
                         },
                     ],
@@ -1437,21 +1604,86 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
             };
 
         case ChartType.BUBBLE:
+            const bubbleSeries = Array.isArray(config?.transformed?.series)
+                ? config.transformed.series
+                : processedData.map(d => [
+                    d[measures[0]] || 0,
+                    d[measures[1]] || 0,
+                    d[measures[2]] || d[measures[0]] || 10,
+                ]);
+            const bubbleScale = Number.isFinite(config?.transformed?.bubbleOptions?.sizeScale)
+                ? config.transformed.bubbleOptions.sizeScale
+                : (Number.isFinite(config?.style?.bubble?.sizeScale) ? config.style.bubble.sizeScale : 1);
             return {
                 ...base,
-                tooltip: { ...tooltipStyle, trigger: 'item' },
+                tooltip: {
+                    ...tooltipStyle,
+                    trigger: 'item',
+                    formatter: (params) => {
+                        const name = String(params?.name || params?.data?.name || '');
+                        const raw = params?.data?.raw;
+                        const value = Array.isArray(params?.value) ? params.value : [];
+                        const [x, y, z] = Array.isArray(raw) ? raw : value;
+                        return `
+                            <div style="font-weight:700;margin-bottom:6px;color:${textColor}">${name || 'Point'}</div>
+                            <div style="display:flex;gap:8px;flex-direction:column;color:${subTextColor}">
+                                <div><strong style="color:${textColor}">${measures[0] || 'X'}:</strong> ${numberFormatter(x || 0)}</div>
+                                <div><strong style="color:${textColor}">${measures[1] || 'Y'}:</strong> ${numberFormatter(y || 0)}</div>
+                                <div><strong style="color:${textColor}">${measures[2] || 'Size'}:</strong> ${numberFormatter(z || 0)}</div>
+                            </div>
+                        `;
+                    },
+                },
                 grid: gridStyle,
                 xAxis: { ...yAxisValue, name: measures[0] || '', nameLocation: 'center', nameGap: 30, nameTextStyle: axisLabelStyle },
                 yAxis: { ...yAxisValue, name: measures[1] || '', nameTextStyle: axisLabelStyle },
                 series: [{
                     type: 'scatter',
-                    data: processedData.map(d => [
-                        d[measures[0]] || 0,
-                        d[measures[1]] || 0,
-                        d[measures[2]] || d[measures[0]] || 10,
-                    ]),
-                    symbolSize: (val) => Math.max(8, Math.min(40, val[2] / 5)),
-                    itemStyle: { opacity: 0.65 },
+                    data: bubbleSeries.map((point) => {
+                        if (Array.isArray(point)) {
+                            return {
+                                name: '',
+                                value: [point[0], point[1], point[2]],
+                            };
+                        }
+                        const value = Array.isArray(point?.value) ? point.value : [];
+                        return {
+                            name: point?.name || '',
+                            value: [value[0], value[1], value[2]],
+                            raw: point?.raw,
+                        };
+                    }),
+                    symbolSize: (val) => {
+                        const size = Number(Array.isArray(val) ? val[2] : val?.value?.[2]) || 0;
+                        const scaled = Math.sqrt(size) * 7 * bubbleScale;
+                        return Math.max(28, Math.min(130, scaled));
+                    },
+                    label: {
+                        show: true,
+                        formatter: (params) => String(params?.name || ''),
+                        color: '#fff',
+                        fontSize: Math.max(10, fontSize - 1),
+                        fontWeight: 700,
+                    },
+                    labelLayout: { hideOverlap: true },
+                    itemStyle: {
+                        opacity: 0.7,
+                        borderColor: isDark ? '#0f172a' : '#ffffff',
+                        borderWidth: 2,
+                        shadowBlur: 10,
+                        shadowColor: isDark ? 'rgba(59,130,246,0.35)' : 'rgba(0,0,0,0.12)',
+                    },
+                    emphasis: {
+                        scale: true,
+                        itemStyle: {
+                            opacity: 1,
+                            shadowBlur: 16,
+                            shadowColor: isDark ? 'rgba(96,165,250,0.5)' : 'rgba(59,130,246,0.35)',
+                        },
+                        label: {
+                            fontSize: Math.max(12, fontSize),
+                        },
+                    },
                 }],
             };
 
@@ -1484,12 +1716,17 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                             ? [colors[0], colors[Math.floor(colors.length / 2)], colors[colors.length - 1]]
                             : (isDark ? ['#1e293b', '#3b82f6', '#ef4444'] : ['#f0f9ff', '#3b82f6', '#ef4444']),
                     },
-                    textStyle: { color: subTextColor, fontSize: 10 },
+                    textStyle: {
+                        color: subTextColor,
+                        fontSize,
+                        fontWeight: TYPO.axis.fontWeight,
+                        fontFamily,
+                    },
                 },
                 series: [{
                     type: 'heatmap',
                     data: heatData,
-                    label: resolveLabel({ show: true, fontSize: Math.max(10, fontSize - 1), color: textColor }),
+                    label: resolveLabel({ show: true, fontSize: scaledFont(11), fontWeight: 500, color: textColor }),
                     itemStyle: { borderRadius: 2, borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2 },
                 }],
             };
@@ -1507,7 +1744,17 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                             name: d.name,
                             value: d[measures[0]] || 0,
                         })),
-                    label: { fontSize: 11, fontWeight: 'bold', color: '#fff' },
+                    label: {
+                        show: true,
+                        fontSize: scaledFont(12),
+                        fontWeight: 500,
+                        color: '#fff',
+                        formatter: (params) => {
+                            const name = String(params?.name || '');
+                            const value = numberFormatter(params?.value);
+                            return `${name}\n${value}`;
+                        },
+                    },
                     upperLabel: resolveLabel({ show: false }),
                     breadcrumb: { show: false },
                     itemStyle: { borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 2, borderRadius: 4 },
@@ -1614,14 +1861,14 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                             rich: {
                                 name: {
                                     color: cardText,
-                                    fontWeight: 700,
-                                    fontSize: Math.max(11, fontSize),
+                                    fontWeight: 600,
+                                    fontSize: scaledFont(13),
                                     lineHeight: 18,
                                 },
                                 meta: {
                                     color: cardSub,
-                                    fontWeight: 500,
-                                    fontSize: Math.max(10, fontSize - 1),
+                                    fontWeight: 400,
+                                    fontSize: scaledFont(11),
                                     lineHeight: 15,
                                 },
                                 badge: {
@@ -1754,36 +2001,20 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                     },
                     axisTick: { show: false },
                     splitLine: { length: 12, lineStyle: { color: isDark ? '#475569' : '#94a3b8', width: 2 } },
-                    axisLabel: { distance: 28, color: subTextColor, fontSize: 10 },
+                    axisLabel: { distance: 28, color: subTextColor, fontSize, fontWeight: TYPO.axis.fontWeight, fontFamily },
                     detail: {
                         valueAnimation: true,
                         fontSize: 24,
-                        fontWeight: 'bold',
+                        fontWeight: 700,
                         color: textColor,
                         formatter: (val) => val > 1000 ? (val / 1000).toFixed(1) + 'k' : val.toFixed(1),
                         offsetCenter: [0, '70%'],
                     },
                     data: [{ value: parseFloat(avg.toFixed(1)), name: measures[0] || '' }],
-                    title: { color: subTextColor, fontSize: 11, offsetCenter: [0, '90%'] },
+                    title: { color: subTextColor, fontSize, fontWeight: TYPO.axis.fontWeight, fontFamily, offsetCenter: [0, '90%'] },
                 }],
             };
         }
-
-        case ChartType.SPARKLINE:
-            return {
-                ...base,
-                grid: { left: 4, right: 4, top: 4, bottom: 4 },
-                xAxis: { type: 'category', show: false, data: categories },
-                yAxis: { type: 'value', show: false },
-                series: [{
-                    type: 'line',
-                    smooth: true,
-                    data: processedData.map(d => d[measures[0]] || 0),
-                    symbol: 'none',
-                    lineStyle: { width: 2, color: colors[0] },
-                    areaStyle: { opacity: 0.1, color: colors[0] },
-                }],
-            };
 
         case ChartType.RADAR: {
             const indicators = processedData.map(d => ({
@@ -1796,7 +2027,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
                 legend: measures.length > 1 ? legendStyle : undefined,
                 radar: {
                     indicator: indicators,
-                    axisName: { color: subTextColor, fontSize: 10 },
+                    axisName: { color: subTextColor, fontSize, fontWeight: TYPO.axis.fontWeight, fontFamily },
                     splitArea: { areaStyle: { color: isDark ? ['#1e293b', '#0f172a'] : ['#f8fafc', '#ffffff'] } },
                     splitLine: { lineStyle: { color: gridBorderColor } },
                     axisLine: { lineStyle: { color: gridBorderColor } },

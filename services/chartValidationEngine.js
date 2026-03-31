@@ -138,6 +138,12 @@ const inferFieldTypeFromData = (fieldName, rows = []) => {
 
 const makeMessage = (code, message, fix) => ({ code, message, ...(fix ? { fix } : {}) });
 
+const isAggregatedExpression = (assignment = {}) => {
+    const expression = String(assignment?.expression || '').trim().toUpperCase();
+    if (!expression) return false;
+    return /^(SUM|AVG|COUNT|MIN|MAX)\s*\(/.test(expression) || expression === 'COUNT(*)';
+};
+
 const getDistinctCount = (rows, field) => {
     if (!field) return 0;
     return new Set(
@@ -224,6 +230,8 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
         if (a?.semanticMeasureName) return true;
         if (String(a?.field || '').startsWith('__semantic__:')) return true;
         if (a.field === '__count__') return true;
+        if (isAggregatedExpression(a)) return true;
+        if (['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'].includes(String(a?.aggregation || '').toUpperCase())) return true;
         const meta = getFieldMeta(a.field);
         return meta?.type === 'numeric';
     });
@@ -249,7 +257,13 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     if (chartType === ChartType.SCATTER) {
         const x = byRole(FieldRoles.X)[0]?.field;
         const y = byRole(FieldRoles.Y)[0]?.field;
-        if (!x || !y || getFieldMeta(x)?.type !== 'numeric' || getFieldMeta(y)?.type !== 'numeric') {
+        const yValueFields = [
+            ...byRole(FieldRoles.Y).map((a) => a.field),
+            ...byRole(FieldRoles.VALUE).map((a) => a.field),
+        ].filter(Boolean);
+        const numericMeasureCount = Array.from(new Set(yValueFields)).filter((field) => getFieldMeta(field)?.type === 'numeric').length;
+        const hasDirectXY = Boolean(x && y && getFieldMeta(x)?.type === 'numeric' && getFieldMeta(y)?.type === 'numeric');
+        if (!hasDirectXY && numericMeasureCount < 2) {
             errors.push(makeMessage('SCATTER_REQUIRED', getChartRequirementText(ChartType.SCATTER)));
         }
     }
@@ -268,9 +282,6 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     }
     if ([ChartType.GAUGE, ChartType.KPI_SINGLE].includes(chartType) && !hasNumeric) {
         errors.push(makeMessage('KPI_REQUIRED', getChartRequirementText(chartType)));
-    }
-    if (chartType === ChartType.SPARKLINE) {
-        if (!byRole(FieldRoles.TIME)[0]?.field || !hasNumeric) errors.push(makeMessage('SPARKLINE_REQUIRED', getChartRequirementText(ChartType.SPARKLINE)));
     }
     if (chartType === ChartType.RADAR) {
         const ySeries = byRole(FieldRoles.Y).length + byRole(FieldRoles.VALUE).length;
@@ -297,7 +308,7 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     }
 
     const hasTime = Array.from(fieldMetaMap.values()).some(f => f.type === 'date');
-    if (hasTime && hasNumeric && ![ChartType.LINE, ChartType.AREA, ChartType.SPARKLINE].includes(chartType)) {
+    if (hasTime && hasNumeric && ![ChartType.LINE, ChartType.AREA].includes(chartType)) {
         suggestions.push(makeMessage('SUGGEST_LINE', 'Time + measure detected. Consider LINE chart.', { chartType: ChartType.LINE }));
     }
     if (hierarchyCount >= 2 && ![ChartType.TREEMAP, ChartType.SUNBURST].includes(chartType)) {

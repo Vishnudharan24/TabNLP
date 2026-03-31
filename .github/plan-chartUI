@@ -1,0 +1,270 @@
+You are a senior frontend architect and design system expert building a Power BI–like analytics platform.
+
+I have a React + ECharts application with multiple chart types:
+
+BAR, LINE, AREA, PIE, DONUT, SCATTER, BUBBLE, HEATMAP, ORG_CHART, TREEMAP, SUNBURST, COMBO_BAR_LINE, GAUGE, SPARKLINE, RADAR, KPI_SINGLE, TABLE
+
+The backend is already query-driven and complete.
+
+---
+
+# 🎯 OBJECTIVE
+
+Implement a **complete, consistent typography system** across:
+
+* All charts (ECharts)
+* All UI components (DataPanel, Visualization, Tables, KPI cards)
+* Tooltips, legends, axis labels, titles
+
+The goal is to achieve a **clean, modern, enterprise BI look (Power BI / Tableau level)**.
+
+---
+
+# 🚨 STRICT RULES
+
+1. Use a SINGLE font system globally
+2. No inline font styling scattered across files
+3. All typography must come from a centralized config
+4. Maintain consistency across all chart types
+5. Ensure readability at small sizes (11px minimum)
+
+---
+
+# 🧱 STEP 1 — DEFINE GLOBAL TYPOGRAPHY SYSTEM
+
+Create:
+
+/frontend/styles/typography.js
+
+---
+
+## IMPLEMENT
+
+export const TYPO = {
+fontFamily: "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+
+title: { fontSize: 16, fontWeight: 600 },
+subtitle: { fontSize: 14, fontWeight: 500 },
+
+axis: { fontSize: 12, fontWeight: 500 },
+label: { fontSize: 12, fontWeight: 500 },
+legend: { fontSize: 12, fontWeight: 400 },
+tooltip: { fontSize: 12, fontWeight: 400 },
+
+kpiValue: { fontSize: 32, fontWeight: 700 },
+kpiLabel: { fontSize: 12, fontWeight: 500 },
+
+tableHeader: { fontSize: 13, fontWeight: 600 },
+tableCell: { fontSize: 12, fontWeight: 400 }
+};
+
+---
+
+# 🔥 STEP 2 — APPLY GLOBAL FONT (APP LEVEL)
+
+In App.jsx or global CSS:
+
+body {
+font-family: TYPO.fontFamily;
+}
+
+---
+
+# 🔥 STEP 3 — UPDATE ECHARTS OPTION BUILDER
+
+Modify:
+
+/frontend/services/echartsOptionBuilder.js
+
+---
+
+## ADD BASE TEXT STYLE
+
+textStyle: {
+fontFamily: TYPO.fontFamily
+}
+
+---
+
+# 🔥 STEP 4 — APPLY TYPOGRAPHY PER CHART TYPE
+
+---
+
+## 📊 BAR / LINE / AREA / COMBO
+
+xAxis.axisLabel → TYPO.axis
+yAxis.axisLabel → TYPO.axis
+legend.textStyle → TYPO.legend
+tooltip.textStyle → TYPO.tooltip
+
+---
+
+## 🥧 PIE / DONUT
+
+series.label:
+fontSize: 13
+fontWeight: 600
+
+legend → TYPO.legend
+
+---
+
+## 🔵 SCATTER / BUBBLE
+
+axisLabel → TYPO.axis
+tooltip → TYPO.tooltip
+
+(No point labels by default)
+
+---
+
+## 🌡️ HEATMAP
+
+axisLabel → TYPO.axis
+series.label:
+fontSize: 11
+fontWeight: 500
+
+---
+
+## 🌳 TREEMAP / SUNBURST
+
+label:
+fontSize: 12
+fontWeight: 500
+
+Auto-hide small labels
+
+---
+
+## 🧬 ORG CHART
+
+node title → 13px / 600
+node subtitle → 11px / 400
+
+---
+
+## 📡 RADAR
+
+axisName → TYPO.axis
+legend → TYPO.legend
+
+---
+
+## ⚡ GAUGE
+
+detail:
+fontSize: 24
+fontWeight: 700
+
+---
+
+## 📉 SPARKLINE
+
+NO labels
+NO axis text
+
+---
+
+## 🧠 KPI SINGLE
+
+value → TYPO.kpiValue
+label → TYPO.kpiLabel
+
+---
+
+## 📋 TABLE
+
+header → TYPO.tableHeader
+cell → TYPO.tableCell
+
+---
+
+# 🔥 STEP 5 — TOOLTIP STANDARDIZATION
+
+Ensure ALL charts use:
+
+tooltip: {
+textStyle: TYPO.tooltip
+}
+
+---
+
+# 🔥 STEP 6 — LEGEND STANDARDIZATION
+
+legend: {
+textStyle: TYPO.legend
+}
+
+---
+
+# 🔥 STEP 7 — TITLE STANDARDIZATION
+
+title: {
+textStyle: TYPO.title
+}
+
+---
+
+# 🔥 STEP 8 — REMOVE INLINE FONT STYLES
+
+Search and remove:
+
+* fontSize hardcoded values
+* fontWeight scattered in components
+* inconsistent text styles
+
+Replace ALL with TYPO usage
+
+---
+
+# 🔥 STEP 9 — DARK MODE SUPPORT (PREPARE)
+
+Ensure text colors are NOT hardcoded.
+
+Use:
+
+theme.textPrimary
+theme.textSecondary
+
+Typography only defines size + weight, not color.
+
+---
+
+# 🔥 STEP 10 — VALIDATION
+
+Test across:
+
+* bar chart
+* pie chart
+* scatter chart
+* KPI card
+* table
+
+Check:
+
+* readability
+* hierarchy
+* consistency
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. typography.js (central system)
+2. updated echartsOptionBuilder.js
+3. updated UI components (DataPanel, Visualization)
+4. removed inline font styles list
+5. before vs after comparison
+
+---
+
+# 🚀 FINAL GOAL
+
+Transform UI from:
+
+"inconsistent styling"
+
+→
+
+"enterprise BI design system with unified typography"

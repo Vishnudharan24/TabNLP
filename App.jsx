@@ -37,6 +37,7 @@ import { ChartType } from './types';
 import { useTheme } from './contexts/ThemeContext';
 import { recommendVisualization } from './services/chartRecommender';
 import { backendApi } from './services/backendApi';
+import { TYPO } from './styles/typography';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
@@ -321,6 +322,10 @@ const App = () => {
     const [routePath, setRoutePath] = useState(() => normalizeRoutePath(window.location.pathname || '/'));
     const [orgExplorerChartId, setOrgExplorerChartId] = useState(null);
     const [semanticMeasuresByDataset, setSemanticMeasuresByDataset] = useState({});
+
+    useEffect(() => {
+        document.body.style.fontFamily = TYPO.fontFamily;
+    }, []);
 
     const navigatePath = (path) => {
         const internalTarget = path || '/';

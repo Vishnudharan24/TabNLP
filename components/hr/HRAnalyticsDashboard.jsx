@@ -115,7 +115,6 @@ const ALL_CHART_TYPES = [
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
     ChartType.GAUGE,
-    ChartType.SPARKLINE,
     ChartType.RADAR,
     ChartType.KPI_SINGLE,
     ChartType.TABLE,

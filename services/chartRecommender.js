@@ -20,7 +20,6 @@ const SUPPORTED_RECOMMENDATION_CHARTS = [
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
     ChartType.GAUGE,
-    ChartType.SPARKLINE,
     ChartType.RADAR,
     ChartType.KPI_SINGLE,
     ChartType.TABLE,
@@ -89,7 +88,6 @@ const DEFAULT_CHARTS = [
     ChartType.SUNBURST,
     ChartType.COMBO_BAR_LINE,
     ChartType.GAUGE,
-    ChartType.SPARKLINE,
     ChartType.RADAR,
     ChartType.KPI_SINGLE,
     ChartType.TABLE,
@@ -123,7 +121,6 @@ const CHART_HELPERS = {
     [ChartType.SUNBURST]: 'Sunburst requires hierarchy fields + 1 value',
     [ChartType.COMBO_BAR_LINE]: 'Combo requires 1 X field + 2 Measures',
     [ChartType.GAUGE]: 'Gauge requires a single measure',
-    [ChartType.SPARKLINE]: 'Sparkline requires Time + Measure',
     [ChartType.RADAR]: 'Radar requires 1 Dimension + multiple Measures',
     [ChartType.KPI_SINGLE]: 'KPI requires a single measure',
     [ChartType.TABLE]: 'Table supports any fields',
@@ -143,7 +140,6 @@ const scoreByRule = ({ dims, measures, times }, chart) => {
     if ([ChartType.KPI_SINGLE, ChartType.GAUGE].includes(chart) && measures >= 1) return 60;
     if ([ChartType.PIE, ChartType.DONUT].includes(chart) && dims >= 1 && measures >= 1) return 75;
     if (chart === ChartType.HEATMAP && dims >= 2 && measures >= 1) return 78;
-    if (chart === ChartType.SPARKLINE && times >= 1 && measures >= 1) return 88;
     if (chart === ChartType.TABLE) return 50;
     if ([ChartType.ORG_CHART, ChartType.ORG_TREE_STRUCTURED].includes(chart) && dims >= 2) return 82;
     return 35;
@@ -301,9 +297,6 @@ export function assignRoles(chartType, columns, rows = [], selectedFields = {}) 
         push(m2 || m1 || '__count__', 'y', m2 ? 'AVG' : 'COUNT');
     } else if (type === ChartType.GAUGE || type === ChartType.KPI_SINGLE) {
         push(m1 || '__count__', 'value', m1 ? 'SUM' : 'COUNT');
-    } else if (type === ChartType.SPARKLINE) {
-        push(t || x, t ? 'time' : 'x');
-        push(m1 || '__count__', 'y', m1 ? 'SUM' : 'COUNT');
     } else if (type === ChartType.RADAR) {
         push(x, 'legend');
         [m1, m2, m3].filter(Boolean).forEach(f => push(f, 'y', 'AVG'));
