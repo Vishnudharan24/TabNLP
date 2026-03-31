@@ -29,6 +29,34 @@
     gap: 12px;
 }
 
+.cv-template-page__header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.cv-field-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.cv-field-select span {
+    font-size: 0.85rem;
+}
+
+.cv-field-select select {
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    background: #ffffff;
+    color: #0f172a;
+}
+
 .cv-template-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));

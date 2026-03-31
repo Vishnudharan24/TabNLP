@@ -116,7 +116,15 @@ const isSampleTypeCompatible = (samples = [], expectedType, fieldName = '') => {
     });
 };
 
-const TemplateMapping = ({ templates = [], datasetColumns, datasetData = [], onGenerateDashboard }) => {
+const TemplateMapping = ({
+    templates = [],
+    datasets = [],
+    selectedDatasetId = null,
+    onSelectDataset,
+    datasetColumns,
+    datasetData = [],
+    onGenerateDashboard,
+}) => {
     const { id } = useParams();
     const navigate = useNavigate();
     const { theme } = useTheme();
@@ -278,7 +286,27 @@ const TemplateMapping = ({ templates = [], datasetColumns, datasetData = [], onG
                     <h1>{template.name} Mapping</h1>
                     <p>Map your dataset columns to the required template fields.</p>
                 </div>
-                <Link className="cv-btn cv-btn--ghost" to="/templates">Back to Templates</Link>
+                <div className="cv-template-page__header-actions">
+                    {Array.isArray(datasets) && datasets.length > 0 && (
+                        <label className="cv-field-select">
+                            <span>Dataset</span>
+                            <select
+                                value={selectedDatasetId || ''}
+                                onChange={(event) => onSelectDataset?.(event.target.value)}
+                            >
+                                {datasets.map((ds) => {
+                                    const fileName = ds?._meta?.fileName || ds?._meta?.metadata?.file_name || '';
+                                    const label = ds?.name || ds?.id || 'Dataset';
+                                    const display = fileName ? `${label} · ${fileName}` : label;
+                                    return (
+                                        <option key={ds.id} value={ds.id}>{display}</option>
+                                    );
+                                })}
+                            </select>
+                        </label>
+                    )}
+                    <Link className="cv-btn cv-btn--ghost" to="/templates">Back to Templates</Link>
+                </div>
             </header>
 
             {normalizedColumns.length === 0 ? (

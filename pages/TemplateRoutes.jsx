@@ -6,10 +6,17 @@ import HRTemplateDashboard from '../components/templates/HRTemplateDashboard';
 import { ANALYTICS_TEMPLATES } from '../data/templates';
 import '../components/templates/templateSystem.css';
 
-const TemplateRoutes = ({ datasetColumns = null, datasetData = [] }) => {
+const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDatasetId }) => {
     const navigate = useNavigate();
     const [isLoading] = useState(false);
     const [templateSession, setTemplateSession] = useState({});
+
+    const selectedDataset = useMemo(
+        () => datasets.find(ds => ds.id === selectedDatasetId) || datasets[0] || null,
+        [datasets, selectedDatasetId]
+    );
+    const datasetColumns = selectedDataset?.columns ?? [];
+    const datasetData = selectedDataset?.data ?? [];
 
     const safeDatasetColumns = useMemo(() => {
         if (datasetColumns == null) {
@@ -49,6 +56,9 @@ const TemplateRoutes = ({ datasetColumns = null, datasetData = [] }) => {
                 element={(
                     <TemplateMapping
                         templates={ANALYTICS_TEMPLATES}
+                        datasets={datasets}
+                        selectedDatasetId={selectedDataset?.id || null}
+                        onSelectDataset={setSelectedDatasetId}
                         datasetColumns={safeDatasetColumns}
                         datasetData={datasetData}
                         onGenerateDashboard={handleGenerateDashboard}

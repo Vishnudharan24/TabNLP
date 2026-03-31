@@ -8,7 +8,6 @@ import {
     Merge,
     GitBranch,
     Server,
-    BriefcaseBusiness,
     LayoutTemplate
 } from 'lucide-react';
 
@@ -71,13 +70,6 @@ const Sidebar = ({ setView, currentView, onNavigatePath }) => {
                     label="Templates"
                     active={currentView === 'templates'}
                     onClick={() => handleViewChange('templates')}
-                />
-
-                <SidebarItem
-                    icon={BriefcaseBusiness}
-                    label="HR Data Visualization"
-                    active={currentView === 'hr-analytics'}
-                    onClick={() => handleViewChange('hr-analytics')}
                 />
 
                 <SidebarItem

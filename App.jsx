@@ -15,7 +15,6 @@ import DataProfiler from './components/DataProfiler';
 import RelationshipDiagram from './components/RelationshipDiagram';
 import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
 import AuthScreen from './components/AuthScreen';
-import HRAnalyticsDashboard from './components/hr/HRAnalyticsDashboard';
 import OrgChartPage from './pages/OrgChartPage.jsx';
 import TemplateRoutes from './pages/TemplateRoutes';
 import {
@@ -1223,8 +1222,9 @@ const App = () => {
                 <main className={`flex-1 flex flex-col min-w-0 ${view === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
                     {view === 'templates' ? (
                         <TemplateRoutes
-                            datasetColumns={selectedDataset?.columns ?? []}
-                            datasetData={selectedDataset?.data ?? []}
+                            datasets={datasets}
+                            selectedDatasetId={selectedDatasetId}
+                            setSelectedDatasetId={setSelectedDatasetId}
                         />
                     ) : view === 'data' ? (
                         <DataSourceView
@@ -1299,12 +1299,6 @@ const App = () => {
                                 </div>
                             )}
                         </div>
-                    ) : view === 'hr-analytics' ? (
-                        <HRAnalyticsDashboard
-                            datasets={datasets}
-                            selectedDatasetId={selectedDatasetId}
-                            setSelectedDatasetId={setSelectedDatasetId}
-                        />
                     ) : (
                         <div className="flex-1 flex flex-col overflow-hidden">
                             <div className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
