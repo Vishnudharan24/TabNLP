@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import tempfile
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -14,6 +15,7 @@ from fastapi import Header
 from fastapi import Depends
 from fastapi import UploadFile
 from fastapi import File
+from fastapi import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
@@ -22,6 +24,7 @@ from typing import Optional, Literal, Any
 from pathlib import Path
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
+import pandas as pd
 from services.data_services.ingestion_service import run_ingestion, run_uploaded_file_ingestion
 from services.hr.hr_analytics_service import compute_module
 from services.chart.visualization_engine import (
@@ -715,7 +718,7 @@ async def chart_config(payload: ChartConfigRequest, _current_user: dict = Depend
 async def query_data(payload: QueryRequest, _current_user: dict = Depends(_require_current_user)):
     try:
         response = await run_query(payload.model_dump(exclude_none=True))
-        return response
+        return _to_json_safe(response)
     except QueryEngineError as e:
         return JSONResponse(status_code=400, content=e.to_dict())
     except ValueError as e:
@@ -737,6 +740,56 @@ async def query_data(payload: QueryRequest, _current_user: dict = Depends(_requi
                 "error": {
                     "code": "QUERY_EXECUTION_FAILED",
                     "message": "Failed to execute query",
+                    "details": {"reason": str(e)},
+                }
+            },
+        )
+
+
+@app.post("/query/export")
+async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks, _current_user: dict = Depends(_require_current_user)):
+    try:
+        response = await run_query(payload.model_dump(exclude_none=True))
+        columns = response.get("columns", []) if isinstance(response, dict) else []
+        rows = response.get("rows", []) if isinstance(response, dict) else []
+
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            df = pd.DataFrame(rows)
+        else:
+            df = pd.DataFrame(rows, columns=columns)
+
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        temp.close()
+        df.to_excel(temp.name, index=False)
+
+        filename = f"query_export_{payload.datasetId}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        background_tasks.add_task(os.remove, temp.name)
+        return FileResponse(
+            temp.name,
+            filename=filename,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except QueryEngineError as e:
+        return JSONResponse(status_code=400, content=e.to_dict())
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "INVALID_QUERY",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
+    except Exception as e:
+        logger.exception("Failed to export query")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "QUERY_EXPORT_FAILED",
+                    "message": "Failed to export query",
                     "details": {"reason": str(e)},
                 }
             },
