@@ -16,6 +16,7 @@ from fastapi import UploadFile
 from fastapi import File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Literal, Any
 from pathlib import Path
@@ -26,9 +27,15 @@ from services.hr.hr_analytics_service import compute_module
 from services.chart.visualization_engine import (
     recommend_chart,
     generate_chart_config,
-    aggregate_for_chart,
 )
 from services.query_engine import run_query
+from services.query_pipeline import QueryEngineError
+from services.semantic_layer import (
+    set_measure,
+    list_measures,
+    delete_measure,
+    clear_dataset_cache,
+)
 from db.db_store import (
     upsert_source_config,
     ensure_indexes,
@@ -129,26 +136,24 @@ class ChartConfigRequest(ChartEngineRequest):
     selected_fields: Optional[dict[str, Any]] = None
 
 
-class ChartAggregateRequest(BaseModel):
-    data: list[dict[str, Any]]
-    config: dict[str, Any]
-
-
 class QueryMeasure(BaseModel):
-    field: str
-    aggregation: Literal["SUM", "AVG", "COUNT", "MIN", "MAX", "GROUP_BY"] = "COUNT"
+    field: Optional[str] = None
+    table: Optional[str] = None
+    name: Optional[str] = None
+    expression: Optional[str] = None
+    aggregation: Optional[Literal["SUM", "AVG", "COUNT", "MIN", "MAX", "GROUP_BY"]] = "COUNT"
     alias: Optional[str] = None
 
 
 class QueryFilter(BaseModel):
     field: str
-    type: Literal["include", "range", "operator"]
-    values: Optional[list[str]] = None
+    table: Optional[str] = None
+    operator: Optional[str] = "EQUALS"
+    value: Optional[Any] = None
+    type: Optional[str] = None
+    values: Optional[list[Any]] = None
     min: Optional[float] = None
     max: Optional[float] = None
-    operator: Optional[str] = None
-    value: Optional[Any] = None
-    valueSecondary: Optional[Any] = None
     columnType: Optional[str] = None
 
 
@@ -161,11 +166,19 @@ class QueryJoin(BaseModel):
 
 class QueryRequest(BaseModel):
     datasetId: str
-    mode: Optional[Literal["aggregate", "raw", "hierarchy", "org_tree"]] = "aggregate"
-    dimensions: Optional[list[str]] = None
-    measures: Optional[list[QueryMeasure]] = None
-    filters: Optional[list[QueryFilter]] = None
-    fields: Optional[list[str]] = None
+    chartType: Optional[str] = None
+    dimensions: Optional[list[Any]] = None
+    measures: Optional[list[Any]] = None
+    filters: Optional[list[Any]] = None
+
+    class QuerySort(BaseModel):
+        field: str
+        order: Literal["asc", "desc"] = "desc"
+
+    sort: Optional[QuerySort] = None
+    limit: Optional[int] = None
+    joins: Optional[list[QueryJoin]] = None
+    mode: Optional[str] = None
     hierarchy: Optional[list[str]] = None
     valueField: Optional[str] = None
     valueAggregation: Optional[str] = None
@@ -174,9 +187,20 @@ class QueryRequest(BaseModel):
     labelField: Optional[str] = None
     colorField: Optional[str] = None
     sortBy: Optional[str] = None
-    sortOrder: Optional[Literal["asc", "desc"]] = "desc"
-    limit: Optional[int] = None
-    joins: Optional[list[QueryJoin]] = None
+    sortOrder: Optional[str] = None
+    fields: Optional[list[str]] = None
+    meta: Optional[dict[str, Any]] = None
+
+
+class SemanticMeasureCreateRequest(BaseModel):
+    datasetId: str
+    name: str
+    expression: str
+
+
+class SemanticMeasureUpdateRequest(BaseModel):
+    datasetId: str
+    expression: str
 
 
 def _serialize_source_config(source_config: dict):
@@ -687,23 +711,120 @@ async def chart_config(payload: ChartConfigRequest, _current_user: dict = Depend
         _raise_internal_error("Failed to generate chart config", e)
 
 
-@app.post("/chart/aggregate")
-async def chart_aggregate(payload: ChartAggregateRequest, _current_user: dict = Depends(_require_current_user)):
-    try:
-        return aggregate_for_chart(data=payload.data, config=payload.config)
-    except Exception as e:
-        _raise_internal_error("Failed to aggregate chart data", e)
-
-
 @app.post("/query")
 async def query_data(payload: QueryRequest, _current_user: dict = Depends(_require_current_user)):
     try:
         response = await run_query(payload.model_dump(exclude_none=True))
         return response
+    except QueryEngineError as e:
+        return JSONResponse(status_code=400, content=e.to_dict())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "INVALID_QUERY",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
     except Exception as e:
-        _raise_internal_error("Failed to execute query", e)
+        logger.exception("Failed to execute query")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "QUERY_EXECUTION_FAILED",
+                    "message": "Failed to execute query",
+                    "details": {"reason": str(e)},
+                }
+            },
+        )
+
+
+@app.post("/semantic/measures")
+async def create_semantic_measure(payload: SemanticMeasureCreateRequest, _current_user: dict = Depends(_require_current_user)):
+    try:
+        measure = set_measure(
+            dataset_id=payload.datasetId,
+            name=payload.name,
+            expression=payload.expression,
+        )
+        clear_dataset_cache(payload.datasetId)
+        return {
+            "status": "success",
+            "datasetId": payload.datasetId,
+            "measure": measure,
+        }
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "INVALID_SEMANTIC_MEASURE",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
+
+
+@app.get("/semantic/measures")
+async def get_semantic_measures(datasetId: str, _current_user: dict = Depends(_require_current_user)):
+    try:
+        items = list_measures(datasetId)
+        return {
+            "status": "success",
+            "datasetId": datasetId,
+            "count": len(items),
+            "measures": items,
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to list semantic measures", e)
+
+
+@app.put("/semantic/measures/{name}")
+async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateRequest, _current_user: dict = Depends(_require_current_user)):
+    try:
+        measure = set_measure(
+            dataset_id=payload.datasetId,
+            name=name,
+            expression=payload.expression,
+        )
+        clear_dataset_cache(payload.datasetId)
+        return {
+            "status": "success",
+            "datasetId": payload.datasetId,
+            "measure": measure,
+        }
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "INVALID_SEMANTIC_MEASURE",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
+
+
+@app.delete("/semantic/measures/{name}")
+async def remove_semantic_measure(name: str, datasetId: str, _current_user: dict = Depends(_require_current_user)):
+    try:
+        removed = delete_measure(dataset_id=datasetId, name=name)
+        if removed:
+            clear_dataset_cache(datasetId)
+        return {
+            "status": "success",
+            "datasetId": datasetId,
+            "removed": removed,
+            "name": name,
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to delete semantic measure", e)
 
 
 @app.get("/relationships")
