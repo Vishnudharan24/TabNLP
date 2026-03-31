@@ -38,6 +38,73 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     };
 
     const { measures = [], dimension = '' } = resolvedConfig;
+
+    const buildRowsFromTransformed = (transformed = {}, measureNames = []) => {
+        const safeMeasures = Array.isArray(measureNames) ? measureNames.filter(Boolean) : [];
+        const series = Array.isArray(transformed?.series) ? transformed.series : [];
+        const xAxis = Array.isArray(transformed?.xAxis) ? transformed.xAxis : [];
+
+        if (series.length === 0) return [];
+
+        const first = series[0];
+
+        if (Array.isArray(first) && first.every((v) => typeof v === 'number' || v === null || v === undefined)) {
+            const measure = safeMeasures[0] || 'Value';
+            return xAxis.map((label, idx) => ({
+                name: String(label ?? ''),
+                [measure]: Number(first[idx]) || 0,
+            }));
+        }
+
+        if (Array.isArray(first) && first.length >= 2) {
+            const xName = safeMeasures[0] || 'X';
+            const yName = safeMeasures[1] || safeMeasures[0] || 'Y';
+            const sizeName = safeMeasures[2] || 'Size';
+
+            return series.map((point, idx) => {
+                const row = {
+                    name: String(xAxis[idx] ?? ''),
+                    [xName]: Number(point?.[0]) || 0,
+                    [yName]: Number(point?.[1]) || 0,
+                };
+                if (point.length > 2) row[sizeName] = Number(point?.[2]) || 0;
+                return row;
+            });
+        }
+
+        if (first && typeof first === 'object' && !Array.isArray(first) && 'value' in first) {
+            const measure = safeMeasures[0] || 'Value';
+            return series.map((item) => ({
+                name: String(item?.name ?? ''),
+                [measure]: Number(item?.value) || 0,
+            }));
+        }
+
+        if (first && typeof first === 'object' && Array.isArray(first?.data)) {
+            const len = Math.max(xAxis.length, ...series.map((s) => (Array.isArray(s?.data) ? s.data.length : 0)));
+            return Array.from({ length: len }).map((_, idx) => {
+                const row = { name: String(xAxis[idx] ?? '') };
+                series.forEach((s, sIdx) => {
+                    const seriesName = String(s?.name || safeMeasures[sIdx] || `Measure ${sIdx + 1}`);
+                    row[seriesName] = Number(s?.data?.[idx]) || 0;
+                });
+                return row;
+            });
+        }
+
+        return [];
+    };
+
+    if (config?.transformed && typeof config.transformed === 'object') {
+        const transformedRows = buildRowsFromTransformed(config.transformed, measures);
+        if (transformedRows.length > 0) {
+            processedData = transformedRows;
+        }
+    }
+
+    if (!Array.isArray(processedData)) {
+        processedData = [];
+    }
     const style = config?.style || {};
     const colorMode = style.colorMode === 'single' ? 'single' : 'multi';
     const normalizedSingle = typeof style.singleColor === 'string' && style.singleColor.trim() ? style.singleColor.trim() : null;

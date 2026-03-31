@@ -26,6 +26,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const [orgSelectedPathNames, setOrgSelectedPathNames] = useState([]);
     const [orgSelectedNodeId, setOrgSelectedNodeId] = useState('');
     const [chartData, setChartData] = useState([]);
+    const [chartTransformed, setChartTransformed] = useState(null);
     const [queryColumns, setQueryColumns] = useState([]);
     const [isQueryLoading, setIsQueryLoading] = useState(false);
     const [queryError, setQueryError] = useState('');
@@ -249,6 +250,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             if (Array.isArray(chartAudit?.errors) && chartAudit.errors.length > 0) {
                 if (!isCancelled) {
                     setChartData([]);
+                    setChartTransformed(null);
                     setQueryColumns([]);
                     setQueryError('');
                     setIsQueryLoading(false);
@@ -259,6 +261,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             if (!queryPayload?.datasetId) {
                 if (!isCancelled) {
                     setChartData([]);
+                    setChartTransformed(null);
                     setQueryColumns([]);
                     setQueryError('');
                     setIsQueryLoading(false);
@@ -270,15 +273,23 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             setQueryError('');
             try {
                 const response = await backendApi.runQuery(queryPayload);
-                const adapted = adaptQueryResponse(response);
+                const adapted = adaptQueryResponse(response, {
+                    chartType: normalizedConfig?.type || config?.type,
+                    dimensionFields: Array.isArray(queryPayload?.dimensions) ? queryPayload.dimensions : [effectiveDimension].filter(Boolean),
+                    measures: Array.isArray(queryPayload?.measures)
+                        ? queryPayload.measures.map((m) => (typeof m === 'string' ? { name: m } : m)).filter(Boolean)
+                        : [],
+                });
                 if (!isCancelled) {
                     setQueryColumns(adapted.columns);
                     setChartData(adapted.rows);
+                    setChartTransformed(adapted.transformed || null);
                 }
             } catch (error) {
                 if (!isCancelled) {
                     setQueryColumns([]);
                     setChartData([]);
+                    setChartTransformed(null);
                     setQueryError(error?.message || 'Unable to load chart data');
                 }
             } finally {
@@ -293,7 +304,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         return () => {
             isCancelled = true;
         };
-    }, [queryPayload, chartAudit]);
+    }, [queryPayload, chartAudit, effectiveDimension]);
 
     const isDark = theme === 'dark';
 
@@ -561,6 +572,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 orgSearchQuery: (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) ? orgSearchQuery : '',
                 orgSelectedPathIds: (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) ? orgSelectedPathIds : [],
                 orgSelectedNodeId: (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) ? orgSelectedNodeId : '',
+                transformed: chartTransformed,
                 style: exportStyleOverrides,
             },
             theme,

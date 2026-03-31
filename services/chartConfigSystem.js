@@ -424,6 +424,7 @@ export function convertOldConfig(oldConfig = {}) {
 
 export function configFromAssignments(chartType, assignments = []) {
     const safe = Array.isArray(assignments) ? assignments : [];
+    const normalizedType = normalizeChartType(chartType);
     const first = (role) => safe.find(a => a.role === role && a.field)?.field;
     const list = (role) => safe.filter(a => a.role === role && a.field).map(a => a.field);
 
@@ -437,7 +438,9 @@ export function configFromAssignments(chartType, assignments = []) {
     const x = first(FieldRoles.TIME) || first(FieldRoles.X) || first(FieldRoles.LEGEND) || hierarchy[0] || '';
 
     const measures = [];
-    [...yFields, ...valueFields, first(FieldRoles.SIZE), first(FieldRoles.X), first(FieldRoles.Y)]
+    const includeXAsMeasure = normalizedType === ChartType.SCATTER || normalizedType === ChartType.BUBBLE;
+
+    [...yFields, ...valueFields, first(FieldRoles.SIZE), ...(includeXAsMeasure ? [first(FieldRoles.X)] : []), first(FieldRoles.Y)]
         .filter(Boolean)
         .forEach((field) => {
             if (!measures.includes(field)) measures.push(field);
