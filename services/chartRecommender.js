@@ -124,8 +124,8 @@ const CHART_HELPERS = {
     [ChartType.RADAR]: 'Radar requires 1 Dimension + multiple Measures',
     [ChartType.KPI_SINGLE]: 'KPI requires a single measure',
     [ChartType.TABLE]: 'Table supports any fields',
-    [ChartType.ORG_CHART]: 'Org Chart requires Node + Parent',
-    [ChartType.ORG_TREE_STRUCTURED]: 'Org Structured requires Node + Parent',
+    [ChartType.ORG_CHART]: 'Org Chart requires hierarchy fields (2+ levels)',
+    [ChartType.ORG_TREE_STRUCTURED]: 'Org Structured requires hierarchy fields (2+ levels)',
 };
 
 const scoreByRule = ({ dims, measures, times }, chart) => {
@@ -262,12 +262,10 @@ export function assignRoles(chartType, columns, rows = [], selectedFields = {}) 
     };
 
     if ([ChartType.ORG_CHART, ChartType.ORG_TREE_STRUCTURED].includes(type)) {
-        const node = pick(profile.categorical) || pick(profile.ids);
-        const parent = pick(profile.categorical, 1) || pick(profile.ids, 1) || node;
-        const label = pick(profile.categorical, 2) || node;
-        push(node, 'node');
-        push(parent, 'parent');
-        push(label, 'label');
+        const level1 = pick(profile.categorical) || pick(profile.ids);
+        const level2 = pick(profile.categorical, 1) || pick(profile.ids, 1) || level1;
+        const level3 = pick(profile.categorical, 2) || pick(profile.ids, 2) || null;
+        [level1, level2, level3].filter(Boolean).forEach((field) => push(field, 'hierarchy'));
     } else if (type === ChartType.BAR) {
         push(x, 'x');
         push(m1 || '__count__', 'y', m1 ? 'SUM' : 'COUNT');

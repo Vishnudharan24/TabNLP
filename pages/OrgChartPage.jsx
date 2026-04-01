@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { ArrowLeft, Search, ZoomIn, ZoomOut, RotateCcw, Building2 } from 'lucide-react';
+import { ArrowLeft, Search, ZoomIn, ZoomOut, RotateCcw, Building2, X } from 'lucide-react';
 import { ChartType } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
 import { autoAssignFields, buildOrgTree, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
@@ -50,8 +50,15 @@ const applyGlobalFilters = (rows = [], globalFilters = []) => {
 const applyLocalFilters = (rows = [], localFilters = {}, fields = {}) => {
     let scoped = Array.isArray(rows) ? rows : [];
 
-    const { department, location, role } = localFilters || {};
-    const { departmentField, locationField, roleField } = fields || {};
+    const { department, location, role, manager, employmentType, level } = localFilters || {};
+    const {
+        departmentField,
+        locationField,
+        roleField,
+        managerField,
+        employmentTypeField,
+        levelField,
+    } = fields || {};
 
     if (department && departmentField) {
         const expected = toNorm(department);
@@ -65,8 +72,88 @@ const applyLocalFilters = (rows = [], localFilters = {}, fields = {}) => {
         const expected = toNorm(role);
         scoped = scoped.filter((row) => toNorm(row?.[roleField]) === expected);
     }
+    if (manager && managerField) {
+        const expected = toNorm(manager);
+        scoped = scoped.filter((row) => toNorm(row?.[managerField]) === expected);
+    }
+    if (employmentType && employmentTypeField) {
+        const expected = toNorm(employmentType);
+        scoped = scoped.filter((row) => toNorm(row?.[employmentTypeField]) === expected);
+    }
+    if (level && levelField) {
+        const expected = toNorm(level);
+        scoped = scoped.filter((row) => toNorm(row?.[levelField]) === expected);
+    }
 
     return scoped;
+};
+
+const buildOrgHierarchy = (rows = [], hierarchyFields = [], options = {}) => {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const fields = Array.isArray(hierarchyFields) ? hierarchyFields.filter(Boolean) : [];
+    if (fields.length === 0) return [];
+
+    const labelField = options?.labelField ? String(options.labelField).trim() : '';
+    const colorField = options?.colorField ? String(options.colorField).trim() : '';
+    const nodeMeta = new Map();
+    const relations = new Map();
+    const rootCandidates = new Set();
+
+    safeRows.forEach((row) => {
+        if (!row || typeof row !== 'object') return;
+        for (let i = 0; i < fields.length; i += 1) {
+            const nodeRaw = row?.[fields[i]];
+            const node = nodeRaw === null || nodeRaw === undefined || String(nodeRaw).trim() === '' ? '' : String(nodeRaw).trim();
+            if (!node) continue;
+
+            const parentRaw = i === 0 ? null : row?.[fields[i - 1]];
+            const parentValue = parentRaw === null || parentRaw === undefined || String(parentRaw).trim() === '' ? null : String(parentRaw).trim();
+            const parent = parentValue === node ? null : parentValue;
+            const key = `${node}__${parent || ''}`;
+
+            if ((labelField || colorField) && !nodeMeta.has(node)) {
+                const labelRaw = labelField ? row?.[labelField] : null;
+                const colorRaw = colorField ? row?.[colorField] : null;
+                const label = labelRaw === null || labelRaw === undefined || String(labelRaw).trim() === ''
+                    ? null
+                    : String(labelRaw).trim();
+                const color = colorRaw === null || colorRaw === undefined || String(colorRaw).trim() === ''
+                    ? null
+                    : String(colorRaw).trim();
+                if (label || color) nodeMeta.set(node, { label, color });
+            }
+
+            if (!relations.has(key)) {
+                const meta = nodeMeta.get(node);
+                relations.set(key, {
+                    node,
+                    parent: parent || null,
+                    ...(meta?.label ? { label: meta.label } : {}),
+                    ...(meta?.color ? { color: meta.color } : {}),
+                });
+            }
+
+            if (!parent) rootCandidates.add(node);
+        }
+    });
+
+    if (rootCandidates.size > 1) {
+        const virtualRoot = 'All Entities';
+        const adjusted = new Map();
+        relations.forEach((rel) => {
+            if (!rel.parent && rootCandidates.has(rel.node)) {
+                const key = `${rel.node}__${virtualRoot}`;
+                adjusted.set(key, { ...rel, parent: virtualRoot });
+            } else {
+                const key = `${rel.node}__${rel.parent || ''}`;
+                adjusted.set(key, { ...rel, parent: rel.parent || null });
+            }
+        });
+        adjusted.set(`${virtualRoot}__`, { node: virtualRoot, parent: null });
+        return Array.from(adjusted.values());
+    }
+
+    return Array.from(relations.values());
 };
 
 const includeAncestorRows = (allRows = [], matchedRows = [], nodeField = '', parentField = '') => {
@@ -144,8 +231,17 @@ const OrgChartPage = ({
     const [selectedPathNames, setSelectedPathNames] = useState([]);
     const [selectedPathIds, setSelectedPathIds] = useState([]);
     const [selectedNodeId, setSelectedNodeId] = useState('');
+    const [orgUiVariant, setOrgUiVariant] = useState('classic');
+    const [selectedNodeDetails, setSelectedNodeDetails] = useState(null);
     const [zoomPct, setZoomPct] = useState(100);
-    const [filters, setFilters] = useState({ department: '', location: '', role: '' });
+    const [filters, setFilters] = useState({
+        department: '',
+        location: '',
+        role: '',
+        manager: '',
+        employmentType: '',
+        level: '',
+    });
 
     useEffect(() => {
         setActiveOrgChartId(defaultChartId);
@@ -189,13 +285,14 @@ const OrgChartPage = ({
     const mapping = useMemo(() => {
         const assignments = Array.isArray(resolvedConfig?.assignments) ? resolvedConfig.assignments : [];
         const pick = (role) => assignments.find((a) => a?.role === role)?.field || '';
+        const hierarchyFields = assignments.filter((a) => a?.role === FieldRoles.HIERARCHY).map((a) => a.field).filter(Boolean);
 
         const nodeField = pick(FieldRoles.NODE) || resolvedConfig?.nodeField || '';
         const parentField = pick(FieldRoles.PARENT) || resolvedConfig?.parentField || '';
         const labelField = pick(FieldRoles.LABEL) || resolvedConfig?.labelField || '';
         const colorField = pick(FieldRoles.COLOR) || resolvedConfig?.colorField || '';
 
-        return { nodeField, parentField, labelField, colorField };
+        return { nodeField, parentField, labelField, colorField, hierarchyFields };
     }, [resolvedConfig]);
 
     const auxiliaryFields = useMemo(() => {
@@ -203,7 +300,17 @@ const OrgChartPage = ({
         const departmentField = mapping.colorField || inferField(cols, [/(department|dept|business\s*unit|team|function|division)/i]);
         const locationField = inferField(cols, [/(location|office|site|city|country|region)/i]);
         const roleField = mapping.labelField || inferField(cols, [/(designation|title|role|position|job)/i]);
-        return { departmentField, locationField, roleField };
+        const managerField = mapping.parentField || inferField(cols, [/(manager|supervisor|reports?_?to|line\s*manager|parent)/i]);
+        const employmentTypeField = inferField(cols, [/(employment\s*type|employee\s*type|worker\s*type|contract\s*type|fte|full\s*time|part\s*time)/i]);
+        const levelField = inferField(cols, [/(level|band|grade|job\s*level|org\s*level|seniority)/i]);
+        return {
+            departmentField,
+            locationField,
+            roleField,
+            managerField,
+            employmentTypeField,
+            levelField,
+        };
     }, [dataset?.columns, mapping.colorField, mapping.labelField]);
 
     const globalScopedRows = useMemo(() => {
@@ -212,12 +319,29 @@ const OrgChartPage = ({
 
     const filteredRows = useMemo(() => {
         const localMatchedRows = applyLocalFilters(globalScopedRows, filters, auxiliaryFields);
+        if (Array.isArray(mapping.hierarchyFields) && mapping.hierarchyFields.length >= 2) {
+            return localMatchedRows;
+        }
         return includeAncestorRows(globalScopedRows, localMatchedRows, mapping.nodeField, mapping.parentField);
-    }, [globalScopedRows, filters, auxiliaryFields, mapping.nodeField, mapping.parentField]);
+    }, [globalScopedRows, filters, auxiliaryFields, mapping.nodeField, mapping.parentField, mapping.hierarchyFields]);
 
     const isFilterActive = useMemo(
-        () => Boolean(filters.department || filters.location || filters.role),
-        [filters.department, filters.location, filters.role]
+        () => Boolean(
+            filters.department
+            || filters.location
+            || filters.role
+            || filters.manager
+            || filters.employmentType
+            || filters.level
+        ),
+        [
+            filters.department,
+            filters.location,
+            filters.role,
+            filters.manager,
+            filters.employmentType,
+            filters.level,
+        ]
     );
 
     const effectiveOrgTreeExpandMode = useMemo(() => {
@@ -242,10 +366,14 @@ const OrgChartPage = ({
             filters.department || '-',
             filters.location || '-',
             filters.role || '-',
+            filters.manager || '-',
+            filters.employmentType || '-',
+            filters.level || '-',
             searchQuery || '-',
             String(filteredRows.length),
             effectiveOrgTreeExpandMode,
             String(effectiveOrgCollapseDepth),
+            orgUiVariant,
         ];
         return parts.join('|');
     }, [
@@ -253,10 +381,14 @@ const OrgChartPage = ({
         filters.department,
         filters.location,
         filters.role,
+        filters.manager,
+        filters.employmentType,
+        filters.level,
         searchQuery,
         filteredRows.length,
         effectiveOrgTreeExpandMode,
         effectiveOrgCollapseDepth,
+        orgUiVariant,
     ]);
 
     useEffect(() => {
@@ -264,7 +396,15 @@ const OrgChartPage = ({
         if (!instance) return;
         instance.dispatchAction({ type: 'restore' });
         setZoomPct(100);
-    }, [activeOrgChartId, filters.department, filters.location, filters.role]);
+    }, [
+        activeOrgChartId,
+        filters.department,
+        filters.location,
+        filters.role,
+        filters.manager,
+        filters.employmentType,
+        filters.level,
+    ]);
 
     useEffect(() => {
         const visibleIds = new Set(filteredRows.map((row) => toKey(row?.[mapping.nodeField])).filter(Boolean));
@@ -277,6 +417,26 @@ const OrgChartPage = ({
     }, [filteredRows, mapping.nodeField, selectedNodeId, selectedPathIds, selectedPathNames]);
 
     const treePayload = useMemo(() => {
+        if (Array.isArray(mapping.hierarchyFields) && mapping.hierarchyFields.length >= 2) {
+            const relations = buildOrgHierarchy(filteredRows, mapping.hierarchyFields, {
+                labelField: mapping.labelField,
+                colorField: mapping.colorField || auxiliaryFields.departmentField,
+            });
+            const treeInput = relations.map((rel) => ({
+                node: rel.node,
+                parent: rel.parent,
+                ...(rel.label ? { __label: rel.label } : {}),
+                ...(rel.color ? { __color: rel.color } : {}),
+            }));
+            return buildOrgTree(
+                treeInput,
+                'node',
+                'parent',
+                mapping.labelField ? '__label' : undefined,
+                (mapping.colorField || auxiliaryFields.departmentField) ? '__color' : undefined
+            );
+        }
+
         if (!mapping.nodeField || !mapping.parentField) {
             return { treeData: { name: 'Organization', children: [] }, meta: { totalNodes: 0 } };
         }
@@ -311,6 +471,7 @@ const OrgChartPage = ({
                 style: {
                     ...(resolvedConfig?.style || {}),
                     labelMode: 'show',
+                    orgUiVariant,
                 },
             },
             isDark ? 'dark' : 'light',
@@ -328,6 +489,7 @@ const OrgChartPage = ({
         effectiveOrgTreeExpandMode,
         effectiveOrgCollapseDepth,
         orgDisableAnimation,
+        orgUiVariant,
         isDark,
     ]);
 
@@ -343,6 +505,18 @@ const OrgChartPage = ({
             setSelectedPathNames(names);
             setSelectedPathIds(ids);
             setSelectedNodeId(clickedId || ids[ids.length - 1] || '');
+
+            const data = params?.data || {};
+            const meta = data?.meta || {};
+            const manager = names.length > 1 ? names[names.length - 2] : (meta?.parentValue || 'N/A');
+            setSelectedNodeDetails({
+                name: String(data?.name || meta?.labelValue || meta?.nodeValue || params?.name || 'Unknown'),
+                role: String(data?.designation || data?.label || meta?.labelValue || 'N/A'),
+                department: String(data?.department || data?.colorValue || meta?.colorValue || 'N/A'),
+                manager: String(manager || 'N/A'),
+                teamSize: Number(data?.teamSize || 1),
+                directReports: Number(data?.directReports || 0),
+            });
         },
     }), []);
 
@@ -366,7 +540,15 @@ const OrgChartPage = ({
         setSelectedPathNames([]);
         setSelectedPathIds([]);
         setSelectedNodeId('');
-        setFilters({ department: '', location: '', role: '' });
+        setSelectedNodeDetails(null);
+        setFilters({
+            department: '',
+            location: '',
+            role: '',
+            manager: '',
+            employmentType: '',
+            level: '',
+        });
         setZoomPct(100);
 
         const instance = chartRef.current;
@@ -391,6 +573,72 @@ const OrgChartPage = ({
         const scoped = applyLocalFilters(globalScopedRows, { department: filters.department, location: filters.location }, auxiliaryFields);
         return uniqueValues(scoped, auxiliaryFields.roleField);
     }, [globalScopedRows, filters.department, filters.location, auxiliaryFields]);
+
+    const managerOptions = useMemo(() => {
+        if (!auxiliaryFields.managerField) return [];
+        const scoped = applyLocalFilters(
+            globalScopedRows,
+            {
+                department: filters.department,
+                location: filters.location,
+                role: filters.role,
+            },
+            auxiliaryFields
+        );
+        return uniqueValues(scoped, auxiliaryFields.managerField);
+    }, [
+        globalScopedRows,
+        filters.department,
+        filters.location,
+        filters.role,
+        auxiliaryFields,
+    ]);
+
+    const employmentTypeOptions = useMemo(() => {
+        if (!auxiliaryFields.employmentTypeField) return [];
+        const scoped = applyLocalFilters(
+            globalScopedRows,
+            {
+                department: filters.department,
+                location: filters.location,
+                role: filters.role,
+                manager: filters.manager,
+            },
+            auxiliaryFields
+        );
+        return uniqueValues(scoped, auxiliaryFields.employmentTypeField);
+    }, [
+        globalScopedRows,
+        filters.department,
+        filters.location,
+        filters.role,
+        filters.manager,
+        auxiliaryFields,
+    ]);
+
+    const levelOptions = useMemo(() => {
+        if (!auxiliaryFields.levelField) return [];
+        const scoped = applyLocalFilters(
+            globalScopedRows,
+            {
+                department: filters.department,
+                location: filters.location,
+                role: filters.role,
+                manager: filters.manager,
+                employmentType: filters.employmentType,
+            },
+            auxiliaryFields
+        );
+        return uniqueValues(scoped, auxiliaryFields.levelField);
+    }, [
+        globalScopedRows,
+        filters.department,
+        filters.location,
+        filters.role,
+        filters.manager,
+        filters.employmentType,
+        auxiliaryFields,
+    ]);
 
     if (!dataset) {
         return (
@@ -428,6 +676,14 @@ const OrgChartPage = ({
                 </div>
 
                 <div className="flex gap-2">
+                    <select
+                        value={orgUiVariant}
+                        onChange={(e) => setOrgUiVariant(e.target.value)}
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${isDark ? 'bg-gray-900 border-gray-700 text-gray-200' : 'bg-white border-gray-300 text-gray-700'}`}
+                    >
+                        <option value="classic">Classic (Default)</option>
+                        <option value="modern">Modern</option>
+                    </select>
                     <button onClick={handleReset} className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}>Reset</button>
                     <button onClick={() => setOrgTreeExpandMode('collapse-all')} className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}>Collapse All</button>
                     <button onClick={() => setOrgTreeExpandMode('expand-all')} className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}>Expand All</button>
@@ -475,6 +731,39 @@ const OrgChartPage = ({
                     {roleOptions.map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
 
+                {auxiliaryFields.managerField && (
+                    <select
+                        value={filters.manager}
+                        onChange={(e) => setFilters((prev) => ({ ...prev, manager: e.target.value }))}
+                        className={`px-3 py-2 rounded-md text-sm border ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-300'}`}
+                    >
+                        <option value="">All Managers</option>
+                        {managerOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                )}
+
+                {auxiliaryFields.employmentTypeField && (
+                    <select
+                        value={filters.employmentType}
+                        onChange={(e) => setFilters((prev) => ({ ...prev, employmentType: e.target.value }))}
+                        className={`px-3 py-2 rounded-md text-sm border ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-300'}`}
+                    >
+                        <option value="">All Employment Types</option>
+                        {employmentTypeOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                )}
+
+                {auxiliaryFields.levelField && (
+                    <select
+                        value={filters.level}
+                        onChange={(e) => setFilters((prev) => ({ ...prev, level: e.target.value }))}
+                        className={`px-3 py-2 rounded-md text-sm border ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-300'}`}
+                    >
+                        <option value="">All Levels</option>
+                        {levelOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                )}
+
                 <div className="ml-auto flex items-center gap-2">
                     <button onClick={() => runZoom(1.15)} className={`p-2 rounded-md border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`} title="Zoom in"><ZoomIn size={14} /></button>
                     <button onClick={() => runZoom(0.87)} className={`p-2 rounded-md border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`} title="Zoom out"><ZoomOut size={14} /></button>
@@ -503,6 +792,28 @@ const OrgChartPage = ({
                         </div>
                     </div>
                 )}
+
+                {selectedNodeDetails && (
+                    <div className={`absolute top-4 right-4 w-72 rounded-xl border shadow-xl z-20 ${isDark ? 'bg-gray-900 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-800'}`}>
+                        <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+                            <h3 className="text-sm font-bold">Employee Details</h3>
+                            <button
+                                onClick={() => setSelectedNodeDetails(null)}
+                                className={`p-1 rounded ${isDark ? 'hover:bg-gray-800 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                        <div className="px-4 py-3 space-y-2 text-xs">
+                            <p><span className="font-semibold">Name:</span> {selectedNodeDetails.name}</p>
+                            <p><span className="font-semibold">Role:</span> {selectedNodeDetails.role}</p>
+                            <p><span className="font-semibold">Department:</span> {selectedNodeDetails.department}</p>
+                            <p><span className="font-semibold">Manager:</span> {selectedNodeDetails.manager}</p>
+                            <p><span className="font-semibold">Direct Reports:</span> {selectedNodeDetails.directReports}</p>
+                            <p><span className="font-semibold">Team Size:</span> {selectedNodeDetails.teamSize}</p>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className={`p-2 border-t text-sm ${isDark ? 'border-gray-800 text-gray-300' : 'border-gray-200 text-gray-700 bg-white'}`}>
@@ -510,7 +821,9 @@ const OrgChartPage = ({
                     ? selectedPathNames.join(' / ')
                     : 'Organization'}
                 <span className={`ml-3 text-xs ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-                    {`${toLabel(mapping.nodeField)} → ${toLabel(mapping.parentField)} • ${filteredRows.length}/${globalScopedRows.length} rows • ${treePayload?.meta?.totalNodes || 0} nodes`}
+                    {Array.isArray(mapping.hierarchyFields) && mapping.hierarchyFields.length >= 2
+                        ? `${mapping.hierarchyFields.map(toLabel).join(' → ')} • ${filteredRows.length}/${globalScopedRows.length} rows • ${treePayload?.meta?.totalNodes || 0} nodes`
+                        : `${toLabel(mapping.nodeField)} → ${toLabel(mapping.parentField)} • ${filteredRows.length}/${globalScopedRows.length} rows • ${treePayload?.meta?.totalNodes || 0} nodes`}
                 </span>
             </div>
         </div>

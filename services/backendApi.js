@@ -264,6 +264,13 @@ export const backendApi = {
         return request(`/datasets/${encodeURIComponent(documentId)}`, { method: 'GET' }, baseUrl, requestConfig);
     },
 
+    mergeDatasets(payload, baseUrl, requestConfig) {
+        return request('/datasets/merge', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
     getHrAnalytics(moduleName, payload, baseUrl, requestConfig) {
         return request(`/hr/analytics/${encodeURIComponent(moduleName)}`, {
             method: 'POST',
@@ -345,6 +352,40 @@ export const backendApi = {
         return request('/query', {
             method: 'POST',
             body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    createReport(payload, baseUrl, requestConfig) {
+        return request('/reports', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    updateReport(reportId, payload, baseUrl, requestConfig) {
+        return request(`/reports/${encodeURIComponent(reportId)}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        }, baseUrl, requestConfig);
+    },
+
+    getReport(reportId, baseUrl, requestConfig) {
+        return request(`/reports/${encodeURIComponent(reportId)}`, {
+            method: 'GET',
+        }, baseUrl, requestConfig);
+    },
+
+    createReportShare(reportId, payload, baseUrl, requestConfig) {
+        return request(`/reports/${encodeURIComponent(reportId)}/shares`, {
+            method: 'POST',
+            body: JSON.stringify(payload || {}),
+        }, baseUrl, requestConfig);
+    },
+
+    getSharedReport(reportId, shareToken, baseUrl, requestConfig) {
+        const query = new URLSearchParams({ shareToken: String(shareToken || '') }).toString();
+        return request(`/shared-reports/${encodeURIComponent(reportId)}?${query}`, {
+            method: 'GET',
         }, baseUrl, requestConfig);
     },
 

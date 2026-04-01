@@ -290,9 +290,13 @@ export function auditChartConfiguration({ config = {}, columns = [], data = [] }
     if ([ChartType.ORG_CHART, ChartType.ORG_TREE_STRUCTURED].includes(chartType)) {
         const nodeField = byRole(FieldRoles.NODE)[0]?.field;
         const parentField = byRole(FieldRoles.PARENT)[0]?.field;
-        if (!nodeField || !parentField) {
-            errors.push(makeMessage('ORG_REQUIRED', 'Org chart requires Node + Parent.'));
-        } else {
+        const hierarchyFields = byRole(FieldRoles.HIERARCHY).map(a => a.field).filter(Boolean);
+
+        if (hierarchyFields.length < 2 && (!nodeField || !parentField)) {
+            errors.push(makeMessage('ORG_REQUIRED', 'Org chart requires hierarchy fields (2+ levels) or Node + Parent.'));
+        }
+
+        if (nodeField && parentField) {
             if (detectOrgCycle(safeRows, nodeField, parentField)) errors.push(makeMessage('ORG_CYCLE', 'Org chart contains a cycle.'));
             const roots = detectMultipleRoots(safeRows, nodeField, parentField);
             if (roots > 1) warnings.push(makeMessage('ORG_MULTI_ROOT', `Org chart has ${roots} roots.`));

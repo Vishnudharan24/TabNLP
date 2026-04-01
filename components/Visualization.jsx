@@ -22,6 +22,9 @@ const toDisplayMeasureName = (value = '') => {
 
 const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = [], groupId, onChartInstanceChange, chartClarityMode = 'standard', chartPaletteMode = 'vibrant', onDataPointClick, isExportRenderMode = false }) => {
     const { theme } = useTheme();
+    const safeDataset = useMemo(() => (dataset || { id: null, columns: [], data: [] }), [dataset]);
+    const datasetColumns = Array.isArray(safeDataset.columns) ? safeDataset.columns : [];
+    const datasetRows = Array.isArray(safeDataset.data) ? safeDataset.data : [];
     const [drillPath, setDrillPath] = useState([]);
     const [orgSearchQuery, setOrgSearchQuery] = useState('');
     const [orgSelectedPathIds, setOrgSelectedPathIds] = useState([]);
@@ -62,8 +65,6 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         }
     }, [isOrgType]);
 
-    if (!dataset) return null;
-
     const normalizedConfig = useMemo(() => {
         const legacy = convertOldConfig(config);
         const assignments = Array.isArray(config?.assignments) && config.assignments.length > 0
@@ -81,9 +82,9 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     const chartAudit = useMemo(() => auditChartConfiguration({
         config: normalizedConfig,
-        columns: dataset?.columns || [],
-        data: dataset?.data || [],
-    }), [normalizedConfig, dataset?.columns, dataset?.data]);
+        columns: datasetColumns,
+        data: datasetRows,
+    }), [normalizedConfig, datasetColumns, datasetRows]);
 
     const getRequiredRolesForChart = (type) => {
         switch (type) {
@@ -103,8 +104,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             case ChartType.ORG_CHART:
             case ChartType.ORG_TREE_STRUCTURED:
                 return [
-                    { label: 'Node', anyOf: [FieldRoles.NODE], required: true },
-                    { label: 'Parent', anyOf: [FieldRoles.PARENT], required: true },
+                    { label: 'Hierarchy', anyOf: [FieldRoles.HIERARCHY], required: true, multi: true },
                     { label: 'Label', anyOf: [FieldRoles.LABEL], required: false },
                     { label: 'Color/Legend', anyOf: [FieldRoles.COLOR, FieldRoles.LEGEND], required: false },
                 ];
@@ -197,7 +197,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const getEffectiveDimension = () => {
         if (drillPath.length === 0) return normalizedConfig.dimension;
         const usedDims = [normalizedConfig.dimension, ...drillPath.map(d => d.dimensionCol)];
-        const stringCols = dataset.columns.filter(c =>
+        const stringCols = datasetColumns.filter(c =>
             (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
         );
         return stringCols.length > 0 ? stringCols[0].name : normalizedConfig.dimension;
@@ -217,7 +217,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             : ['__count__'];
 
         const numericColumns = new Set(
-            (Array.isArray(dataset?.columns) ? dataset.columns : [])
+            datasetColumns
                 .filter((c) => c?.type === 'number')
                 .map((c) => c.name)
         );
@@ -226,7 +226,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
         const deduped = Array.from(new Set(filtered));
 
         return deduped.length > 0 ? deduped : ['__count__'];
-    }, [normalizedConfig?.measures, dataset?.columns]);
+    }, [normalizedConfig?.measures, datasetColumns]);
 
     const semanticTitle = (() => {
         const configured = (config.title || '').trim();
@@ -250,12 +250,12 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
 
     const queryPayload = useMemo(() => buildQuery({
         config: normalizedConfig,
-        dataset,
-        datasetId: config?.datasetId || dataset?.id,
+        dataset: safeDataset,
+        datasetId: config?.datasetId || safeDataset?.id,
         globalFilters,
         drillPath,
         effectiveDimension,
-    }), [normalizedConfig, dataset, config?.datasetId, globalFilters, drillPath, effectiveDimension]);
+    }), [normalizedConfig, safeDataset, config?.datasetId, globalFilters, drillPath, effectiveDimension]);
 
     useEffect(() => {
         let isCancelled = false;
@@ -354,15 +354,19 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
     const canDrill = useMemo(() => {
         if (normalizedConfig.type === ChartType.ORG_CHART || normalizedConfig.type === ChartType.ORG_TREE_STRUCTURED) return false;
         const usedDims = [normalizedConfig.dimension, ...drillPath.map(d => d.dimensionCol)];
-        return dataset.columns.some(c =>
+        return datasetColumns.some(c =>
             (c.type === 'string' || c.type === 'date') && !usedDims.includes(c.name)
         );
-    }, [normalizedConfig.dimension, normalizedConfig.type, drillPath, dataset.columns]);
+    }, [normalizedConfig.dimension, normalizedConfig.type, drillPath, datasetColumns]);
 
     const handleDrillDown = useCallback((params) => {
         if (!canDrill || !params.name) return;
+        // Clear interaction filters when drilling down
+        if (onDataPointClick) {
+            onDataPointClick({ chartId: config.id, value: null });
+        }
         setDrillPath(prev => [...prev, { dimensionCol: effectiveDimension, value: params.name }]);
-    }, [canDrill, effectiveDimension]);
+    }, [canDrill, effectiveDimension, onDataPointClick, config.id]);
 
     const handlePointClick = useCallback((params) => {
         if (!params?.name) return;
@@ -384,7 +388,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
             setOrgSelectedNodeId(clickedId || nextIds[nextIds.length - 1] || '');
         }
 
-        if (normalizedConfig?.type === ChartType.SUNBURST) {
+        if (normalizedConfig?.type === ChartType.SUNBURST || normalizedConfig?.type === ChartType.TREEMAP) {
             const pathInfo = Array.isArray(params?.treePathInfo) ? params.treePathInfo.slice(1) : [];
             const hierarchyFields = Array.isArray(normalizedConfig?.hierarchyFields) ? normalizedConfig.hierarchyFields : [];
             const filters = [];
@@ -408,27 +412,26 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                 setDrillDownFilters(filters);
                 setDrillDownTitle(pathNames.join(' ▸ ') || 'Drill Down');
                 setDrillDownOpen(true);
+                return;
             }
-            return;
-        }
-
-        if (onDataPointClick) {
-            onDataPointClick({
-                chartId: config.id,
-                chartTitle: config.title,
-                datasetId: config.datasetId,
-                dimension: isOrgChart ? (normalizedConfig?.nodeField || effectiveDimension) : effectiveDimension,
-                value: params.name,
-                params,
-            });
         }
 
         if (isOrgChart) return;
 
-        if (canDrill) {
-            handleDrillDown(params);
+        const dimensionField = effectiveDimension || normalizedConfig?.dimension;
+        if (dimensionField) {
+            setDrillDownFilters([
+                {
+                    field: dimensionField,
+                    operator: 'EQUALS',
+                    value: String(params.name),
+                },
+            ]);
+            setDrillDownTitle(`${semanticTitle} ▸ ${params.name}`);
+            setDrillDownOpen(true);
+            return;
         }
-    }, [onDataPointClick, config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown, normalizedConfig?.type, normalizedConfig?.nodeField, normalizedConfig?.hierarchyFields, setDrillDownOpen]);
+    }, [config.id, config.title, config.datasetId, effectiveDimension, canDrill, handleDrillDown, normalizedConfig?.type, normalizedConfig?.nodeField, normalizedConfig?.hierarchyFields, semanticTitle, setDrillDownFilters, setDrillDownTitle, setDrillDownOpen]);
 
     const handleDrillUp = (index) => {
         setDrillPath(prev => prev.slice(0, index));

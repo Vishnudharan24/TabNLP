@@ -123,10 +123,9 @@ const ROLE_SECTION_DEFS = [
 ];
 
 const ORG_ROLE_SECTION_DEFS = [
-    { key: 'node', title: 'Node', icon: Layers, roles: [FieldRoles.NODE], emoji: '👤', multi: false },
-    { key: 'parent', title: 'Parent', icon: ArrowRight, roles: [FieldRoles.PARENT], emoji: '🧭', multi: false },
-    { key: 'label', title: 'Label', icon: Type, roles: [FieldRoles.LABEL], emoji: '🏷️', multi: false },
-    { key: 'color', title: 'Color Group', icon: PieIcon, roles: [FieldRoles.COLOR], emoji: '🎨', multi: false },
+    { key: 'hierarchy', title: 'Hierarchy (Levels)', icon: Layers, roles: [FieldRoles.HIERARCHY], emoji: '🧭', multi: true },
+    { key: 'label', title: 'Label (Optional)', icon: Type, roles: [FieldRoles.LABEL], emoji: '🏷️', multi: false },
+    { key: 'color', title: 'Color Group (Optional)', icon: PieIcon, roles: [FieldRoles.COLOR], emoji: '🎨', multi: false },
 ];
 
 const getFieldTypeMeta = (type) => {
@@ -406,9 +405,8 @@ const DataPanel = ({
         const type = activeChartConfig.type;
 
         if (type === ChartType.ORG_CHART || type === ChartType.ORG_TREE_STRUCTURED) {
-            let orgRole = FieldRoles.NODE;
-            if (!hasRole(FieldRoles.NODE) && isFieldCompatibleWithRole(type, FieldRoles.NODE, col)) orgRole = FieldRoles.NODE;
-            else if (!hasRole(FieldRoles.PARENT) && isFieldCompatibleWithRole(type, FieldRoles.PARENT, col)) orgRole = FieldRoles.PARENT;
+            let orgRole = FieldRoles.HIERARCHY;
+            if (!hasRole(FieldRoles.HIERARCHY) && isFieldCompatibleWithRole(type, FieldRoles.HIERARCHY, col)) orgRole = FieldRoles.HIERARCHY;
             else if (!hasRole(FieldRoles.LABEL) && isFieldCompatibleWithRole(type, FieldRoles.LABEL, col)) orgRole = FieldRoles.LABEL;
             else if (!hasRole(FieldRoles.COLOR)) orgRole = FieldRoles.COLOR;
             else return;
@@ -501,9 +499,11 @@ const DataPanel = ({
     const candidateFieldsForRole = useMemo(() => {
         if (!pickerRole || !selectedDataset) return [];
         const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART || activeChartConfig?.type === ChartType.ORG_TREE_STRUCTURED;
-        const used = isOrgChart
-            ? new Set(effectiveAssignments.filter(a => a.role === pickerRole).map(a => a.field))
-            : new Set(effectiveAssignments.map(a => a.field));
+        const used = isOrgChart && pickerRole === FieldRoles.HIERARCHY
+            ? new Set()
+            : (isOrgChart
+                ? new Set(effectiveAssignments.filter(a => a.role === pickerRole).map(a => a.field))
+                : new Set(effectiveAssignments.map(a => a.field)));
         const includeCount = ['y', 'value', 'x', 'size'].includes(pickerRole);
         const includeSemantic = ['y', 'value', 'size'].includes(pickerRole);
 
@@ -550,7 +550,7 @@ const DataPanel = ({
         if (effectiveAssignments.some(a => a.field === fieldName && a.role === role)) return;
 
         const isOrgChart = activeChartConfig?.type === ChartType.ORG_CHART || activeChartConfig?.type === ChartType.ORG_TREE_STRUCTURED;
-        const isOrgSingleRole = isOrgChart && [FieldRoles.NODE, FieldRoles.PARENT, FieldRoles.LABEL, FieldRoles.COLOR].includes(role);
+        const isOrgSingleRole = isOrgChart && [FieldRoles.LABEL, FieldRoles.COLOR].includes(role);
 
         const pickedCol = selectedDataset?.columns?.find((c) => c.name === fieldName);
         const resolvedRole = (role === FieldRoles.TIME && pickedCol?.type !== 'date')

@@ -29,11 +29,23 @@ const toUpperAgg = (aggregation) => {
     return 'COUNT';
 };
 
-const toLegacyMeasureExpression = (field, aggregation) => {
-    const agg = toUpperAgg(aggregation);
-    if (field === '__count__') return 'COUNT(*)';
-    if (agg === 'GROUP_BY') return `COUNT(${field})`;
-    return `${agg}(${field})`;
+const parseSimpleAggregateExpression = (expression) => {
+    const text = String(expression || '').trim();
+    if (!text) return null;
+
+    const match = text.match(/^\s*(SUM|AVG|COUNT|MIN|MAX|GROUP_BY)\s*\((.*)\)\s*$/i);
+    if (!match) return null;
+
+    const aggregation = toUpperAgg(match[1]);
+    if (!aggregation) return null;
+
+    const rawField = String(match[2] || '').trim();
+    if (!rawField) return null;
+
+    return {
+        aggregation,
+        field: rawField === '*' ? '__count__' : rawField,
+    };
 };
 
 const normalizeAssignments = (config) => {
@@ -145,8 +157,22 @@ const collectMeasuresFromAssignments = (assignments = [], fallbackAggregation = 
         if (typeof a?.expression === 'string' && a.expression.trim()) {
             const alias = a?.name || (a.field === '__count__' ? 'Count' : a.field);
             const expression = a.expression.trim();
+            const parsed = parseSimpleAggregateExpression(expression);
+
+            if (parsed?.field) {
+                const key = `${alias}::${parsed.aggregation}::${parsed.field}`;
+                if (!picked.some(item => `${item.name}::${item.aggregation || ''}::${item.field || ''}` === key)) {
+                    picked.push({
+                        name: alias,
+                        field: parsed.field,
+                        aggregation: parsed.aggregation,
+                    });
+                }
+                return;
+            }
+
             const key = `${alias}::${expression}`;
-            if (!picked.some(item => `${item.name}::${item.expression}` === key)) {
+            if (!picked.some(item => `${item.name}::${item.expression || ''}` === key)) {
                 picked.push({ name: alias, expression });
             }
             return;
@@ -155,15 +181,18 @@ const collectMeasuresFromAssignments = (assignments = [], fallbackAggregation = 
         const field = a.field;
         const aggregation = toUpperAgg(a.aggregation || fallbackAggregation);
         const alias = field === '__count__' ? 'Count' : field;
-        const expression = toLegacyMeasureExpression(field, aggregation);
-        const key = `${alias}::${expression}`;
-        if (!picked.some(item => `${item.name}::${item.expression}` === key)) {
-            picked.push({ name: alias, expression });
+        const key = `${alias}::${aggregation}::${field}`;
+        if (!picked.some(item => `${item.name}::${item.aggregation || ''}::${item.field || ''}` === key)) {
+            picked.push({
+                name: alias,
+                field,
+                aggregation,
+            });
         }
     });
 
     if (picked.length === 0) {
-        picked.push({ name: 'Count', expression: 'COUNT(*)' });
+        picked.push({ name: 'Count', field: '__count__', aggregation: 'COUNT' });
     }
 
     return picked;
@@ -181,6 +210,10 @@ const collectDimensions = ({ chartType, assignments, normalized, effectiveDimens
     const byRole = (role) => assignments.filter((a) => a?.role === role).map((a) => a?.field).filter(Boolean);
 
     if (chartType === ChartType.ORG_CHART || chartType === ChartType.ORG_TREE_STRUCTURED) {
+        const hierarchyFields = Array.isArray(normalized?.hierarchyFields) ? normalized.hierarchyFields : [];
+        if (hierarchyFields.length > 0) {
+            return Array.from(new Set(hierarchyFields.filter(Boolean)));
+        }
         return Array.from(new Set([
             ...byRole(FieldRoles.NODE),
             ...byRole(FieldRoles.PARENT),
@@ -261,7 +294,11 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
         dataset,
     });
 
-    const measures = chartType === ChartType.TABLE
+    const orgHierarchyFields = Array.isArray(normalized?.hierarchyFields) ? normalized.hierarchyFields.filter(Boolean) : [];
+    const useOrgHierarchy = (chartType === ChartType.ORG_CHART || chartType === ChartType.ORG_TREE_STRUCTURED) && orgHierarchyFields.length >= 2 && !normalized?.nodeField && !normalized?.parentField;
+    const requestChartType = useOrgHierarchy ? ChartType.TABLE : chartType;
+
+    const measures = requestChartType === ChartType.TABLE
         ? []
         : collectMeasuresFromAssignments(assignments, normalized.aggregation || 'COUNT', chartType, dataset);
     const sortField = measures[0]?.name || measures[0]?.expression || dimensions[0] || 'Count';
@@ -269,7 +306,7 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
 
     return {
         datasetId,
-        chartType,
+        chartType: requestChartType,
         dimensions,
         measures,
         filters: allFilters,
@@ -277,6 +314,6 @@ export const buildQuery = ({ config, dataset, datasetId, globalFilters = [], dri
             field: sortField,
             order: sortOrder,
         },
-        limit: chartType === ChartType.TABLE ? 1000 : 200,
+        limit: requestChartType === ChartType.TABLE ? 2000 : 200,
     };
 };

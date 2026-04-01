@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { backendApi } from '../../services/backendApi';
-import { TYPO } from '../../styles/typography';
+import { backendApi } from '../services/backendApi';
+import { TYPO } from '../styles/typography';
 
 const buildQueryPayload = ({ datasetId, columns, filters, limit = 500 }) => ({
     datasetId,

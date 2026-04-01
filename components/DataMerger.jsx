@@ -22,6 +22,13 @@ const TYPE_META = {
     boolean: { icon: ToggleLeft, color: 'amber' },
 };
 
+const getDatasetFileName = (dataset) => (
+    dataset?._meta?.metadata?.file_name
+    || dataset?._meta?.metadata?.filename
+    || dataset?._meta?.fileName
+    || ''
+);
+
 const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
@@ -34,6 +41,7 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
     const [previewData, setPreviewData] = useState(null);
     const [error, setError] = useState('');
     const [step, setStep] = useState(1); // 1=config, 2=preview
+    const [isSubmittingMerge, setIsSubmittingMerge] = useState(false);
 
     const leftDs = datasets.find(d => d.id === leftId);
     const rightDs = datasets.find(d => d.id === rightId);
@@ -87,16 +95,29 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
         }
     };
 
-    const confirmMerge = () => {
+    const confirmMerge = async () => {
         if (!previewData) return;
         const name = mergedName.trim() || `${leftDs.name} + ${rightDs.name}`;
-        onMergeComplete({
-            id: Math.random().toString(36).substr(2, 9),
-            name,
-            columns: previewData.columns,
-            data: previewData.data,
-            _meta: { merged: true, leftSource: leftDs.name, rightSource: rightDs.name, joinType },
-        });
+        setError('');
+        setIsSubmittingMerge(true);
+        try {
+            await onMergeComplete({
+                leftDatasetId: leftId,
+                rightDatasetId: rightId,
+                joinType,
+                leftKey: isAppend ? null : (keyPairs[0]?.leftKey || null),
+                rightKey: isAppend ? null : (keyPairs[0]?.rightKey || null),
+                mergedName: name,
+                preview: {
+                    columns: previewData.columns,
+                    rowCount: previewData.data?.length || 0,
+                },
+            });
+        } catch (e) {
+            setError(e?.message || 'Failed to create merged dataset');
+        } finally {
+            setIsSubmittingMerge(false);
+        }
     };
 
     const previewRows = previewData?.data.slice(0, 50) || [];
@@ -345,7 +366,7 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
                         {step === 1 ? (
                             <button
                                 onClick={runPreview}
-                                disabled={!canPreview}
+                                disabled={!canPreview || isSubmittingMerge}
                                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${isDark ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}
                             >
                                 <Eye size={14} /> Preview Result
@@ -353,9 +374,10 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
                         ) : (
                             <button
                                 onClick={confirmMerge}
+                                disabled={isSubmittingMerge}
                                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${isDark ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}
                             >
-                                <Check size={14} /> Confirm & Add Dataset
+                                <Check size={14} /> {isSubmittingMerge ? 'Creating Dataset...' : 'Confirm & Add Dataset'}
                             </button>
                         )}
                     </div>
@@ -379,7 +401,9 @@ const DatasetSelector = ({ label, datasets, selectedId, excludeId, onChange, isD
             >
                 <option value="">Select dataset…</option>
                 {datasets.filter(d => d.id !== excludeId).map(d => (
-                    <option key={d.id} value={d.id}>{d.name} ({d.data.length} rows)</option>
+                    <option key={d.id} value={d.id}>
+                        {`${d.name}${getDatasetFileName(d) ? ` • ${getDatasetFileName(d)}` : ''} (${d.data.length} rows)`}
+                    </option>
                 ))}
             </select>
             {ds && (

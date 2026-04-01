@@ -247,13 +247,13 @@ const TemplateMapping = ({
 
     const handleGenerateDashboard = () => {
         setSubmitted(true);
-        if (validation.missing.length > 0) return;
 
         if (typeof onGenerateDashboard === 'function') {
             onGenerateDashboard({
                 template,
                 mapping,
                 warnings: validation.mismatches,
+                missingFields: validation.missing,
             });
             return;
         }
@@ -387,7 +387,7 @@ const TemplateMapping = ({
                                         )}
                                     </div>
                                     {submitted && !mapping[field.name] && (
-                                        <p className="cv-warning">Missing required field mapping.</p>
+                                        <p className="cv-warning">Not mapped. Related analytics may be unavailable.</p>
                                     )}
                                     {mismatch && (
                                         <p className="cv-warning">
@@ -417,7 +417,7 @@ const TemplateMapping = ({
                 <div className="cv-validation-summary">
                     {validation.missing.length > 0 && (
                         <p>
-                            Missing fields: {validation.missing.join(', ')}
+                            Missing mappings detected: {validation.missing.join(', ')}. Dashboard generation will continue with available fields.
                         </p>
                     )}
                     {validation.mismatches.length > 0 && (

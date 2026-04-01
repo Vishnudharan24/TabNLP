@@ -9,7 +9,7 @@ const AuthScreen = ({ onLogin, onSignUp, isLoading }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
-    const title = useMemo(() => (mode === 'login' ? 'Sign in to ChillView' : 'Create your ChillView account'), [mode]);
+    const title = useMemo(() => (mode === 'login' ? 'Sign in to ChillAnalytics' : 'Create your ChillAnalytics account'), [mode]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();

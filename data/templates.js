@@ -6,6 +6,7 @@ export const ANALYTICS_TEMPLATES = [
         requiredFields: [
             { name: 'Employee_ID', type: 'string' },
             { name: 'Employee_Name', type: 'string' },
+            { name: 'Active_Status', type: 'string' },
             { name: 'Employment_Status', type: 'string' },
             { name: 'Department', type: 'string' },
             { name: 'Business_Unit', type: 'string' },

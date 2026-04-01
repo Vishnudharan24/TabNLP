@@ -20,7 +20,7 @@ const Header = ({ authUser, onLogout, onLogoClick }) => {
                 <div className="flex items-center gap-3">
                     <img
                         src={appLogo}
-                        alt="ChillView"
+                        alt="ChillAnalytics"
                         className={`h-10 w-auto object-contain rounded-xl shadow-sm ${onLogoClick ? 'cursor-pointer' : ''}`}
                         onClick={onLogoClick}
                     />

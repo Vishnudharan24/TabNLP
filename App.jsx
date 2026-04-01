@@ -22,7 +22,6 @@ import {
     BarChart as BarChartIcon,
     Database,
     Save,
-    Share2,
     FileText,
     Presentation,
     Trash2,
@@ -50,8 +49,6 @@ const STORAGE_KEY_VIEW = 'power_bi_v3_view_restored';
 const STORAGE_KEY_BACKEND_SOURCE_IDS = 'power_bi_v3_backend_source_ids_restored';
 const STORAGE_KEY_AUTH_TOKEN = 'power_bi_v3_auth_token';
 const STORAGE_KEY_AUTH_USER = 'power_bi_v3_auth_user';
-const SHARE_QUERY_PARAM = 'reportShare';
-const SHARE_SCHEMA_VERSION = 1;
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
 const APP_BASE_URL = (() => {
@@ -79,6 +76,33 @@ const toBrowserRoutePath = (internalPath) => {
         : `${baseNoTrailing}${normalized}`;
 };
 
+const parseReportRouteContext = (pathname, search = '') => {
+    const normalizedPath = normalizeRoutePath(pathname || '/');
+    const match = normalizedPath.match(/^\/report\/([^/]+)\/?$/i);
+    if (!match) return null;
+
+    const query = new URLSearchParams(search || '');
+    return {
+        reportId: decodeURIComponent(match[1]),
+        shareToken: String(query.get('shareToken') || '').trim(),
+    };
+};
+
+const parseTemplateSharedRouteContext = (pathname, search = '') => {
+    const normalizedPath = normalizeRoutePath(pathname || '/');
+    const match = normalizedPath.match(/^\/templates\/hr\/dashboard\/shared\/([^/]+)\/?$/i);
+    if (!match) return null;
+
+    const query = new URLSearchParams(search || '');
+    const shareToken = String(query.get('shareToken') || '').trim();
+    if (!shareToken) return null;
+
+    return {
+        reportId: decodeURIComponent(match[1]),
+        shareToken,
+    };
+};
+
 const readStorageJson = (key, fallback) => {
     try {
         const raw = localStorage.getItem(key);
@@ -97,32 +121,6 @@ const writeStorageJson = (key, value) => {
         console.warn(`Failed to persist ${key}:`, error);
         return false;
     }
-};
-
-const encodeShareToken = (payload) => {
-    const json = JSON.stringify(payload);
-    const bytes = new TextEncoder().encode(json);
-    let binary = '';
-    bytes.forEach((b) => {
-        binary += String.fromCharCode(b);
-    });
-
-    return btoa(binary)
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/g, '');
-};
-
-const decodeShareToken = (token) => {
-    const normalized = token
-        .replace(/-/g, '+')
-        .replace(/_/g, '/');
-
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    const json = new TextDecoder().decode(bytes);
-    return JSON.parse(json);
 };
 
 const extractBackendSourceIds = (datasets = []) => (
@@ -320,6 +318,8 @@ const App = () => {
     const [routePath, setRoutePath] = useState(() => normalizeRoutePath(window.location.pathname || '/'));
     const [orgExplorerChartId, setOrgExplorerChartId] = useState(null);
     const [semanticMeasuresByDataset, setSemanticMeasuresByDataset] = useState({});
+    const [isSharedView, setIsSharedView] = useState(false);
+    const [currentReportId, setCurrentReportId] = useState('');
 
     useEffect(() => {
         document.body.style.fontFamily = TYPO.fontFamily;
@@ -427,98 +427,37 @@ const App = () => {
         applyAuthSession('', null);
     };
 
+    const applyReportToState = (report) => {
+        const safeReport = report || {};
+        const reportPages = Array.isArray(safeReport.pages) && safeReport.pages.length > 0
+            ? safeReport.pages
+            : [{ id: 'page-1', name: 'Page 1' }];
+        const reportCharts = Array.isArray(safeReport.charts) ? safeReport.charts : [];
+        const reportFilters = Array.isArray(safeReport.global_filters) ? safeReport.global_filters : [];
+
+        setPages(reportPages);
+        setCharts(reportCharts);
+        setGlobalFilters(reportFilters);
+        setView('report');
+
+        const fallbackPageId = reportPages[0]?.id || 'page-1';
+        const selectedPageId = safeReport.active_page_id;
+        const hasPage = selectedPageId && reportPages.some((p) => p.id === selectedPageId);
+        setActivePageId(hasPage ? selectedPageId : fallbackPageId);
+
+        if (safeReport.selected_dataset_id) {
+            setSelectedDatasetId(safeReport.selected_dataset_id);
+        }
+    };
+
     useEffect(() => {
-        const readSharedPayloadFromUrl = () => {
-            try {
-                const url = new URL(window.location.href);
-                const sharedToken = url.searchParams.get(SHARE_QUERY_PARAM);
-                if (!sharedToken) return null;
-                const payload = decodeShareToken(sharedToken);
-                if (!payload || payload.schemaVersion !== SHARE_SCHEMA_VERSION) return null;
-                return payload;
-            } catch {
-                return null;
-            }
-        };
+        let isCancelled = false;
 
-        const applySharedPayload = (payload) => {
-            const sharedDatasets = Array.isArray(payload?.datasets) ? payload.datasets : [];
-            const sharedPages = Array.isArray(payload?.pages) && payload.pages.length > 0
-                ? payload.pages
-                : [{ id: 'page-1', name: 'Page 1' }];
-            const sharedCharts = Array.isArray(payload?.charts) ? payload.charts : [];
-            const sharedGlobalFilters = Array.isArray(payload?.globalFilters) ? payload.globalFilters : [];
-
-            setDatasets(sharedDatasets);
-            setCompanies(Array.isArray(payload?.companies) ? payload.companies : []);
-            setCharts(sharedCharts);
-            setPages(sharedPages);
-            setGlobalFilters(sharedGlobalFilters);
-            setView('report');
-
-            const fallbackPageId = sharedPages[0]?.id || 'page-1';
-            const restoredPageId = payload?.activePageId;
-            const hasSharedPage = restoredPageId && sharedPages.some(p => p.id === restoredPageId);
-            setActivePageId(hasSharedPage ? restoredPageId : fallbackPageId);
-
-            const restoredDatasetId = payload?.selectedDatasetId;
-            const hasSharedDataset = restoredDatasetId && sharedDatasets.some(d => d.id === restoredDatasetId);
-            if (hasSharedDataset) {
-                setSelectedDatasetId(restoredDatasetId);
-            } else if (sharedDatasets[0]?.id) {
-                setSelectedDatasetId(sharedDatasets[0].id);
-            }
-
-            setActiveCompanyId('__all__');
-            return true;
-        };
-
-        const sharedPayload = readSharedPayloadFromUrl();
-        if (sharedPayload) {
-            const sharedApplied = applySharedPayload(sharedPayload);
-            hasHydratedRef.current = true;
-            if (sharedApplied) return;
-        }
-
-        const restoredDatasets = readStorageJson(STORAGE_KEY_DATASETS, []);
-        const restoredBackendSourceIds = readStorageJson(STORAGE_KEY_BACKEND_SOURCE_IDS, []);
-        const restoredCompanies = readStorageJson(STORAGE_KEY_COMPANIES, []);
-        const restoredCharts = readStorageJson(STORAGE_KEY_CHARTS, []);
-        const restoredPages = readStorageJson(STORAGE_KEY_PAGES, []);
-        const restoredGlobalFilters = readStorageJson(STORAGE_KEY_GLOBAL_FILTERS, []);
-        const restoredActivePage = readStorageJson(STORAGE_KEY_ACTIVE_PAGE, null);
-        const restoredSelectedDataset = readStorageJson(STORAGE_KEY_SELECTED_DATASET, null);
-        const restoredActiveCompany = readStorageJson(STORAGE_KEY_ACTIVE_COMPANY, '__all__');
-        const restoredView = readStorageJson(STORAGE_KEY_VIEW, 'data');
-
-        setDatasets(Array.isArray(restoredDatasets) ? restoredDatasets : []);
-        setCompanies(Array.isArray(restoredCompanies) ? restoredCompanies : []);
-        setCharts(Array.isArray(restoredCharts) ? restoredCharts : []);
-        setGlobalFilters(Array.isArray(restoredGlobalFilters) ? restoredGlobalFilters : []);
-        setView(restoredView || 'data');
-        setActiveCompanyId(restoredActiveCompany || '__all__');
-
-        if (Array.isArray(restoredPages) && restoredPages.length > 0) {
-            setPages(restoredPages);
-            const hasRestoredActivePage = restoredActivePage && restoredPages.some(p => p.id === restoredActivePage);
-            setActivePageId(hasRestoredActivePage ? restoredActivePage : restoredPages[0].id);
-        } else {
-            const firstPageId = 'page-1';
-            setPages([{ id: firstPageId, name: 'Page 1' }]);
-            setActivePageId(firstPageId);
-        }
-
-        if (restoredSelectedDataset && Array.isArray(restoredDatasets) && restoredDatasets.some(d => d.id === restoredSelectedDataset)) {
-            setSelectedDatasetId(restoredSelectedDataset);
-        } else if (Array.isArray(restoredDatasets) && restoredDatasets.length > 0) {
-            setSelectedDatasetId(restoredDatasets[0].id);
-        }
-
-        hasHydratedRef.current = true;
-
-        (async () => {
+        const loadDatasetsFromBackend = async (restoredBackendSourceIds = []) => {
             try {
                 const response = await backendApi.listDatasets(1000);
+                if (isCancelled) return;
+
                 const loaded = Array.isArray(response?.items)
                     ? response.items.map(mapBackendDatasetToAppDataset)
                     : [];
@@ -538,7 +477,6 @@ const App = () => {
 
                         return [...nonBackendDatasets, ...backendDatasets];
                     });
-
                     return;
                 }
             } catch (error) {
@@ -549,6 +487,7 @@ const App = () => {
                 const results = await Promise.allSettled(
                     restoredBackendSourceIds.map(sourceId => backendApi.getLatestDatasetBySourceId(sourceId))
                 );
+                if (isCancelled) return;
 
                 const loaded = results
                     .filter(r => r.status === 'fulfilled' && r.value?.item)
@@ -562,8 +501,86 @@ const App = () => {
                     return Array.from(map.values());
                 });
             }
-        })();
-    }, []);
+        };
+
+        const hydrateFromLocalStorage = () => {
+            const restoredDatasets = readStorageJson(STORAGE_KEY_DATASETS, []);
+            const restoredBackendSourceIds = readStorageJson(STORAGE_KEY_BACKEND_SOURCE_IDS, []);
+            const restoredCompanies = readStorageJson(STORAGE_KEY_COMPANIES, []);
+            const restoredCharts = readStorageJson(STORAGE_KEY_CHARTS, []);
+            const restoredPages = readStorageJson(STORAGE_KEY_PAGES, []);
+            const restoredGlobalFilters = readStorageJson(STORAGE_KEY_GLOBAL_FILTERS, []);
+            const restoredActivePage = readStorageJson(STORAGE_KEY_ACTIVE_PAGE, null);
+            const restoredSelectedDataset = readStorageJson(STORAGE_KEY_SELECTED_DATASET, null);
+            const restoredActiveCompany = readStorageJson(STORAGE_KEY_ACTIVE_COMPANY, '__all__');
+            const restoredView = readStorageJson(STORAGE_KEY_VIEW, 'data');
+
+            setDatasets(Array.isArray(restoredDatasets) ? restoredDatasets : []);
+            setCompanies(Array.isArray(restoredCompanies) ? restoredCompanies : []);
+            setCharts(Array.isArray(restoredCharts) ? restoredCharts : []);
+            setGlobalFilters(Array.isArray(restoredGlobalFilters) ? restoredGlobalFilters : []);
+            setView(restoredView || 'data');
+            setActiveCompanyId(restoredActiveCompany || '__all__');
+
+            if (Array.isArray(restoredPages) && restoredPages.length > 0) {
+                setPages(restoredPages);
+                const hasRestoredActivePage = restoredActivePage && restoredPages.some(p => p.id === restoredActivePage);
+                setActivePageId(hasRestoredActivePage ? restoredActivePage : restoredPages[0].id);
+            } else {
+                const firstPageId = 'page-1';
+                setPages([{ id: firstPageId, name: 'Page 1' }]);
+                setActivePageId(firstPageId);
+            }
+
+            if (restoredSelectedDataset && Array.isArray(restoredDatasets) && restoredDatasets.some(d => d.id === restoredSelectedDataset)) {
+                setSelectedDatasetId(restoredSelectedDataset);
+            } else if (Array.isArray(restoredDatasets) && restoredDatasets.length > 0) {
+                setSelectedDatasetId(restoredDatasets[0].id);
+            }
+
+            setIsSharedView(false);
+            setCurrentReportId('');
+            hasHydratedRef.current = true;
+            return restoredBackendSourceIds;
+        };
+
+        const runHydration = async () => {
+            const routeInfo = parseReportRouteContext(window.location.pathname || '/', window.location.search || '');
+
+            if (routeInfo?.reportId) {
+                try {
+                    const response = routeInfo.shareToken
+                        ? await backendApi.getSharedReport(routeInfo.reportId, routeInfo.shareToken)
+                        : await backendApi.getReport(routeInfo.reportId);
+                    if (isCancelled) return;
+
+                    const report = response?.report || null;
+                    if (report) {
+                        applyReportToState(report);
+                        setCurrentReportId(String(report?.id || routeInfo.reportId));
+                        setIsSharedView(Boolean(routeInfo.shareToken));
+                        if (routeInfo.shareToken) {
+                            setIsEditMode(false);
+                        }
+                        hasHydratedRef.current = true;
+                        await loadDatasetsFromBackend([]);
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Failed to load report from backend route:', error);
+                }
+            }
+
+            const restoredBackendSourceIds = hydrateFromLocalStorage();
+            await loadDatasetsFromBackend(restoredBackendSourceIds);
+        };
+
+        runHydration();
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [routePath]);
 
     useEffect(() => {
         if (!hasHydratedRef.current) return;
@@ -658,10 +675,9 @@ const App = () => {
     };
 
     const handleShareDashboard = async () => {
-        if (isSharing) return;
+        if (isSharing || isSharedView) return;
 
-        const shareDatasets = datasets.filter(ds => charts.some(chart => chart.datasetId === ds.id) || ds.id === selectedDatasetId);
-        if (shareDatasets.length === 0 || charts.length === 0) {
+        if (!Array.isArray(charts) || charts.length === 0) {
             window.alert('Add at least one visual before creating a share link.');
             return;
         }
@@ -669,28 +685,40 @@ const App = () => {
         setIsSharing(true);
         try {
             const payload = {
-                schemaVersion: SHARE_SCHEMA_VERSION,
-                createdAt: new Date().toISOString(),
-                view: 'report',
+                name: `Report ${new Date().toLocaleString()}`,
                 pages,
                 charts,
-                datasets: shareDatasets,
-                companies,
-                globalFilters,
-                activePageId,
-                selectedDatasetId,
+                global_filters: globalFilters,
+                selected_dataset_id: selectedDatasetId || null,
+                active_page_id: activePageId || null,
             };
 
-            const token = encodeShareToken(payload);
-            const shareUrl = new URL(window.location.href);
-            shareUrl.searchParams.set(SHARE_QUERY_PARAM, token);
-            shareUrl.searchParams.delete('reportShareCopied');
-            const finalUrl = shareUrl.toString();
+            let reportId = String(currentReportId || '').trim();
+            if (reportId) {
+                await backendApi.updateReport(reportId, payload);
+            } else {
+                const created = await backendApi.createReport(payload);
+                reportId = String(created?.report?.id || '').trim();
+                if (!reportId) throw new Error('Unable to save report before sharing');
+                setCurrentReportId(reportId);
 
-            if (finalUrl.length > 180000) {
-                window.alert('This dashboard is too large to share via URL. Reduce dataset size or use backend sharing.');
-                return;
+                const reportPath = toBrowserRoutePath(`/report/${encodeURIComponent(reportId)}`);
+                window.history.replaceState({}, '', reportPath);
+                setRoutePath(normalizeRoutePath(reportPath));
             }
+
+            const shareResponse = await backendApi.createReportShare(reportId, {
+                role: 'viewer',
+                expires_in_hours: 168,
+            });
+
+            const shareToken = String(shareResponse?.share?.token || '').trim();
+            if (!shareToken) throw new Error('Share token was not returned');
+
+            const sharePath = toBrowserRoutePath(`/report/${encodeURIComponent(reportId)}`);
+            const url = new URL(window.location.origin + sharePath);
+            url.searchParams.set('shareToken', shareToken);
+            const finalUrl = url.toString();
 
             if (navigator?.clipboard?.writeText) {
                 await navigator.clipboard.writeText(finalUrl);
@@ -700,8 +728,8 @@ const App = () => {
 
             window.prompt('Copy your dashboard share link:', finalUrl);
         } catch (error) {
-            console.error('Failed to create share link:', error);
-            window.alert('Unable to generate a share link right now. Please try again.');
+            console.error('Failed to generate share link:', error);
+            window.alert(error?.message || 'Unable to generate share link right now.');
         } finally {
             setIsSharing(false);
         }
@@ -1104,9 +1132,16 @@ const App = () => {
     };
 
     const handleVisualizationDataPoint = ({ chartId, chartTitle, datasetId, dimension, value }) => {
-        if (!chartId || !datasetId || !dimension || value === undefined || value === null) return;
-
         const interactionFilterId = `interaction-${chartId}`;
+
+        if (!chartId || value === undefined || value === null) {
+            // Clear interaction filter
+            setGlobalFilters(prev => prev.filter(f => f.id !== interactionFilterId));
+            return;
+        }
+
+        if (!datasetId || !dimension) return;
+
         const nextFilter = {
             id: interactionFilterId,
             source: 'interaction',
@@ -1189,6 +1224,9 @@ const App = () => {
         }
     };
 
+    const sharedTemplateRoute = parseTemplateSharedRouteContext(routePath, window.location.search || '');
+    const isSharedTemplateRoute = Boolean(sharedTemplateRoute?.reportId && sharedTemplateRoute?.shareToken);
+
     if (isAuthLoading) {
         return (
             <div className={`min-h-screen flex items-center justify-center ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-700'}`}>
@@ -1197,11 +1235,26 @@ const App = () => {
         );
     }
 
-    if (!authUser) {
+    if (!authUser && !isSharedTemplateRoute) {
         return <AuthScreen onLogin={handleLogin} onSignUp={handleSignUp} isLoading={isAuthSubmitting} />;
     }
 
-    if (routePath === '/org-chart') {
+    if (isSharedTemplateRoute) {
+        return (
+            <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
+                <main className={`flex-1 min-w-0 overflow-auto ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                    <TemplateRoutes
+                        datasets={datasets}
+                        selectedDatasetId={selectedDatasetId}
+                        setSelectedDatasetId={setSelectedDatasetId}
+                        sharedTemplateRoute={sharedTemplateRoute}
+                    />
+                </main>
+            </div>
+        );
+    }
+
+    if (routePath === '/org-chart' && !isSharedView) {
         return (
             <OrgChartPage
                 datasets={datasets}
@@ -1214,19 +1267,22 @@ const App = () => {
         );
     }
 
+    const effectiveView = isSharedView ? 'report' : view;
+
     return (
         <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
-            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { setView('data'); navigatePath('/'); }} />
+            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { if (!isSharedView) { setView('data'); navigatePath('/'); } }} />
             <div className="flex flex-1 overflow-hidden">
-                <Sidebar setView={setView} currentView={view} onNavigatePath={navigatePath} />
-                <main className={`flex-1 flex flex-col min-w-0 ${view === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                    {view === 'templates' ? (
+                {!isSharedView && <Sidebar setView={setView} currentView={effectiveView} onNavigatePath={navigatePath} />}
+                <main className={`flex-1 flex flex-col min-w-0 ${effectiveView === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                    {effectiveView === 'templates' ? (
                         <TemplateRoutes
                             datasets={datasets}
                             selectedDatasetId={selectedDatasetId}
                             setSelectedDatasetId={setSelectedDatasetId}
+                            sharedTemplateRoute={null}
                         />
-                    ) : view === 'data' ? (
+                    ) : effectiveView === 'data' ? (
                         <DataSourceView
                             datasets={datasets}
                             companies={companies}
@@ -1243,11 +1299,11 @@ const App = () => {
                             onProfileDataset={id => setProfilerDatasetId(id)}
                             onBackendIngestionSuccess={handleBackendIngestionSuccess}
                         />
-                    ) : view === 'source-config' ? (
+                    ) : effectiveView === 'source-config' ? (
                         <SourceConfigIngestionPage onIngestionSuccess={handleBackendIngestionSuccess} />
-                    ) : view === 'relationships' ? (
+                    ) : effectiveView === 'relationships' ? (
                         <RelationshipDiagram datasets={datasets} companies={companies} />
-                    ) : view === 'profiler' ? (
+                    ) : effectiveView === 'profiler' ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-10">
                             {datasets.length > 0 ? (
                                 <div className="text-center space-y-6">
@@ -1274,7 +1330,7 @@ const App = () => {
                                 </div>
                             )}
                         </div>
-                    ) : view === 'merge' ? (
+                    ) : effectiveView === 'merge' ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-10">
                             {datasets.length >= 2 ? (
                                 <div className="text-center space-y-6">
@@ -1314,7 +1370,8 @@ const App = () => {
                                         <select
                                             value={selectedDatasetId}
                                             onChange={(e) => setSelectedDatasetId(e.target.value)}
-                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
+                                            disabled={isSharedView}
+                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all cursor-pointer focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50'}`}
                                         >
                                             {datasets.map(ds => (
                                                 <option key={ds.id} value={ds.id}>
@@ -1338,10 +1395,12 @@ const App = () => {
                                             </p>
                                         </div>
                                     )}
-                                    <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all ${isEditMode ? (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50') : (theme === 'dark' ? 'bg-gray-200 text-gray-800 border-transparent' : 'bg-gray-800 text-white border-transparent hover:bg-gray-900 shadow-sm')}`}>
-                                        {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
-                                        <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
-                                    </button>
+                                    {!isSharedView && (
+                                        <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all ${isEditMode ? (theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 shadow-sm hover:bg-gray-50') : (theme === 'dark' ? 'bg-gray-200 text-gray-800 border-transparent' : 'bg-gray-800 text-white border-transparent hover:bg-gray-900 shadow-sm')}`}>
+                                            {isEditMode ? <Eye size={16} /> : <Settings size={16} />}
+                                            <span>{isEditMode ? 'Preview' : 'Edit Mode'}</span>
+                                        </button>
+                                    )}
                                     {currentPageOrgCharts.length > 0 && (
                                         <button
                                             onClick={() => {
@@ -1356,14 +1415,6 @@ const App = () => {
                                         </button>
                                     )}
                                     <button
-                                        onClick={() => setShowShareExportPopup(true)}
-                                        disabled={exportableVisualCount === 0 || isExportingPdf || isExportingPpt || isPreparingExport}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
-                                    >
-                                        <Share2 size={16} className={isPreparingExport ? 'animate-pulse' : ''} />
-                                        <span>Share</span>
-                                    </button>
-                                    <button
                                         onClick={() => setShowReportSettingsPopup(true)}
                                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
                                     >
@@ -1374,16 +1425,18 @@ const App = () => {
                                         <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
                                         <span>{isSaving ? 'Saving...' : 'Save Layout'}</span>
                                     </button> */}
-                                    <button onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
-                                        <Plus size={16} />
-                                        <span>Add Visual</span>
-                                    </button>
+                                    {!isSharedView && (
+                                        <button onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
+                                            <Plus size={16} />
+                                            <span>Add Visual</span>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
                             <div className="flex-1 flex overflow-hidden p-6 gap-6">
                                 <div ref={reportCanvasRef} className={`flex-1 overflow-y-scroll overflow-x-hidden report-canvas-scrollbar designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : (theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent')}`}>
-                                    <ResponsiveGridLayout className="layout" layouts={{ lg: gridLayouts }} breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={40} draggableHandle=".drag-handle" onLayoutChange={onLayoutChange} isDraggable={isEditMode} isResizable={isEditMode} margin={[16, 16]}>
+                                    <ResponsiveGridLayout className="layout" layouts={{ lg: gridLayouts }} breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={40} draggableHandle=".drag-handle" onLayoutChange={onLayoutChange} isDraggable={isEditMode} isResizable={isEditMode || isSharedView} margin={[16, 16]}>
                                         {currentPageCharts.map(config => (
                                             <div key={config.id} onClick={() => isEditMode && setActiveChartId(config.id)}>
                                                 <div
@@ -1405,7 +1458,9 @@ const App = () => {
                                     {currentPageCharts.length === 0 && <div className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}><BarChartIcon size={48} className="opacity-20 mb-4" /><p className="text-sm font-medium">Add visuals to start your report.</p></div>}
                                 </div>
 
-                                <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} semanticMeasures={semanticMeasuresByDataset[selectedDatasetId] || []} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
+                                {!isSharedView && (
+                                    <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} semanticMeasures={semanticMeasuresByDataset[selectedDatasetId] || []} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
+                                )}
                             </div>
                         </div>
                     )}
@@ -1436,8 +1491,26 @@ const App = () => {
                 <DataMerger
                     datasets={datasets}
                     onClose={() => setShowMerger(false)}
-                    onMergeComplete={(mergedDs) => {
-                        setDatasets(p => [...p, mergedDs]);
+                    onMergeComplete={async (mergeConfig) => {
+                        const response = await backendApi.mergeDatasets({
+                            left_dataset_id: mergeConfig?.leftDatasetId,
+                            right_dataset_id: mergeConfig?.rightDatasetId,
+                            join_type: mergeConfig?.joinType,
+                            left_key: mergeConfig?.leftKey || null,
+                            right_key: mergeConfig?.rightKey || null,
+                            merged_name: mergeConfig?.mergedName || null,
+                        });
+
+                        const item = response?.item;
+                        if (!item) {
+                            throw new Error('Backend did not return merged dataset details');
+                        }
+
+                        const mergedDs = mapBackendDatasetToAppDataset(item);
+                        setDatasets((prev) => {
+                            const withoutSame = prev.filter((d) => d.id !== mergedDs.id);
+                            return [...withoutSame, mergedDs];
+                        });
                         setSelectedDatasetId(mergedDs.id);
                         setShowMerger(false);
                     }}
@@ -1536,6 +1609,17 @@ const App = () => {
                                 <option value="vibrant">Vibrant</option>
                                 <option value="neutral">Neutral</option>
                             </select>
+
+                            <label className={`block text-xs font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Share</label>
+                            <button
+                                onClick={handleShareDashboard}
+                                disabled={isSharedView || isSharing || isPreparingExport || isExportingPdf || isExportingPpt}
+                                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                            >
+                                <FileText size={16} className={isSharing ? 'animate-pulse' : ''} />
+                                <span>{isSharing ? 'Preparing link...' : 'Copy Share Link'}</span>
+                            </button>
+
                         </div>
                     </div>
                 </div>
@@ -1598,24 +1682,24 @@ const App = () => {
 
             <footer className={`h-10 border-t px-6 flex items-center justify-between shrink-0 z-40 text-xs ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center gap-1">
-                    {view === 'report' && (
+                    {effectiveView === 'report' && (
                         <>
                             {pages.map((p) => (
                                 <div key={p.id} className="group relative flex items-center">
                                     <button onClick={() => { setActivePageId(p.id); setView('report'); }} className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-2 ${activePageId === p.id ? (theme === 'dark' ? 'bg-gray-700 text-gray-100' : 'bg-gray-100 text-gray-900') : (theme === 'dark' ? 'text-gray-500 hover:bg-gray-700 hover:text-gray-300' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700')}`}>
                                         <span>{p.name}</span>
-                                        {pages.length > 1 && <span onClick={(e) => handleRemovePage(e, p.id)} className={`ml-1 hover:text-rose-500 transition-colors ${activePageId === p.id ? 'opacity-100' : 'hidden group-hover:block'}`}><X size={12} /></span>}
+                                        {!isSharedView && pages.length > 1 && <span onClick={(e) => handleRemovePage(e, p.id)} className={`ml-1 hover:text-rose-500 transition-colors ${activePageId === p.id ? 'opacity-100' : 'hidden group-hover:block'}`}><X size={12} /></span>}
                                     </button>
                                 </div>
                             ))}
-                            <button onClick={handleAddPage} className={`p-1.5 ml-1 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}><PlusCircle size={14} /></button>
+                            {!isSharedView && <button onClick={handleAddPage} className={`p-1.5 ml-1 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}><PlusCircle size={14} /></button>}
                         </>
                     )}
                 </div>
                 <div className={`flex items-center gap-4 font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     <span>{currentPageCharts.length} Objects</span>
                     <div className={`h-3 w-[1px] ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-300'}`} />
-                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>ChillView v1.0</span>
+                    <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>ChillAnalytics v1.0</span>
                 </div>
             </footer>
         </div>

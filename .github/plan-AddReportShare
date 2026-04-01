@@ -1,0 +1,52 @@
+1) Add persistent report + share storage (Mongo)
+In db_store.py, add collections and helpers for:
+
+reports
+id, owner_user_id, name, pages, charts, global_filters, selected_dataset_id, active_page_id, created_at, updated_at
+report_shares
+report_id, token_hash, role (viewer), expires_at, revoked, created_by, created_at
+Also add indexes:
+
+reports.owner_user_id + updated_at
+report_shares.report_id + token_hash (unique)
+TTL-like cleanup flow for expired shares (or check on read).
+2) Add backend APIs for save/share/open
+In main.py, add endpoints:
+
+POST /reports → create report (owner only)
+PUT /reports/{reportId} → update report (owner/editor)
+GET /reports/{reportId} → fetch report (authorized)
+POST /reports/{reportId}/shares → create share token with expiry
+GET /shared-reports/{reportId} with shareToken → resolve read-only shared view
+Use existing auth dependency pattern (Authorization header already flows from frontend API client).
+
+3) Replace URL payload sharing with ID + token
+In App.jsx, remove payload-in-query for sharing and replace with:
+
+Share link format: /report/{reportId}?shareToken=...
+On load:
+if link has reportId + shareToken, call shared-report endpoint
+set isSharedView=true, isEditMode=false
+For normal users:
+load by reportId from backend, not from URL payload snapshot
+4) Add frontend API methods
+In backendApi.js, add:
+
+createReport()
+updateReport(reportId, payload)
+getReport(reportId)
+createReportShare(reportId, payload)
+getSharedReport(reportId, shareToken)
+Reuse existing retry/timeout and auth header behavior.
+
+5) Security controls
+Store only hashed share token (sha256) in DB.
+Token shown once at creation.
+Enforce expiry + revoke checks server-side every read.
+Keep shared role strictly viewer (no writes).
+Add audit log fields (created_by, accessed_at, ip optional).
+6) Efficient rollout plan
+Introduce backend collections + APIs.
+Keep current local-storage mode as fallback.
+Switch “Copy Share Link” button to call backend share endpoint.
+Remove old reportShare payload decoding after migration validation.

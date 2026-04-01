@@ -1,0 +1,296 @@
+You are a senior frontend engineer
+
+The current org chart works functionally, but the UI is not enterprise-grade. It has issues like:
+
+* Nodes displaying “[object Object]”
+* Overlapping / stretched pill-shaped nodes
+* No hierarchy differentiation
+* No interaction (expand/collapse, focus)
+* Poor readability for large datasets
+
+---
+
+# 🎯 OBJECTIVE
+
+Upgrade the Org Chart UI to be:
+
+* Clean and structured (card-based nodes)
+* Hierarchy-aware (visual levels)
+* Interactive (expand/collapse, hover focus)
+* Business-friendly (tooltips, readable labels)
+* Scalable (supports 1000+ nodes)
+
+---
+
+# 🚨 STRICT RULES
+
+1. Do NOT change the underlying data model (Node + Parent remains)
+2. Do NOT modify backend APIs
+3. All improvements must be in frontend (ECharts config + adapter layer)
+4. Must handle large hierarchies efficiently
+5. Avoid heavy DOM or custom rendering — use ECharts capabilities
+
+---
+
+# 🧱 STEP 1 — FIX NODE LABEL RENDERING (CRITICAL)
+
+Replace incorrect rendering:
+
+❌ “[object Object]”
+
+---
+
+## IMPLEMENT
+
+```js
+label: {
+  formatter: params => {
+    return params.data.label || params.data.name;
+  }
+}
+```
+
+---
+
+# 🧱 STEP 2 — SWITCH TO CARD-STYLE NODES
+
+Replace pill UI with structured card layout.
+
+---
+
+## IMPLEMENT
+
+```js
+label: {
+  backgroundColor: "#ffffff",
+  borderColor: "#E5E7EB",
+  borderWidth: 1,
+  borderRadius: 8,
+  padding: [8, 12],
+  color: "#111827",
+  fontSize: 12,
+  lineHeight: 18
+}
+```
+
+---
+
+## FORMAT CONTENT
+
+```js
+formatter: params => {
+  const name = params.data.name;
+  const role = params.data.role || "";
+  return `${name}\n${role}`;
+}
+```
+
+---
+
+# 🧱 STEP 3 — HIERARCHY-BASED STYLING
+
+Apply visual differentiation by depth.
+
+---
+
+## IMPLEMENT
+
+```js
+label: {
+  formatter: params => {
+    const depth = params.treePathInfo.length - 1;
+
+    if (depth === 0) return `{root|${params.name}}`;
+    if (depth === 1) return `{manager|${params.name}}`;
+    return `{employee|${params.name}}`;
+  },
+  rich: {
+    root: { fontSize: 16, fontWeight: "bold" },
+    manager: { fontSize: 13 },
+    employee: { fontSize: 11 }
+  }
+}
+```
+
+---
+
+# 🧱 STEP 4 — FIX LAYOUT & SPACING
+
+Ensure readability and prevent overlap.
+
+---
+
+## IMPLEMENT
+
+```js
+layout: "orthogonal",
+orient: "vertical",
+nodeGap: 30,
+layerGap: 80
+```
+
+---
+
+# 🧱 STEP 5 — ENABLE EXPAND / COLLAPSE
+
+Show only top levels initially.
+
+---
+
+## IMPLEMENT
+
+```js
+initialTreeDepth: 2
+```
+
+---
+
+# 🧱 STEP 6 — ADD TOOLTIP (BUSINESS INFO)
+
+```js
+tooltip: {
+  formatter: params => {
+    const data = params.data;
+
+    return `
+      <b>${data.name}</b><br/>
+      Role: ${data.role || "N/A"}<br/>
+      Department: ${data.department || "N/A"}
+    `;
+  }
+}
+```
+
+---
+
+# 🧱 STEP 7 — COLOR BY CATEGORY (DEPARTMENT)
+
+---
+
+## IMPLEMENT
+
+```js
+itemStyle: {
+  color: params => {
+    const dept = params.data.department;
+
+    const map = {
+      Engineering: "#3B82F6",
+      HR: "#22C55E",
+      Operations: "#F59E0B"
+    };
+
+    return map[dept] || "#6366F1";
+  }
+}
+```
+
+---
+
+# 🧱 STEP 8 — ADD HOVER FOCUS
+
+Highlight reporting chain.
+
+---
+
+## IMPLEMENT
+
+```js
+emphasis: {
+  focus: "descendant"
+},
+blur: {
+  itemStyle: {
+    opacity: 0.3
+  }
+}
+```
+
+---
+
+# 🧱 STEP 9 — LIMIT NODE WIDTH
+
+Prevent long stretched nodes.
+
+---
+
+## IMPLEMENT
+
+```js
+label: {
+  width: 140,
+  overflow: "truncate"
+}
+```
+
+---
+
+# 🧱 STEP 10 — ADD SEARCH (EXTERNAL CONTROL)
+
+Add input:
+
+```text
+Search employee / department
+```
+
+---
+
+## BEHAVIOR
+
+* Highlight matching node
+* Auto-scroll / focus
+* Expand path to node
+
+---
+
+# 🧱 STEP 11 — ADD SIDE PANEL ON CLICK
+
+On node click:
+
+* Open side panel / modal
+* Show full details:
+
+  * Name
+  * Department
+  * Manager
+  * Team size
+
+---
+
+# 🧱 STEP 12 — OPTIONAL ENHANCEMENTS
+
+* Add icons (👤, 🏢)
+* Add breadcrumb path
+* Add zoom + pan controls
+
+---
+
+# 🧪 STEP 13 — TEST CASES
+
+1. Large hierarchy (1000+ nodes)
+2. Deep hierarchy (5+ levels)
+3. Long names (truncate correctly)
+4. Missing optional fields
+5. Expand/collapse behavior
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. Updated ECharts org chart config
+2. Label formatter logic
+3. Styling (card-based nodes)
+4. Interaction (expand/collapse, hover, click)
+5. Example before vs after UI
+
+---
+
+# 🚀 FINAL GOAL
+
+Transform org chart from:
+
+"raw node graph"
+
+→
+
+"clean, interactive, enterprise-grade org visualization"

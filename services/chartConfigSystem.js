@@ -370,13 +370,20 @@ export function convertOldConfig(oldConfig = {}) {
     }
 
     if (normalizedType === ChartType.ORG_CHART) {
+        const hierarchyFields = Array.isArray(oldConfig.hierarchyFields) && oldConfig.hierarchyFields.length > 0
+            ? oldConfig.hierarchyFields
+            : [];
         const nodeField = oldConfig.nodeField || oldConfig.dimension || oldConfig.xAxisField || '';
         const parentField = oldConfig.parentField || oldConfig.yAxisField || '';
         const labelField = oldConfig.labelField || oldConfig.legendField || '';
         const colorField = oldConfig.colorField || '';
 
-        if (nodeField) assignments.push({ field: nodeField, role: FieldRoles.NODE });
-        if (parentField) assignments.push({ field: parentField, role: FieldRoles.PARENT });
+        if (hierarchyFields.length > 0) {
+            hierarchyFields.forEach((field) => assignments.push({ field, role: FieldRoles.HIERARCHY }));
+        } else {
+            if (nodeField) assignments.push({ field: nodeField, role: FieldRoles.NODE });
+            if (parentField) assignments.push({ field: parentField, role: FieldRoles.PARENT });
+        }
         if (labelField) assignments.push({ field: labelField, role: FieldRoles.LABEL });
         if (colorField) assignments.push({ field: colorField, role: FieldRoles.COLOR });
 
@@ -451,18 +458,19 @@ export function configFromAssignments(chartType, assignments = []) {
             if (!measures.includes(field)) measures.push(field);
         });
 
-    if (chartType === ChartType.ORG_CHART) {
+    if (chartType === ChartType.ORG_CHART || chartType === ChartType.ORG_TREE_STRUCTURED) {
+        const orgHierarchy = list(FieldRoles.HIERARCHY);
         return {
             type: chartType,
-            dimension: orgNode || '',
+            dimension: orgHierarchy[0] || orgNode || '',
             measures: ['__count__'],
             xAxisField: orgNode || '',
             yAxisField: orgParent || '',
             legendField: orgColor || '',
             sizeField: '',
-            hierarchyFields: [],
-            nodeField: orgNode || '',
-            parentField: orgParent || '',
+            hierarchyFields: orgHierarchy,
+            nodeField: orgHierarchy.length === 0 ? (orgNode || '') : '',
+            parentField: orgHierarchy.length === 0 ? (orgParent || '') : '',
             labelField: orgLabel || '',
             colorField: orgColor || '',
             assignments: safe,
@@ -510,23 +518,22 @@ export function autoAssignFields(columns = [], chartType = ChartType.BAR) {
         const byName = safeColumns.map(c => ({ ...c, lower: String(c?.name || '').toLowerCase() }));
         const firstByRegex = (regex, pool = byName) => pool.find(c => regex.test(c.lower))?.name;
 
-        const nodeField = firstByRegex(/(^|\b)(employee\s*id|emp\s*id|employee|staff\s*id|person\s*id|user\s*id)(\b|$)/)
-            || firstByRegex(/(^|\b)(full\s*name|employee\s*name|name)(\b|$)/)
+        const level1 = firstByRegex(/(^|\b)(legal\s*entity|entity|business\s*unit|company|division)(\b|$)/)
             || sortedCategorical[0]?.name;
+        const level2 = firstByRegex(/(^|\b)(manager\s*name|manager|supervisor|reports\s*to|lead)(\b|$)/)
+            || sortedCategorical.find(c => c.name !== level1)?.name;
+        const level3 = firstByRegex(/(^|\b)(employee\s*name|full\s*name|employee|name)(\b|$)/)
+            || sortedCategorical.find(c => ![level1, level2].includes(c.name))?.name;
 
-        const parentField = firstByRegex(/(^|\b)(manager\s*id|mgr\s*id|manager|parent\s*id|supervisor\s*id|reports\s*to|lead\s*id)(\b|$)/)
-            || sortedCategorical.find(c => c.name !== nodeField)?.name;
+        [level1, level2, level3].filter(Boolean).forEach((field) => assignments.push({ field, role: FieldRoles.HIERARCHY }));
 
-        const labelField = firstByRegex(/(^|\b)(designation|title|role|position|full\s*name|name)(\b|$)/)
-            || sortedCategorical.find(c => c.name !== nodeField && c.name !== parentField)?.name;
-
+        const labelField = firstByRegex(/(^|\b)(designation|title|role|position)(\b|$)/)
+            || null;
         const colorField = firstByRegex(/(^|\b)(department|dept|business\s*unit|team|division|function)(\b|$)/)
-            || sortedCategorical.find(c => ![nodeField, parentField, labelField].includes(c.name))?.name;
+            || null;
 
-        if (nodeField) assignments.push({ field: nodeField, role: FieldRoles.NODE });
-        if (parentField) assignments.push({ field: parentField, role: FieldRoles.PARENT });
-        if (labelField && labelField !== nodeField) assignments.push({ field: labelField, role: FieldRoles.LABEL });
-        if (colorField && ![nodeField, parentField, labelField].includes(colorField)) assignments.push({ field: colorField, role: FieldRoles.COLOR });
+        if (labelField) assignments.push({ field: labelField, role: FieldRoles.LABEL });
+        if (colorField) assignments.push({ field: colorField, role: FieldRoles.COLOR });
 
         return assignments;
     }

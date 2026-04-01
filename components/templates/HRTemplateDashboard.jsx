@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import jsPDF from 'jspdf';
@@ -146,6 +146,125 @@ const chartBase = (isDark) => ({
 
 const axisTextColor = (isDark) => (isDark ? '#d1d5db' : '#334155');
 
+const applyAllCategoryLabels = (option = {}, isDark = false) => {
+    const patchAxis = (axis) => {
+        if (!axis || axis.type !== 'category') return axis;
+        return {
+            ...axis,
+            axisLabel: {
+                ...(axis.axisLabel || {}),
+                interval: axis.axisLabel?.interval ?? 'auto',
+                rotate: axis.axisLabel?.rotate ?? 30,
+                color: axisTextColor(isDark),
+            },
+        };
+    };
+
+    const next = { ...option };
+    if (Array.isArray(next.xAxis)) next.xAxis = next.xAxis.map(patchAxis);
+    else if (next.xAxis) next.xAxis = patchAxis(next.xAxis);
+
+    if (Array.isArray(next.yAxis)) next.yAxis = next.yAxis.map(patchAxis);
+    else if (next.yAxis) next.yAxis = patchAxis(next.yAxis);
+
+    const xAxis = Array.isArray(next.xAxis) ? next.xAxis[0] : next.xAxis;
+    const yAxis = Array.isArray(next.yAxis) ? next.yAxis[0] : next.yAxis;
+    const useYAxisZoom = xAxis?.type === 'value' && yAxis?.type === 'category';
+    const categoryCount = (useYAxisZoom ? yAxis?.data?.length : xAxis?.data?.length) || 0;
+
+    if (categoryCount > 20) {
+        next.dataZoom = [
+            useYAxisZoom
+                ? { type: 'inside', yAxisIndex: 0, filterMode: 'filter', zoomLock: false }
+                : { type: 'inside', xAxisIndex: 0, filterMode: 'filter', zoomLock: false },
+            useYAxisZoom
+                ? { type: 'slider', yAxisIndex: 0, width: 14, right: 6, top: 40, bottom: 40 }
+                : { type: 'slider', xAxisIndex: 0, height: 16, bottom: 24 },
+        ];
+    }
+
+    return next;
+};
+
+const applyAlwaysOnLabels = (option = {}, isDark = false) => {
+    const series = Array.isArray(option?.series) ? option.series : [];
+    if (series.length === 0) return option;
+
+    const hasPie = series.some((s) => String(s?.type || '').toLowerCase() === 'pie');
+    const pieSliceCount = series.reduce((max, s) => {
+        const t = String(s?.type || '').toLowerCase();
+        if (t !== 'pie') return max;
+        const count = Array.isArray(s?.data) ? s.data.length : 0;
+        return Math.max(max, count);
+    }, 0);
+
+    const nextLegend = hasPie
+        ? {
+            ...(option?.legend || {}),
+            top: option?.legend?.top ?? 0,
+            left: option?.legend?.left ?? 'center',
+            orient: option?.legend?.orient || 'horizontal',
+            ...(pieSliceCount > 10 ? { type: 'scroll' } : {}),
+        }
+        : option?.legend;
+
+    return {
+        ...option,
+        legend: nextLegend,
+        series: series.map((s) => {
+            const type = String(s?.type || '').toLowerCase();
+            const baseLabel = {
+                ...(s?.label || {}),
+                show: true,
+                color: s?.label?.color || (isDark ? '#e5e7eb' : '#0f172a'),
+            };
+
+            if (type === 'pie') {
+                const dataCount = Array.isArray(s?.data) ? s.data.length : 0;
+                return {
+                    ...s,
+                    label: {
+                        ...baseLabel,
+                        position: s?.label?.position || 'outside',
+                        formatter: s?.label?.formatter || '{b}: {c}',
+                    },
+                    labelLayout: { hideOverlap: true },
+                    avoidLabelOverlap: true,
+                };
+            }
+
+            if (type === 'line' || type === 'bar') {
+                return {
+                    ...s,
+                    label: {
+                        ...baseLabel,
+                        position: s?.label?.position || 'top',
+                        formatter: s?.label?.formatter || ((params) => formatCountLabel(params?.value)),
+                    },
+                    labelLayout: { hideOverlap: true },
+                };
+            }
+
+            if (type === 'scatter') {
+                return {
+                    ...s,
+                    label: {
+                        ...baseLabel,
+                        position: s?.label?.position || 'top',
+                        formatter: s?.label?.formatter || ((params) => params?.name || ''),
+                    },
+                    labelLayout: { hideOverlap: true },
+                };
+            }
+
+            return {
+                ...s,
+                label: baseLabel,
+            };
+        }),
+    };
+};
+
 const deepCloneOption = (value) => {
     if (typeof structuredClone === 'function') {
         try {
@@ -207,25 +326,14 @@ const withAxisMeta = (axisConfig, axisName, isDark) => {
 };
 
 const buildExportReadyOption = ({ option, title, axisFields, isDark }) => {
-    const exportOption = deepCloneOption(option || {});
+    const exportOption = applyAllCategoryLabels(
+        applyAlwaysOnLabels(deepCloneOption(option || {}), isDark),
+        isDark
+    );
     const horizontalBar = isHorizontalBarChart(exportOption);
 
     exportOption.backgroundColor = isDark ? '#111827' : '#ffffff';
-    exportOption.title = {
-        text: title || 'Chart',
-        subtext: `X-axis: ${axisFields?.x || 'Category'}  |  Y-axis: ${axisFields?.y || 'Value'}`,
-        left: 'center',
-        top: 8,
-        textStyle: {
-            color: isDark ? '#f3f4f6' : '#111827',
-            fontSize: 16,
-            fontWeight: 700,
-        },
-        subtextStyle: {
-            color: isDark ? '#9ca3af' : '#475569',
-            fontSize: 11,
-        },
-    };
+    exportOption.title = undefined;
 
     if (exportOption.grid) {
         if (Array.isArray(exportOption.grid)) {
@@ -288,15 +396,13 @@ const buildExportReadyOption = ({ option, title, axisFields, isDark }) => {
     exportOption.series = series.map((seriesItem) => {
         if (!seriesItem || typeof seriesItem !== 'object') return seriesItem;
         const seriesType = String(seriesItem.type || '').toLowerCase();
-        const pointCount = Array.isArray(seriesItem.data) ? seriesItem.data.length : 0;
 
         if (seriesType === 'bar') {
-            const showLabels = pointCount <= 20;
             return {
                 ...seriesItem,
                 label: {
                     ...(seriesItem.label || {}),
-                    show: showLabels,
+                    show: true,
                     color: isDark ? '#e5e7eb' : '#0f172a',
                     position: horizontalBar ? 'insideRight' : 'top',
                     formatter: ({ value }) => formatCountLabel(value),
@@ -309,12 +415,11 @@ const buildExportReadyOption = ({ option, title, axisFields, isDark }) => {
         }
 
         if (seriesType === 'line') {
-            const showLabels = pointCount <= 18;
             return {
                 ...seriesItem,
                 label: {
                     ...(seriesItem.label || {}),
-                    show: showLabels,
+                    show: true,
                     color: isDark ? '#e5e7eb' : '#0f172a',
                     position: 'top',
                     formatter: ({ value }) => formatCountLabel(value),
@@ -327,12 +432,11 @@ const buildExportReadyOption = ({ option, title, axisFields, isDark }) => {
         }
 
         if (seriesType === 'pie') {
-            const showLabels = pointCount <= 14;
             return {
                 ...seriesItem,
                 label: {
                     ...(seriesItem.label || {}),
-                    show: showLabels,
+                    show: true,
                     color: isDark ? '#e5e7eb' : '#0f172a',
                     formatter: '{b}: {c} ({d}%)',
                     fontSize: 10,
@@ -365,6 +469,34 @@ const buildExportReadyOption = ({ option, title, axisFields, isDark }) => {
 
         return seriesItem;
     });
+
+    const hasPieSeries = series.some((s) => String(s?.type || '').toLowerCase() === 'pie');
+    if (hasPieSeries) {
+        exportOption.legend = {
+            ...(exportOption.legend || {}),
+            top: exportOption.legend?.top ?? 8,
+            left: exportOption.legend?.left ?? 'center',
+            orient: exportOption.legend?.orient || 'horizontal',
+            itemGap: exportOption.legend?.itemGap ?? 12,
+            padding: exportOption.legend?.padding ?? [0, 0, 6, 0],
+        };
+        exportOption.series = (Array.isArray(exportOption.series) ? exportOption.series : []).map((s) => {
+            if (String(s?.type || '').toLowerCase() !== 'pie') return s;
+
+            let nextRadius = s?.radius;
+            if (typeof nextRadius === 'string') {
+                nextRadius = '60%';
+            } else if (Array.isArray(nextRadius)) {
+                nextRadius = nextRadius.length >= 2 ? ['40%', '60%'] : nextRadius;
+            }
+
+            return {
+                ...s,
+                center: s?.center || ['50%', '68%'],
+                radius: nextRadius ?? s?.radius,
+            };
+        });
+    }
 
     return exportOption;
 };
@@ -446,7 +578,7 @@ const KpiCard = ({ title, value, hint, isDark }) => (
     </div>
 );
 
-const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras = null, renderExpandedControls = null }) => {
+const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras = null, renderExpandedControls = null, chartRef = null }) => {
     const [expanded, setExpanded] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [exportError, setExportError] = useState('');
@@ -578,6 +710,11 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
         }
     };
 
+    const labeledOption = useMemo(() => {
+        const withLabels = applyAlwaysOnLabels(option, isDark);
+        return applyAllCategoryLabels(withLabels, isDark);
+    }, [option, isDark]);
+
     return (
         <>
             <div className={`rounded-2xl border p-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
@@ -597,7 +734,14 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
                         Expand
                     </button>
                 </div>
-                <ReactECharts option={option} style={{ width: '100%', height }} notMerge lazyUpdate onEvents={onEvents} />
+                <ReactECharts
+                    ref={chartRef}
+                    option={labeledOption}
+                    style={{ width: '100%', height }}
+                    notMerge
+                    lazyUpdate
+                    onEvents={onEvents}
+                />
             </div>
 
             {expanded && (
@@ -617,6 +761,12 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
                                 </p>
                             </div>
                             <div className="flex items-center gap-2">
+                                {isExporting && (
+                                    <span
+                                        className={`inline-flex h-4 w-4 animate-spin rounded-full border-2 ${isDark ? 'border-gray-600 border-t-gray-200' : 'border-gray-300 border-t-gray-700'}`}
+                                        aria-label="Exporting"
+                                    />
+                                )}
                                 <button
                                     type="button"
                                     onClick={exportPng}
@@ -661,7 +811,7 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
 
                         <ReactECharts
                             ref={(ref) => setExpandedChartRef(ref)}
-                            option={option}
+                            option={labeledOption}
                             style={{ width: '100%', height: 'calc(92vh - 90px)' }}
                             notMerge
                             lazyUpdate
@@ -674,13 +824,14 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
     );
 };
 
-const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
+const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView = false }) => {
     const { id } = useParams();
     const { theme } = useTheme();
     const isDark = theme === 'dark';
 
     const session = sessionByTemplate?.[id] || null;
     const mapping = session?.mapping || null;
+    const mappingMissingFields = Array.isArray(session?.missingFields) ? session.missingFields : [];
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -692,6 +843,79 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
     const [orgSelectedPathNames, setOrgSelectedPathNames] = useState([]);
     const [orgSelectedNodeId, setOrgSelectedNodeId] = useState('');
     const [orgDepartmentFilter, setOrgDepartmentFilter] = useState('__all__');
+    const [exportAllLoading, setExportAllLoading] = useState(false);
+    const [exportAllError, setExportAllError] = useState('');
+    const [isSharingDashboard, setIsSharingDashboard] = useState(false);
+    const chartRefs = useRef(new Map());
+
+    const shareDashboard = useCallback(async () => {
+        if (isSharedView || isSharingDashboard) return;
+        if (!mapping || !Array.isArray(datasetData) || datasetData.length === 0) {
+            window.alert('Dashboard data is not ready to share yet.');
+            return;
+        }
+
+        setIsSharingDashboard(true);
+        try {
+            const payload = {
+                name: `HR Dashboard ${new Date().toLocaleString()}`,
+                pages: [{ id: 'hr-dashboard', name: 'HR Dashboard' }],
+                charts: [
+                    {
+                        id: 'hr-template-dashboard-snapshot',
+                        type: 'hr-template-dashboard',
+                        payload: {
+                            templateId: id || 'hr',
+                            mapping,
+                            missingFields: mappingMissingFields,
+                            datasetData,
+                        },
+                    },
+                ],
+                global_filters: [],
+                selected_dataset_id: null,
+                active_page_id: 'hr-dashboard',
+            };
+
+            const created = await backendApi.createReport(payload);
+            const reportId = String(created?.report?.id || '').trim();
+            if (!reportId) throw new Error('Unable to save dashboard snapshot for sharing');
+
+            const shareResponse = await backendApi.createReportShare(reportId, {
+                role: 'viewer',
+                expires_in_hours: 168,
+            });
+
+            const shareToken = String(shareResponse?.share?.token || '').trim();
+            if (!shareToken) throw new Error('Share token was not returned');
+
+            const basePathRaw = String(import.meta.env.BASE_URL || '/').trim() || '/';
+            const basePath = basePathRaw.endsWith('/') ? basePathRaw.slice(0, -1) : basePathRaw;
+            const sharePath = `${basePath}/templates/hr/dashboard/shared/${encodeURIComponent(reportId)}`.replace(/\/\/+/, '/');
+            const url = new URL(window.location.origin + sharePath);
+            url.searchParams.set('shareToken', shareToken);
+            const finalUrl = url.toString();
+
+            if (navigator?.clipboard?.writeText) {
+                await navigator.clipboard.writeText(finalUrl);
+                window.alert('HR dashboard share link copied to clipboard.');
+                return;
+            }
+
+            window.prompt('Copy your HR dashboard share link:', finalUrl);
+        } catch (error) {
+            window.alert(error?.message || 'Unable to generate HR dashboard share link.');
+        } finally {
+            setIsSharingDashboard(false);
+        }
+    }, [isSharedView, isSharingDashboard, mapping, datasetData, id, mappingMissingFields]);
+
+    const registerChartRef = useCallback((title, key = title) => (ref) => {
+        if (!title) return;
+        const mapKey = key || title;
+        if (ref) chartRefs.current.set(mapKey, { title, ref });
+        else chartRefs.current.delete(mapKey);
+    }, []);
 
     useEffect(() => {
         let mounted = true;
@@ -854,6 +1078,90 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
             setOrgSelectedNodeId(clickedId || ids[ids.length - 1] || '');
         },
     }), []);
+
+    const getChartImageFromRef = useCallback(async (ref, title) => {
+        const instance = ref?.getEchartsInstance?.();
+        if (!instance) return null;
+
+        const originalOption = instance.getOption();
+        const axisFields = CHART_AXIS_FIELDS[title] || { x: 'Category', y: 'Value' };
+        const exportOption = buildExportReadyOption({ option: originalOption, title, axisFields, isDark });
+
+        instance.setOption(exportOption, true);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        const width = instance.getWidth?.() || 1200;
+        const height = instance.getHeight?.() || 700;
+        const dataUrl = instance.getDataURL({
+            type: 'png',
+            pixelRatio: 2,
+            backgroundColor: isDark ? '#111827' : '#ffffff',
+        });
+
+        instance.setOption(originalOption, true);
+
+        return { title, axisFields, dataUrl, width, height };
+    }, [isDark]);
+
+    const exportAllPdf = useCallback(async () => {
+        setExportAllError('');
+        setExportAllLoading(true);
+
+        try {
+            const entries = Array.from(chartRefs.current.values());
+            const images = [];
+            for (const entry of entries) {
+                const { title, ref } = entry || {};
+                // eslint-disable-next-line no-await-in-loop
+                const image = await getChartImageFromRef(ref, title);
+                if (image) images.push(image);
+            }
+
+            if (images.length === 0) throw new Error('No charts available for export');
+
+            let pdf = null;
+
+            images.forEach((image, idx) => {
+                const orientation = image.width >= image.height ? 'landscape' : 'portrait';
+                if (!pdf) {
+                    pdf = new jsPDF({ orientation, unit: 'pt', format: 'a4' });
+                } else {
+                    pdf.addPage('a4', orientation);
+                }
+
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const margin = 24;
+                const headerY = 24;
+                const axisLine = `X-axis: ${image.axisFields.x} | Y-axis: ${image.axisFields.y}`;
+
+                pdf.setFontSize(14);
+                pdf.setTextColor(30, 41, 59);
+                pdf.text(String(image.title || 'Chart'), margin, headerY);
+                pdf.setFontSize(10);
+                pdf.setTextColor(71, 85, 105);
+                pdf.text(axisLine, margin, headerY + 16);
+                pdf.text(`Exported on: ${new Date().toLocaleString()}`, margin, headerY + 30);
+
+                const maxW = pageWidth - margin * 2;
+                const maxH = pageHeight - margin * 2 - 44;
+                const ratio = Math.min(maxW / image.width, maxH / image.height);
+                const renderWidth = image.width * ratio;
+                const renderHeight = image.height * ratio;
+                const x = (pageWidth - renderWidth) / 2;
+                const y = headerY + 44 + ((maxH - renderHeight) / 2);
+
+                pdf.addImage(image.dataUrl, 'PNG', x, y, renderWidth, renderHeight, undefined, 'FAST');
+            });
+
+            const fileName = `hr-analytics-charts-${new Date().toISOString().slice(0, 10)}.pdf`;
+            pdf?.save(fileName);
+        } catch (error) {
+            setExportAllError(error?.message || 'Failed to export all charts');
+        } finally {
+            setExportAllLoading(false);
+        }
+    }, [getChartImageFromRef]);
 
     const orgHeaderExtras = (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1108,11 +1416,52 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                     <h1>HR Analytics Dashboard</h1>
                     <p>Template-driven HR insights generated from mapped fields and dataset rows.</p>
                 </div>
-                <Link className="cv-btn cv-btn--ghost" to="/templates/hr/map">Back to Mapping</Link>
+                <div className="flex flex-wrap items-center gap-2">
+                    {!isSharedView && (
+                        <button
+                            type="button"
+                            onClick={shareDashboard}
+                            disabled={isSharingDashboard || loading || !!error}
+                            className={`cv-btn ${isSharingDashboard || loading || !!error ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                            {isSharingDashboard ? 'Preparing Share Link...' : 'Share Dashboard'}
+                        </button>
+                    )}
+                    {exportAllLoading && (
+                        <span
+                            className={`inline-flex h-4 w-4 animate-spin rounded-full border-2 ${isDark ? 'border-gray-600 border-t-gray-200' : 'border-gray-300 border-t-gray-700'}`}
+                            aria-label="Exporting"
+                        />
+                    )}
+                    <button
+                        type="button"
+                        onClick={exportAllPdf}
+                        disabled={exportAllLoading}
+                        className={`cv-btn ${exportAllLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    >
+                        Export All PDF
+                    </button>
+                    {!isSharedView && <Link className="cv-btn cv-btn--ghost" to="/templates/hr/map">Back to Mapping</Link>}
+                </div>
             </header>
+
+            {exportAllError && (
+                <div className="cv-validation-summary">
+                    <p>{exportAllError}</p>
+                </div>
+            )}
 
             {loading && <div className="cv-state-card">Generating HR analytics...</div>}
             {!loading && error && <div className="cv-validation-summary"><p>{error}</p></div>}
+
+            {!loading && !error && mappingMissingFields.length > 0 && (
+                <div className="cv-validation-summary">
+                    <p>
+                        Partial analysis mode: some template fields were not mapped ({mappingMissingFields.join(', ')}).
+                        Related analytics are not available for missing fields.
+                    </p>
+                </div>
+            )}
 
             {!loading && !error && hasValidationWarnings && (
                 <div className="cv-validation-summary">
@@ -1157,6 +1506,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Department Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Department Distribution')}
                             option={{
                                 ...chartBase(isDark),
                                 ...barOption(isDark, deptItems, COLORS[0]),
@@ -1166,6 +1516,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Gender Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Gender Distribution')}
                             option={{
                                 ...chartBase(isDark),
                                 ...pieOption(isDark, genderItems, true),
@@ -1175,6 +1526,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Business Unit Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Business Unit Distribution')}
                             option={{
                                 ...barOption(isDark, businessUnitItems, COLORS[1]),
                             }}
@@ -1183,6 +1535,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Location Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Location Distribution', 'summary-location-distribution')}
                             option={{
                                 ...barOption(isDark, locationItems, COLORS[2]),
                             }}
@@ -1191,6 +1544,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Workforce Category Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Workforce Category Distribution')}
                             option={{
                                 ...pieOption(isDark, workforceCategoryItems, true),
                             }}
@@ -1199,6 +1553,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Marital Status Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Marital Status Distribution')}
                             option={{
                                 ...pieOption(isDark, maritalStatusItems, true),
                             }}
@@ -1207,6 +1562,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Age Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Age Distribution')}
                             option={{
                                 ...barOption(isDark, ageItems, COLORS[2]),
                             }}
@@ -1215,6 +1571,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Monthly Hiring Trend"
                             isDark={isDark}
+                            chartRef={registerChartRef('Monthly Hiring Trend')}
                             option={{
                                 ...lineOption(isDark, monthlyHiring, COLORS[3]),
                             }}
@@ -1223,6 +1580,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Yearly Hiring Trend"
                             isDark={isDark}
+                            chartRef={registerChartRef('Yearly Hiring Trend')}
                             option={{
                                 ...barOption(isDark, yearlyHiring, COLORS[4]),
                             }}
@@ -1231,6 +1589,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Hiring by Department"
                             isDark={isDark}
+                            chartRef={registerChartRef('Hiring by Department')}
                             option={{
                                 ...barOption(isDark, hiringByDepartment, COLORS[5]),
                             }}
@@ -1239,6 +1598,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Hiring by Location"
                             isDark={isDark}
+                            chartRef={registerChartRef('Hiring by Location')}
                             option={{
                                 ...barOption(isDark, hiringByLocation, COLORS[6]),
                             }}
@@ -1247,6 +1607,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Gender by Department"
                             isDark={isDark}
+                            chartRef={registerChartRef('Gender by Department')}
                             option={{
                                 ...chartBase(isDark),
                                 legend: { top: 8, textStyle: { color: axisTextColor(isDark) } },
@@ -1259,6 +1620,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Nationality Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Nationality Distribution')}
                             option={{
                                 ...pieOption(isDark, nationalityItems),
                             }}
@@ -1267,14 +1629,16 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Demographic Location Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Demographic Location Distribution')}
                             option={{
                                 ...barOption(isDark, demographicLocationItems, COLORS[0]),
                             }}
                         />
 
                         <ChartCard
-                            title="Voluntary vs Involuntary"
+                            title="Voluntary vs Involuntary Exits"
                             isDark={isDark}
+                            chartRef={registerChartRef('Voluntary vs Involuntary Exits')}
                             option={{
                                 ...pieOption(isDark, voluntaryVsInvoluntary, true),
                             }}
@@ -1283,6 +1647,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Attrition by Department"
                             isDark={isDark}
+                            chartRef={registerChartRef('Attrition by Department')}
                             option={{
                                 ...chartBase(isDark),
                                 grid: { left: 40, right: 16, top: 20, bottom: 40, containLabel: true },
@@ -1299,6 +1664,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Exits by Manager"
                             isDark={isDark}
+                            chartRef={registerChartRef('Exits by Manager')}
                             option={{
                                 ...barOption(isDark, exitsByManager, COLORS[4], true),
                             }}
@@ -1307,6 +1673,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Top Exit Reasons"
                             isDark={isDark}
+                            chartRef={registerChartRef('Top Exit Reasons')}
                             option={{
                                 ...barOption(isDark, topExitReasons, COLORS[3], true),
                             }}
@@ -1315,6 +1682,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Attrition by Experience"
                             isDark={isDark}
+                            chartRef={registerChartRef('Attrition by Experience')}
                             option={{
                                 ...barOption(isDark, attritionByExperience, COLORS[2]),
                             }}
@@ -1323,6 +1691,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Experience Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Experience Distribution')}
                             option={{
                                 ...barOption(isDark, experienceDistribution, COLORS[1]),
                             }}
@@ -1331,6 +1700,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Senior vs Junior Ratio"
                             isDark={isDark}
+                            chartRef={registerChartRef('Senior vs Junior Ratio')}
                             option={{
                                 ...pieOption(isDark, seniorVsJuniorRatio, true),
                             }}
@@ -1340,6 +1710,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                             title="Organization Tree"
                             isDark={isDark}
                             height={420}
+                            chartRef={registerChartRef('Organization Tree')}
                             onEvents={orgChartEvents}
                             headerExtras={orgHeaderExtras}
                             renderExpandedControls={renderExpandedOrgControls}
@@ -1351,6 +1722,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Manager Team Size"
                             isDark={isDark}
+                            chartRef={registerChartRef('Manager Team Size')}
                             option={{
                                 ...barOption(isDark, managerTeamSize, COLORS[0], true),
                             }}
@@ -1359,6 +1731,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Payment Mode Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Payment Mode Distribution')}
                             option={{
                                 ...pieOption(isDark, paymentModeDistribution, true),
                             }}
@@ -1367,6 +1740,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Bank Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Bank Distribution')}
                             option={{
                                 ...barOption(isDark, bankDistribution, COLORS[5], true),
                             }}
@@ -1375,6 +1749,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Qualification Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Qualification Distribution')}
                             option={{
                                 ...barOption(isDark, qualificationDistribution, COLORS[1]),
                             }}
@@ -1383,6 +1758,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Specialization Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Specialization Distribution')}
                             option={{
                                 ...barOption(isDark, specializationDistribution, COLORS[2], true),
                             }}
@@ -1391,6 +1767,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Course Type Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Course Type Distribution')}
                             option={{
                                 ...pieOption(isDark, courseTypeDistribution, true),
                             }}
@@ -1399,6 +1776,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Location Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Location Distribution', 'detail-location-distribution')}
                             option={{
                                 ...barOption(isDark, locationDistribution, COLORS[0]),
                             }}
@@ -1407,6 +1785,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Transfer Trends"
                             isDark={isDark}
+                            chartRef={registerChartRef('Transfer Trends')}
                             option={{
                                 ...barOption(isDark, transferTrends, COLORS[3], true),
                             }}
@@ -1415,6 +1794,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Movement Reasons"
                             isDark={isDark}
+                            chartRef={registerChartRef('Movement Reasons')}
                             option={{
                                 ...barOption(isDark, movementReasons, COLORS[4], true),
                             }}
@@ -1423,6 +1803,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Headcount per Department"
                             isDark={isDark}
+                            chartRef={registerChartRef('Headcount per Department')}
                             option={{
                                 ...barOption(isDark, headcountPerDepartment, COLORS[1]),
                             }}
@@ -1431,6 +1812,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Attrition per Department"
                             isDark={isDark}
+                            chartRef={registerChartRef('Attrition per Department')}
                             option={{
                                 ...barOption(isDark, attritionPerDepartment, COLORS[4]),
                             }}
@@ -1439,6 +1821,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Lifecycle Duration (Months)"
                             isDark={isDark}
+                            chartRef={registerChartRef('Lifecycle Duration (Months)')}
                             option={{
                                 ...barOption(isDark, asArray(lifecycleDuration).slice(0, 50), COLORS[6], true),
                             }}
@@ -1447,6 +1830,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Null Distribution per Column"
                             isDark={isDark}
+                            chartRef={registerChartRef('Null Distribution per Column')}
                             option={{
                                 ...barOption(isDark, asArray(nullDistributionPerColumn).slice(0, 40), COLORS[4], true),
                             }}
@@ -1455,6 +1839,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [] }) => {
                         <ChartCard
                             title="Emergency Relationship Distribution"
                             isDark={isDark}
+                            chartRef={registerChartRef('Emergency Relationship Distribution')}
                             option={{
                                 ...pieOption(isDark, relationshipDistribution, true),
                             }}

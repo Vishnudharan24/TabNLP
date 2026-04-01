@@ -1,3 +1,5 @@
+import { buildOrgTree } from './chartConfigSystem';
+
 const ensureArray = (value, message) => {
     if (!Array.isArray(value)) throw new Error(message);
     return value;
@@ -187,12 +189,90 @@ const normalizeConfig = (config = {}) => {
 
     const measures = normalizeMeasureList(config.measures || []);
 
+    const normalizedHierarchy = Array.isArray(config.hierarchyFields)
+        ? config.hierarchyFields.filter(Boolean)
+        : [];
+
     return {
         ...config,
         chartType,
-        dimensionFields,
+        dimensionFields: (chartType === 'ORG_CHART' || chartType === 'ORG_TREE_STRUCTURED') && normalizedHierarchy.length > 0
+            ? normalizedHierarchy
+            : dimensionFields,
+        hierarchyFields: normalizedHierarchy,
         measures,
     };
+};
+
+const buildOrgHierarchy = (rows = [], hierarchyFields = [], options = {}) => {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const fields = Array.isArray(hierarchyFields) ? hierarchyFields.filter(Boolean) : [];
+    if (fields.length === 0) return [];
+
+    const labelField = options?.labelField ? String(options.labelField).trim() : '';
+    const colorField = options?.colorField ? String(options.colorField).trim() : '';
+    const nodeMeta = new Map();
+
+    const relations = new Map();
+    const rootCandidates = new Set();
+
+    safeRows.forEach((row) => {
+        if (!row || typeof row !== 'object') return;
+        for (let i = 0; i < fields.length; i += 1) {
+            const nodeRaw = row?.[fields[i]];
+            const node = nodeRaw === null || nodeRaw === undefined || String(nodeRaw).trim() === '' ? '' : String(nodeRaw).trim();
+            if (!node) continue;
+
+            const parentRaw = i === 0 ? null : row?.[fields[i - 1]];
+            const parentValue = parentRaw === null || parentRaw === undefined || String(parentRaw).trim() === '' ? null : String(parentRaw).trim();
+            const parent = parentValue === node ? null : parentValue;
+            const key = `${node}__${parent || ''}`;
+
+            if ((labelField || colorField) && !nodeMeta.has(node)) {
+                const labelRaw = labelField ? row?.[labelField] : null;
+                const colorRaw = colorField ? row?.[colorField] : null;
+                const label = labelRaw === null || labelRaw === undefined || String(labelRaw).trim() === ''
+                    ? null
+                    : String(labelRaw).trim();
+                const color = colorRaw === null || colorRaw === undefined || String(colorRaw).trim() === ''
+                    ? null
+                    : String(colorRaw).trim();
+                if (label || color) nodeMeta.set(node, { label, color });
+            }
+
+            if (!relations.has(key)) {
+                const meta = nodeMeta.get(node);
+                relations.set(key, {
+                    node,
+                    parent: parent || null,
+                    ...(meta?.label ? { label: meta.label } : {}),
+                    ...(meta?.color ? { color: meta.color } : {}),
+                });
+            }
+
+            if (!parent) {
+                rootCandidates.add(node);
+            }
+        }
+    });
+
+    if (rootCandidates.size > 1) {
+        const virtualRoot = 'All Entities';
+        const adjusted = new Map();
+        relations.forEach((rel) => {
+            if (!rel.parent && rootCandidates.has(rel.node)) {
+                const key = `${rel.node}__${virtualRoot}`;
+                adjusted.set(key, { ...rel, parent: virtualRoot });
+            } else {
+                const key = `${rel.node}__${rel.parent || ''}`;
+                adjusted.set(key, { ...rel, parent: rel.parent || null });
+            }
+        });
+        adjusted.set(`${virtualRoot}__`, { node: virtualRoot, parent: null });
+        return Array.from(adjusted.values());
+    }
+
+    return Array.from(relations.values());
 };
 
 export const adaptQueryResponse = (response, config = {}) => {
@@ -263,19 +343,60 @@ export const adaptQueryResponse = (response, config = {}) => {
     }
 
     if (isOrgChart) {
-        const treeIdx = getColumnIndex(columns, '__orgTree');
-        const metaIdx = columns.some((c) => String(c || '').toLowerCase() === '__orgmeta'.toLowerCase())
-            ? getColumnIndex(columns, '__orgMeta')
-            : -1;
+        const hasOrgTreeColumn = columns.some((c) => String(c || '').toLowerCase() === '__orgtree');
+        if (hasOrgTreeColumn) {
+            const treeIdx = getColumnIndex(columns, '__orgTree');
+            const metaIdx = columns.some((c) => String(c || '').toLowerCase() === '__orgmeta')
+                ? getColumnIndex(columns, '__orgMeta')
+                : -1;
 
-        const orgTree = rowMatrix?.[0]?.[treeIdx];
-        const orgMeta = metaIdx >= 0 ? rowMatrix?.[0]?.[metaIdx] : null;
+            const orgTree = rowMatrix?.[0]?.[treeIdx];
+            const orgMeta = metaIdx >= 0 ? rowMatrix?.[0]?.[metaIdx] : null;
+
+            const adaptedRows = [
+                {
+                    name: 'Organization',
+                    __orgTree: orgTree || null,
+                    __orgMeta: orgMeta || null,
+                },
+            ];
+
+            return {
+                columns: [...columns],
+                rows: adaptedRows,
+                records,
+                transformed: {
+                    orgTree,
+                    orgMeta,
+                },
+                meta: response?.meta || {},
+            };
+        }
+
+        const hierarchyFields = normalizedConfig.hierarchyFields || normalizedConfig.dimensionFields || [];
+        const relations = buildOrgHierarchy(records, hierarchyFields, {
+            labelField: normalizedConfig?.labelField,
+            colorField: normalizedConfig?.colorField,
+        });
+        const treeInput = relations.map((rel) => ({
+            node: rel.node,
+            parent: rel.parent,
+            ...(rel.label ? { __label: rel.label } : {}),
+            ...(rel.color ? { __color: rel.color } : {}),
+        }));
+        const { treeData, meta } = buildOrgTree(
+            treeInput,
+            'node',
+            'parent',
+            normalizedConfig?.labelField ? '__label' : undefined,
+            normalizedConfig?.colorField ? '__color' : undefined
+        );
 
         const adaptedRows = [
             {
                 name: 'Organization',
-                __orgTree: orgTree || null,
-                __orgMeta: orgMeta || null,
+                __orgTree: treeData,
+                __orgMeta: meta || null,
             },
         ];
 
@@ -284,8 +405,8 @@ export const adaptQueryResponse = (response, config = {}) => {
             rows: adaptedRows,
             records,
             transformed: {
-                orgTree,
-                orgMeta,
+                orgTree: treeData,
+                orgMeta: meta || null,
             },
             meta: response?.meta || {},
         };
