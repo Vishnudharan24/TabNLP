@@ -181,6 +181,8 @@ def build_org_tree(rows: list[dict], node_field: str, parent_field: str, label_f
         if not node_id:
             continue
         parent_id = str(row.get(parent_field, "")).strip() or None
+        if parent_id == node_id:
+            parent_id = None
         label = str(row.get(label_field, node_id)).strip() if label_field else node_id
         color_value = str(row.get(color_field, "")).strip() if color_field else ""
 
@@ -199,10 +201,25 @@ def build_org_tree(rows: list[dict], node_field: str, parent_field: str, label_f
         }
         children[parent_id].append(node_id)
 
-    def build(node_id: str):
+    def build(node_id: str, path: set[str] | None = None):
+        if path is None:
+            path = set()
+        if node_id in path:
+            base = dict(nodes[node_id])
+            base["children"] = []
+            base["directReports"] = 0
+            base["teamSize"] = 1
+            base["meta"] = {
+                **(base.get("meta") or {}),
+                "cycleDetected": True,
+            }
+            return base
+
+        next_path = set(path)
+        next_path.add(node_id)
         base = dict(nodes[node_id])
         child_ids = children.get(node_id, [])
-        built_children = [build(cid) for cid in child_ids if cid in nodes]
+        built_children = [build(cid, next_path) for cid in child_ids if cid in nodes]
         base["children"] = built_children
         base["directReports"] = len(built_children)
         base["teamSize"] = 1 + sum(int(c.get("teamSize", 1)) for c in built_children)

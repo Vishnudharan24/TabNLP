@@ -49,10 +49,18 @@ from db.db_store import (
     list_latest_datasets,
     get_latest_dataset_by_source,
     get_dataset_by_id,
+    get_dataset_for_query,
+    store_dataset,
     create_user,
     get_user_by_email,
     get_user_by_id,
     update_user_last_login,
+    create_report,
+    get_report_by_id,
+    update_report,
+    create_report_share,
+    get_active_report_share,
+    mark_report_share_accessed,
     list_relationships,
     upsert_relationship,
 )
@@ -206,6 +214,38 @@ class SemanticMeasureUpdateRequest(BaseModel):
     expression: str
 
 
+class ReportCreateRequest(BaseModel):
+    name: Optional[str] = "Untitled Report"
+    pages: list[dict[str, Any]] = []
+    charts: list[dict[str, Any]] = []
+    global_filters: list[dict[str, Any]] = []
+    selected_dataset_id: Optional[str] = None
+    active_page_id: Optional[str] = None
+
+
+class ReportUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    pages: Optional[list[dict[str, Any]]] = None
+    charts: Optional[list[dict[str, Any]]] = None
+    global_filters: Optional[list[dict[str, Any]]] = None
+    selected_dataset_id: Optional[str] = None
+    active_page_id: Optional[str] = None
+
+
+class ReportShareCreateRequest(BaseModel):
+    role: Literal["viewer"] = "viewer"
+    expires_in_hours: Optional[int] = 24
+
+
+class DatasetMergeRequest(BaseModel):
+    left_dataset_id: str
+    right_dataset_id: str
+    join_type: Literal["inner", "left", "right", "full", "append"]
+    left_key: Optional[str] = None
+    right_key: Optional[str] = None
+    merged_name: Optional[str] = None
+
+
 def _serialize_source_config(source_config: dict):
     if not source_config:
         return None
@@ -313,6 +353,14 @@ def _create_access_token(user_id: str, email: str):
     return f"{header_b64}.{payload_b64}.{signature_b64}"
 
 
+def _create_share_token() -> str:
+    return _base64url_encode(os.urandom(32))
+
+
+def _hash_share_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
 def _decode_access_token(token: str):
     parts = token.split(".")
     payload = None
@@ -384,6 +432,171 @@ def _raise_internal_error(public_message: str, exc: Exception):
     raise HTTPException(status_code=500, detail=public_message)
 
 
+def _serialize_report(report_doc: dict[str, Any]):
+    if not report_doc:
+        return None
+    return _to_json_safe({
+        "id": str(report_doc.get("_id")),
+        "owner_user_id": report_doc.get("owner_user_id"),
+        "name": report_doc.get("name") or "Untitled Report",
+        "pages": report_doc.get("pages") or [],
+        "charts": report_doc.get("charts") or [],
+        "global_filters": report_doc.get("global_filters") or [],
+        "selected_dataset_id": report_doc.get("selected_dataset_id"),
+        "active_page_id": report_doc.get("active_page_id"),
+        "created_at": report_doc.get("created_at"),
+        "updated_at": report_doc.get("updated_at"),
+    })
+
+
+def _slugify(text: str) -> str:
+    safe = ''.join(ch.lower() if ch.isalnum() else '-' for ch in (text or ''))
+    while '--' in safe:
+        safe = safe.replace('--', '-')
+    return safe.strip('-') or 'merged-dataset'
+
+
+def _classify_declared_type(series: pd.Series) -> str:
+    if pd.api.types.is_numeric_dtype(series):
+        return "number"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "date"
+    if pd.api.types.is_bool_dtype(series):
+        return "boolean"
+    return "string"
+
+
+def _infer_semantic_type(column_name: str, series: pd.Series) -> str:
+    sample = [v for v in series.dropna().tolist() if str(v).strip() != ""]
+    sample = sample[:500]
+    if not sample:
+        return "categorical"
+
+    lowered = str(column_name or "").strip().lower()
+    if (
+        lowered == "id"
+        or "_id" in lowered
+        or "identifier" in lowered
+        or "uuid" in lowered
+        or "code" in lowered
+        or "sku" in lowered
+    ):
+        return "id"
+
+    unique_ratio = len({str(v) for v in sample}) / max(1, len(sample))
+    if unique_ratio >= 0.98:
+        return "id"
+
+    declared = _classify_declared_type(series)
+    if declared == "number":
+        return "numeric"
+    if declared == "date":
+        return "date"
+    return "categorical"
+
+
+@app.post("/datasets/merge")
+async def merge_datasets(payload: DatasetMergeRequest, current_user: dict = Depends(_require_current_user)):
+    try:
+        left_id = (payload.left_dataset_id or "").strip()
+        right_id = (payload.right_dataset_id or "").strip()
+        if not left_id or not right_id:
+            raise HTTPException(status_code=400, detail="Both left_dataset_id and right_dataset_id are required")
+        if left_id == right_id:
+            raise HTTPException(status_code=400, detail="Select two different datasets to merge")
+
+        left_doc = await get_dataset_for_query(left_id)
+        right_doc = await get_dataset_for_query(right_id)
+        if not left_doc:
+            raise HTTPException(status_code=404, detail=f"Left dataset not found: {left_id}")
+        if not right_doc:
+            raise HTTPException(status_code=404, detail=f"Right dataset not found: {right_id}")
+
+        left_rows = left_doc.get("data") if isinstance(left_doc.get("data"), list) else []
+        right_rows = right_doc.get("data") if isinstance(right_doc.get("data"), list) else []
+        left_df = pd.DataFrame(left_rows)
+        right_df = pd.DataFrame(right_rows)
+
+        join_type = payload.join_type
+        left_key = (payload.left_key or "").strip()
+        right_key = (payload.right_key or "").strip()
+
+        if join_type != "append":
+            if not left_key or not right_key:
+                raise HTTPException(status_code=400, detail="left_key and right_key are required for join merge")
+            if left_key not in left_df.columns:
+                raise HTTPException(status_code=400, detail=f"Left key not found in dataset: {left_key}")
+            if right_key not in right_df.columns:
+                raise HTTPException(status_code=400, detail=f"Right key not found in dataset: {right_key}")
+
+        if join_type == "append":
+            merged_df = pd.concat([left_df, right_df], ignore_index=True, sort=False)
+        else:
+            join_map = {
+                "inner": "inner",
+                "left": "left",
+                "right": "right",
+                "full": "outer",
+            }
+            merged_df = pd.merge(
+                left_df,
+                right_df,
+                how=join_map[join_type],
+                left_on=left_key,
+                right_on=right_key,
+                suffixes=("", "_right"),
+            )
+            if right_key != left_key and right_key in merged_df.columns:
+                merged_df = merged_df.drop(columns=[right_key])
+
+        merged_df = merged_df.where(pd.notnull(merged_df), None)
+
+        raw_name = (payload.merged_name or "").strip()
+        default_name = f"{left_doc.get('source_key', 'left')} + {right_doc.get('source_key', 'right')}"
+        merged_name = raw_name or default_name
+
+        metadata = {
+            "source": f"merge://{left_id}+{right_id}",
+            "source_type": "merge",
+            "timestamp": datetime.now(timezone.utc),
+            "row_count": int(len(merged_df.index)),
+            "columns": list(merged_df.columns),
+            "column_types": {column: _classify_declared_type(merged_df[column]) for column in merged_df.columns},
+            "column_semantic_types": {column: _infer_semantic_type(column, merged_df[column]) for column in merged_df.columns},
+            "relationships": [],
+            "file_name": merged_name,
+            "source_details": {
+                "source_type": "merge",
+                "left_dataset_id": left_id,
+                "right_dataset_id": right_id,
+                "left_source_key": left_doc.get("source_key"),
+                "right_source_key": right_doc.get("source_key"),
+                "join_type": join_type,
+                "left_key": left_key or None,
+                "right_key": right_key or None,
+                "created_by": {
+                    "id": str(current_user.get("_id")),
+                    "name": current_user.get("name"),
+                    "email": current_user.get("email"),
+                },
+            },
+        }
+
+        source_id = f"merged::{str(current_user.get('_id'))}::{_slugify(merged_name)}"
+        storage_result = await store_dataset(metadata, merged_df, source_id=source_id)
+        stored_doc = await get_dataset_by_id(storage_result["document_id"])
+
+        return {
+            "status": "success",
+            "message": "Datasets merged and stored successfully",
+            "item": _serialize_dataset(stored_doc),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to merge and store dataset", e)
+
+
 @app.post("/auth/signup")
 async def auth_signup(payload: SignUpRequest):
     try:
@@ -451,6 +664,173 @@ async def auth_me(current_user: dict = Depends(_require_current_user)):
         raise
     except Exception as e:
         _raise_internal_error("Authentication check failed", e)
+
+
+@app.post("/reports")
+async def create_report_endpoint(payload: ReportCreateRequest, current_user: dict = Depends(_require_current_user)):
+    try:
+        owner_user_id = str(current_user.get("_id"))
+        report_doc = await create_report(
+            owner_user_id=owner_user_id,
+            name=(payload.name or "Untitled Report").strip() or "Untitled Report",
+            pages=payload.pages or [],
+            charts=payload.charts or [],
+            global_filters=payload.global_filters or [],
+            selected_dataset_id=payload.selected_dataset_id,
+            active_page_id=payload.active_page_id,
+        )
+
+        return {
+            "status": "success",
+            "report": _serialize_report(report_doc),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to create report", e)
+
+
+@app.put("/reports/{report_id}")
+async def update_report_endpoint(report_id: str, payload: ReportUpdateRequest, current_user: dict = Depends(_require_current_user)):
+    try:
+        owner_user_id = str(current_user.get("_id"))
+        updates = {
+            key: value
+            for key, value in {
+                "name": payload.name,
+                "pages": payload.pages,
+                "charts": payload.charts,
+                "global_filters": payload.global_filters,
+                "selected_dataset_id": payload.selected_dataset_id,
+                "active_page_id": payload.active_page_id,
+            }.items()
+            if value is not None
+        }
+
+        updated = await update_report(report_id=report_id, owner_user_id=owner_user_id, updates=updates)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Report not found or access denied")
+
+        return {
+            "status": "success",
+            "report": _serialize_report(updated),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to update report", e)
+
+
+@app.get("/reports/{report_id}")
+async def get_report_endpoint(report_id: str, current_user: dict = Depends(_require_current_user)):
+    try:
+        report_doc = await get_report_by_id(report_id)
+        if not report_doc:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        owner_user_id = str(current_user.get("_id"))
+        if report_doc.get("owner_user_id") != owner_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        return {
+            "status": "success",
+            "report": _serialize_report(report_doc),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to fetch report", e)
+
+
+@app.post("/reports/{report_id}/shares")
+async def create_report_share_endpoint(
+    report_id: str,
+    payload: ReportShareCreateRequest,
+    request: Request,
+    current_user: dict = Depends(_require_current_user),
+):
+    try:
+        report_doc = await get_report_by_id(report_id)
+        if not report_doc:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        owner_user_id = str(current_user.get("_id"))
+        if report_doc.get("owner_user_id") != owner_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        expires_in_hours = payload.expires_in_hours if payload.expires_in_hours is not None else 168
+        if expires_in_hours <= 0:
+            raise HTTPException(status_code=400, detail="expires_in_hours must be a positive integer")
+
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=int(expires_in_hours))
+        share_token = _create_share_token()
+        token_hash = _hash_share_token(share_token)
+
+        share_doc = await create_report_share(
+            report_id=report_id,
+            token_hash=token_hash,
+            role=payload.role,
+            expires_at=expires_at,
+            created_by=owner_user_id,
+            created_ip=(request.client.host if request and request.client else None),
+        )
+        if not share_doc:
+            raise HTTPException(status_code=400, detail="Invalid report id")
+
+        return {
+            "status": "success",
+            "share": {
+                "report_id": report_id,
+                "role": payload.role,
+                "expires_at": expires_at,
+                "token": share_token,
+                "share_url": f"{request.base_url}report/{report_id}?shareToken={share_token}",
+            },
+        }
+    except HTTPException:
+        raise
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="Share token collision. Retry request")
+    except Exception as e:
+        _raise_internal_error("Failed to create report share", e)
+
+
+@app.get("/shared-reports/{report_id}")
+async def get_shared_report_endpoint(report_id: str, shareToken: str, request: Request):
+    try:
+        if not shareToken:
+            raise HTTPException(status_code=400, detail="shareToken is required")
+
+        token_hash = _hash_share_token(shareToken)
+        share_doc = await get_active_report_share(report_id=report_id, token_hash=token_hash)
+        if not share_doc:
+            raise HTTPException(status_code=404, detail="Shared report not found or link expired")
+        if (share_doc.get("role") or "viewer") != "viewer":
+            raise HTTPException(status_code=403, detail="Only viewer role is supported for shared reports")
+
+        report_doc = await get_report_by_id(report_id)
+        if not report_doc:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        await mark_report_share_accessed(
+            str(share_doc.get("_id")),
+            accessed_ip=(request.client.host if request and request.client else None),
+        )
+
+        serialized = _serialize_report(report_doc)
+        if serialized:
+            serialized.pop("owner_user_id", None)
+
+        return {
+            "status": "success",
+            "mode": "shared-viewer",
+            "role": share_doc.get("role") or "viewer",
+            "report": serialized,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to fetch shared report", e)
 
 
 @app.on_event("startup")

@@ -20,6 +20,8 @@ source_config_collection = db["source_config"]
 version_counters_collection = db["dataset_version_counters"]
 users_collection = db["users"]
 relationships_collection = db["relationships"]
+reports_collection = db["reports"]
+report_shares_collection = db["report_shares"]
 
 _indexes_initialized = False
 
@@ -60,6 +62,20 @@ async def ensure_indexes():
     await relationships_collection.create_index(
         [("from_table", 1)],
         name="relationships_from_table_idx",
+    )
+    await reports_collection.create_index(
+        [("owner_user_id", 1), ("updated_at", -1)],
+        name="reports_owner_updated_idx",
+    )
+    await report_shares_collection.create_index(
+        [("report_id", 1), ("token_hash", 1)],
+        unique=True,
+        name="report_shares_report_token_unique",
+    )
+    await report_shares_collection.create_index(
+        [("expires_at", 1)],
+        expireAfterSeconds=0,
+        name="report_shares_expires_ttl",
     )
 
     _indexes_initialized = True
@@ -299,6 +315,126 @@ async def update_user_last_login(user_id: str):
     result = await users_collection.update_one(
         {"_id": ObjectId(user_id)},
         {"$set": {"last_login_at": datetime.now(timezone.utc)}},
+    )
+    return {
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+    }
+
+
+async def create_report(
+    owner_user_id: str,
+    name: str,
+    pages: list[dict],
+    charts: list[dict],
+    global_filters: list[dict],
+    selected_dataset_id: str | None,
+    active_page_id: str | None,
+):
+    now = datetime.now(timezone.utc)
+    document = {
+        "owner_user_id": owner_user_id,
+        "name": name,
+        "pages": pages,
+        "charts": charts,
+        "global_filters": global_filters,
+        "selected_dataset_id": selected_dataset_id,
+        "active_page_id": active_page_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await reports_collection.insert_one(document)
+    document["_id"] = result.inserted_id
+    return document
+
+
+async def get_report_by_id(report_id: str):
+    if not ObjectId.is_valid(report_id):
+        return None
+    return await reports_collection.find_one({"_id": ObjectId(report_id)})
+
+
+async def update_report(
+    report_id: str,
+    owner_user_id: str,
+    updates: dict,
+):
+    if not ObjectId.is_valid(report_id):
+        return None
+
+    safe_updates = {k: v for k, v in (updates or {}).items() if k in {
+        "name",
+        "pages",
+        "charts",
+        "global_filters",
+        "selected_dataset_id",
+        "active_page_id",
+    }}
+    if not safe_updates:
+        safe_updates = {}
+    safe_updates["updated_at"] = datetime.now(timezone.utc)
+
+    return await reports_collection.find_one_and_update(
+        {
+            "_id": ObjectId(report_id),
+            "owner_user_id": owner_user_id,
+        },
+        {"$set": safe_updates},
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+async def create_report_share(
+    report_id: str,
+    token_hash: str,
+    role: str,
+    expires_at,
+    created_by: str,
+    created_ip: str | None = None,
+):
+    if not ObjectId.is_valid(report_id):
+        return None
+
+    now = datetime.now(timezone.utc)
+    document = {
+        "report_id": report_id,
+        "token_hash": token_hash,
+        "role": role,
+        "expires_at": expires_at,
+        "revoked": False,
+        "created_by": created_by,
+        "created_ip": created_ip,
+        "created_at": now,
+        "accessed_at": None,
+        "accessed_ip": None,
+    }
+    result = await report_shares_collection.insert_one(document)
+    document["_id"] = result.inserted_id
+    return document
+
+
+async def get_active_report_share(report_id: str, token_hash: str):
+    now = datetime.now(timezone.utc)
+    return await report_shares_collection.find_one(
+        {
+            "report_id": report_id,
+            "token_hash": token_hash,
+            "revoked": {"$ne": True},
+            "$or": [
+                {"expires_at": None},
+                {"expires_at": {"$gt": now}},
+            ],
+        }
+    )
+
+
+async def mark_report_share_accessed(share_id: str, accessed_ip: str | None = None):
+    if not ObjectId.is_valid(share_id):
+        return {"matched_count": 0, "modified_count": 0}
+
+    result = await report_shares_collection.update_one(
+        {"_id": ObjectId(share_id)},
+        {"$set": {"accessed_at": datetime.now(timezone.utc), "accessed_ip": accessed_ip}},
     )
     return {
         "matched_count": result.matched_count,

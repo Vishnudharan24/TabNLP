@@ -154,6 +154,32 @@ def _contains(text: str, *parts: str) -> bool:
     return any(part in lower for part in parts)
 
 
+def _active_status_from_row(row: dict[str, Any], mapping: dict[str, str]) -> str:
+    mapped_value = _row_get(
+        row,
+        mapping,
+        "Active_Status",
+        "active_status",
+        "Active Status",
+        "activeStatus",
+    )
+    if not _is_blank(mapped_value):
+        return _to_text(mapped_value)
+
+    for key in ("active_status", "Active_Status", "activeStatus", "Active Status"):
+        if key in row and not _is_blank(row.get(key)):
+            return _to_text(row.get(key))
+    return ""
+
+
+def _is_active_status(value: Any) -> bool:
+    return _normalize(value) == "active"
+
+
+def _is_inactive_status(value: Any) -> bool:
+    return _normalize(value) == "inactive"
+
+
 def _status_from_row(row: dict[str, Any], columns: dict[str, str]) -> str:
     status_value = _to_text(_row_get(row, columns, "Employment_Status", "Employment Status", "Status", "Employee_Status", "Employee Status"))
     resignation_date = _to_datetime(_row_get(row, columns, "Date_of_Resignation", "Resignation_Date", "Exit_Date"))
@@ -217,6 +243,7 @@ def _build_record(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any
     normalized_experience_months = (normalized_experience_years * 12) if normalized_experience_years is not None else None
 
     employee_id = _to_text(_row_get(row, mapping, "Employee_ID", "Employee ID", "EmpID", "EmployeeCode"))
+    active_status_raw = _active_status_from_row(row, mapping)
     employment_status_raw = _to_text(_row_get(row, mapping, "Employment_Status", "Employment Status", "Status", "Employee_Status", "Employee Status"))
     department = _to_text(_row_get(row, mapping, "Department", "Dept")) or "Unknown"
     location = _to_text(_row_get(row, mapping, "Location", "Office_Location", "Work_Location")) or "Unknown"
@@ -230,6 +257,7 @@ def _build_record(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any
 
     return {
         "employee_id": employee_id,
+        "active_status_raw": active_status_raw,
         "employment_status_raw": employment_status_raw,
         "department": department,
         "business_unit": _to_text(_row_get(row, mapping, "Business_Unit", "Business Unit", "BU")) or "Unknown",
@@ -324,6 +352,7 @@ def validate_mapping(data: list[dict[str, Any]], mapping: dict[str, str]) -> dic
 
     expected = {
         "Employee_ID": "string",
+        "Active_Status": "string",
         "Department": "string",
         "Date_of_Joining": "date",
         "Date_of_Resignation": "date",
@@ -364,16 +393,8 @@ def validate_mapping(data: list[dict[str, Any]], mapping: dict[str, str]) -> dic
 def workforce_overview(prepared: dict[str, Any]) -> dict[str, Any]:
     records = prepared["records"]
     total = sum(1 for r in records if _to_text(r.get("employee_id")))
-    active = sum(
-        1
-        for r in records
-        if (
-            _normalize(r.get("employment_status_raw")) == "active"
-            or (_is_blank(r.get("employment_status_raw")) and r.get("status") == "active")
-        )
-    )
-    active = min(active, total)
-    inactive = total - active
+    active = sum(1 for r in records if _is_active_status(r.get("active_status_raw")))
+    inactive = sum(1 for r in records if _is_inactive_status(r.get("active_status_raw")))
 
     headcount_by_department = _group_count(records, lambda r: r["department"])
     headcount_by_business_unit = _group_count(records, lambda r: r["business_unit"])
