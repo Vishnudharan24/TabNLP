@@ -133,9 +133,9 @@ const RelationshipDiagram = ({ datasets, companies }) => {
     };
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div data-tour="relationships-root" className="flex-1 flex flex-col overflow-hidden">
             {/* Header */}
-            <div className={`px-6 py-4 flex items-center justify-between shrink-0 border-b ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+            <div data-tour="relationships-header" className={`px-6 py-4 flex items-center justify-between shrink-0 border-b ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                 <div>
                     <div className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                         <GitBranch size={12} />
@@ -154,7 +154,7 @@ const RelationshipDiagram = ({ datasets, companies }) => {
             </div>
 
             {/* Diagram */}
-            <div className="flex-1 p-6">
+            <div data-tour="relationships-diagram" className="flex-1 p-6">
                 {datasets.length < 2 ? (
                     <div className="h-full flex flex-col items-center justify-center">
                         <GitBranch size={48} className={`mb-4 ${isDark ? 'text-gray-600' : 'text-gray-300'}`} />

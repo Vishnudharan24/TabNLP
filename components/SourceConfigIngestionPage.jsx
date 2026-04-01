@@ -208,8 +208,8 @@ const SourceConfigIngestionPage = ({
     };
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-10 pt-10 pb-6 shrink-0">
+        <div data-tour="source-config-root" className="flex-1 flex flex-col overflow-hidden">
+            <div data-tour="source-config-header" className="px-10 pt-10 pb-6 shrink-0">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="space-y-2">
                         <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -226,6 +226,7 @@ const SourceConfigIngestionPage = ({
 
                     <div className="flex items-center gap-3">
                         <button
+                            data-tour="source-config-refresh"
                             onClick={fetchSourceConfigs}
                             disabled={isLoadingConfigs}
                             className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all flex items-center gap-2 ${isDark ? 'bg-gray-800 border-gray-600 text-gray-200 hover:bg-gray-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
@@ -234,6 +235,7 @@ const SourceConfigIngestionPage = ({
                             Refresh Configs
                         </button>
                         <button
+                            data-tour="source-config-save"
                             onClick={handleSaveConfig}
                             disabled={isSaving}
                             className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${isDark ? 'bg-gray-200 text-gray-900 hover:bg-gray-300' : 'bg-gray-900 text-white hover:bg-black'} disabled:opacity-60`}
@@ -242,6 +244,7 @@ const SourceConfigIngestionPage = ({
                             {isSaving ? 'Saving...' : 'Save Config'}
                         </button>
                         <button
+                            data-tour="source-config-ingest"
                             onClick={() => handleIngest()}
                             disabled={Boolean(ingestingSourceId)}
                             className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${isDark ? 'bg-emerald-300 text-gray-900 hover:bg-emerald-200' : 'bg-emerald-600 text-white hover:bg-emerald-700'} disabled:opacity-60`}
@@ -253,7 +256,7 @@ const SourceConfigIngestionPage = ({
                 </div>
             </div>
 
-            <div className="px-10 pb-6 shrink-0">
+            <div data-tour="source-config-type-toggle" className="px-10 pb-6 shrink-0">
                 <div className={`rounded-2xl border p-2 inline-flex ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                     <button
                         onClick={() => setActiveType('api')}

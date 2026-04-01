@@ -649,10 +649,11 @@ const OrgChartPage = ({
     }
 
     return (
-        <div className={`flex flex-col h-screen ${isDark ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-900'}`}>
-            <div className={`flex items-center justify-between p-3 border-b ${isDark ? 'border-gray-800' : 'border-gray-200 bg-white'}`}>
+        <div data-tour="orgchart-root" className={`flex flex-col h-full ${isDark ? 'bg-gray-950 text-white' : 'bg-gray-50 text-gray-900'}`}>
+            <div data-tour="orgchart-header" className={`flex items-center justify-between p-3 border-b ${isDark ? 'border-gray-800' : 'border-gray-200 bg-white'}`}>
                 <div className="flex items-center gap-3">
                     <button
+                        data-tour="orgchart-back"
                         onClick={onBack}
                         className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border ${isDark ? 'border-gray-700 text-gray-200 hover:bg-gray-800' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}
                     >
@@ -690,7 +691,7 @@ const OrgChartPage = ({
                 </div>
             </div>
 
-            <div className={`flex items-center gap-3 p-3 border-b ${isDark ? 'border-gray-800' : 'border-gray-200 bg-white'}`}>
+            <div data-tour="orgchart-filters" className={`flex items-center gap-3 p-3 border-b ${isDark ? 'border-gray-800' : 'border-gray-200 bg-white'}`}>
                 <div className="relative">
                     <Search size={14} className={`absolute left-2.5 top-1/2 -translate-y-1/2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
                     <input
@@ -764,7 +765,7 @@ const OrgChartPage = ({
                     </select>
                 )}
 
-                <div className="ml-auto flex items-center gap-2">
+                <div data-tour="orgchart-zoom-controls" className="ml-auto flex items-center gap-2">
                     <button onClick={() => runZoom(1.15)} className={`p-2 rounded-md border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`} title="Zoom in"><ZoomIn size={14} /></button>
                     <button onClick={() => runZoom(0.87)} className={`p-2 rounded-md border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`} title="Zoom out"><ZoomOut size={14} /></button>
                     <button onClick={handleReset} className={`p-2 rounded-md border ${isDark ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`} title="Reset view"><RotateCcw size={14} /></button>
@@ -772,7 +773,7 @@ const OrgChartPage = ({
                 </div>
             </div>
 
-            <div className="flex-1 relative">
+            <div data-tour="orgchart-canvas" className="flex-1 relative">
                 <ReactECharts
                     key={chartRenderKey}
                     option={option}

@@ -12,8 +12,8 @@ const TemplateList = ({ templates = [], isLoading = false }) => {
     };
 
     return (
-        <section className={`cv-template-page ${theme === 'dark' ? 'cv-template-page--dark' : ''}`}>
-            <header className="cv-template-page__header">
+        <section data-tour="templates-list-root" className={`cv-template-page ${theme === 'dark' ? 'cv-template-page--dark' : ''}`}>
+            <header data-tour="templates-list-header" className="cv-template-page__header">
                 <h1>ChillAnalytics Templates</h1>
                 <p>Choose a ready-to-use analytics template to accelerate dashboard creation.</p>
             </header>
@@ -27,7 +27,7 @@ const TemplateList = ({ templates = [], isLoading = false }) => {
             )}
 
             {!isLoading && templates.length > 0 && (
-                <div className="cv-template-grid">
+                <div data-tour="templates-list-grid" className="cv-template-grid">
                     {templates.map((template) => (
                         <TemplateCard
                             key={template.id}

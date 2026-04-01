@@ -158,9 +158,9 @@ const DataSourceView = ({
     };
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div data-tour="datahub-root" className="flex-1 flex flex-col overflow-hidden">
             {/* ─── Top Header ─── */}
-            <div className={`px-10 pt-10 pb-6 shrink-0`}>
+            <div data-tour="datahub-header" className={`px-10 pt-10 pb-6 shrink-0`}>
                 <div className="flex justify-between items-end">
                     <div className="space-y-2">
                         <div className={`flex items-center gap-3 w-fit px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] ${isDark ? 'text-gray-300 bg-gray-700' : 'text-gray-600 bg-gray-100'}`}>
@@ -174,12 +174,13 @@ const DataSourceView = ({
                     </div>
                     <div className="flex items-center gap-3">
                         {datasets.length >= 2 && (
-                            <button onClick={onOpenMerge} className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold border transition-all shadow-sm active:scale-95 ${isDark ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
+                            <button data-tour="datahub-merge-btn" onClick={onOpenMerge} className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold border transition-all shadow-sm active:scale-95 ${isDark ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
                                 <Merge size={20} />
                                 <span>Merge Datasets</span>
                             </button>
                         )}
                         <button
+                            data-tour="datahub-upload-btn"
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isUploading}
                             className={`flex items-center gap-3 px-8 py-4 rounded-2xl font-bold transition-all shadow-lg active:scale-95 disabled:opacity-50 ${isDark ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}
@@ -197,7 +198,7 @@ const DataSourceView = ({
             </div>
 
             {/* ─── Company Tabs ─── */}
-            <div className={`px-10 shrink-0 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+            <div data-tour="datahub-company-tabs" className={`px-10 shrink-0 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
                 <div className="flex items-center gap-1 overflow-x-auto pb-0 -mb-px">
                     {/* All tab */}
                     <CompanyTab
@@ -303,7 +304,7 @@ const DataSourceView = ({
             </div>
 
             {/* ─── Search + Stats Bar ─── */}
-            <div className={`px-10 py-4 flex items-center gap-4 shrink-0 flex-wrap`}>
+            <div data-tour="datahub-filters" className={`px-10 py-4 flex items-center gap-4 shrink-0 flex-wrap`}>
                 <div className={`flex items-center gap-2 flex-1 max-w-md px-3 py-2 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                     <Search size={14} className={isDark ? 'text-gray-500' : 'text-gray-400'} />
                     <input
@@ -353,7 +354,7 @@ const DataSourceView = ({
             </div>
 
             {/* ─── Dataset Cards ─── */}
-            <div className="flex-1 overflow-y-auto px-10 pb-10">
+            <div data-tour="datahub-dataset-list" className="flex-1 overflow-y-auto px-10 pb-10">
                 {filteredDatasets.length === 0 ? (
                     <div className={`border-2 border-dashed rounded-2xl p-32 flex flex-col items-center justify-center ${isDark ? 'border-gray-600 bg-gray-800/40 text-gray-500' : 'border-gray-200 bg-white/40 text-gray-400'}`}>
                         <div className={`p-6 rounded-2xl shadow-sm mb-6 ${isDark ? 'bg-gray-700' : 'bg-white'}`}>

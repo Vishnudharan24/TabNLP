@@ -4,7 +4,7 @@ import { Bell, HelpCircle, Search, Sun, Moon, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import appLogo from '../ChillView_logo.jpg';
 
-const Header = ({ authUser, onLogout, onLogoClick }) => {
+const Header = ({ authUser, onLogout, onLogoClick, onHelpClick }) => {
     const { theme, toggleTheme } = useTheme();
     const displayName = authUser?.name || 'Local User';
     const initials = (displayName || 'LU')
@@ -15,9 +15,9 @@ const Header = ({ authUser, onLogout, onLogoClick }) => {
         .join('') || 'LU';
 
     return (
-        <header className="h-16 glass-panel border-b px-8 flex items-center justify-between sticky top-0 z-50 animate-fade-in dark:border-gray-700">
+        <header data-tour="header-root" className="h-16 glass-panel border-b px-8 flex items-center justify-between sticky top-0 z-50 animate-fade-in dark:border-gray-700">
             <div className="flex items-center gap-8 flex-1">
-                <div className="flex items-center gap-3">
+            <div data-tour="header-logo" className="flex items-center gap-3">
                     <img
                         src={appLogo}
                         alt="ChillAnalytics"
@@ -26,7 +26,7 @@ const Header = ({ authUser, onLogout, onLogoClick }) => {
                     />
                 </div>
 
-                <div className="max-w-md w-full relative">
+                <div data-tour="header-search" className="max-w-md w-full relative">
                     <div className="relative group">
                         <input
                             type="text"
@@ -41,21 +41,27 @@ const Header = ({ authUser, onLogout, onLogoClick }) => {
             <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 pr-4 border-r border-gray-200 dark:border-gray-700">
                     <button
+                        data-tour="header-theme-toggle"
                         onClick={toggleTheme}
                         className="p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl transition-all"
                         title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
                     >
                         {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
                     </button>
-                    <button className="p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl transition-all relative group">
+                    <button data-tour="header-notifications" className="p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl transition-all relative group">
                         <Bell size={20} className="relative z-10" />
                         <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full border-2 border-white dark:border-gray-800 bg-blue-500 animate-pulse"></div>
                     </button>
-                    <button className="p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl transition-all">
+                    <button
+                        data-tour="header-help"
+                        onClick={onHelpClick}
+                        className="p-2.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl transition-all"
+                        title="Start page tour"
+                    >
                         <HelpCircle size={20} className="relative z-10" />
                     </button>
                 </div>
-                <div className="flex items-center gap-3 pl-2">
+                <div data-tour="header-user" className="flex items-center gap-3 pl-2">
                     {onLogout && (
                         <button
                             onClick={onLogout}

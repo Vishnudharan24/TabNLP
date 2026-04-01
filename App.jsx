@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Responsive, WidthProvider } from 'react-grid-layout';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -35,6 +35,7 @@ import { useTheme } from './contexts/ThemeContext';
 import { recommendVisualization } from './services/chartRecommender';
 import { backendApi } from './services/backendApi';
 import { TYPO } from './styles/typography';
+import { startPageTour } from './services/pageTour';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
@@ -101,6 +102,45 @@ const parseTemplateSharedRouteContext = (pathname, search = '') => {
         reportId: decodeURIComponent(match[1]),
         shareToken,
     };
+};
+
+const resolveTourPageKey = ({
+    routePath,
+    view,
+    isSharedView,
+    isSharedTemplateRoute,
+}) => {
+    if (isSharedTemplateRoute || /\/templates\/[^/]+\/dashboard\/shared\//i.test(String(routePath || ''))) {
+        return 'templates-dashboard-shared';
+    }
+
+    if (routePath === '/org-chart' && !isSharedView) {
+        return 'org-chart';
+    }
+
+    if (/^\/templates\/?$/i.test(String(routePath || ''))) return 'templates-list';
+    if (/\/templates\/[^/]+\/map\/?$/i.test(String(routePath || ''))) return 'templates-map';
+    if (/\/templates\/[^/]+\/dashboard\/?$/i.test(String(routePath || ''))) return 'templates-dashboard';
+
+    const effectiveView = isSharedView ? 'report-shared' : view;
+    switch (effectiveView) {
+        case 'data':
+            return 'data';
+        case 'source-config':
+            return 'source-config';
+        case 'relationships':
+            return 'relationships';
+        case 'profiler':
+            return 'profiler';
+        case 'merge':
+            return 'merge';
+        case 'report-shared':
+            return 'report-shared';
+        case 'report':
+            return 'report';
+        default:
+            return 'app-shell';
+    }
 };
 
 const readStorageJson = (key, fallback) => {
@@ -1226,6 +1266,15 @@ const App = () => {
 
     const sharedTemplateRoute = parseTemplateSharedRouteContext(routePath, window.location.search || '');
     const isSharedTemplateRoute = Boolean(sharedTemplateRoute?.reportId && sharedTemplateRoute?.shareToken);
+    const currentTourPageKey = useMemo(() => resolveTourPageKey({
+        routePath,
+        view,
+        isSharedView,
+        isSharedTemplateRoute,
+    }), [routePath, view, isSharedView, isSharedTemplateRoute]);
+    const handleStartTour = useCallback(() => {
+        startPageTour(currentTourPageKey);
+    }, [currentTourPageKey]);
 
     if (isAuthLoading) {
         return (
@@ -1242,6 +1291,7 @@ const App = () => {
     if (isSharedTemplateRoute) {
         return (
             <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
+                <Header authUser={authUser} onLogout={null} onLogoClick={() => navigatePath('/templates')} onHelpClick={handleStartTour} />
                 <main className={`flex-1 min-w-0 overflow-auto ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
                     <TemplateRoutes
                         datasets={datasets}
@@ -1256,25 +1306,30 @@ const App = () => {
 
     if (routePath === '/org-chart' && !isSharedView) {
         return (
-            <OrgChartPage
-                datasets={datasets}
-                charts={charts}
-                selectedDatasetId={selectedDatasetId}
-                globalFilters={globalFilters}
-                initialChartId={orgExplorerChartId}
-                onBack={() => navigatePath('/')}
-            />
+            <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
+                <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => navigatePath('/')} onHelpClick={handleStartTour} />
+                <div className="flex-1 min-w-0 overflow-hidden">
+                    <OrgChartPage
+                        datasets={datasets}
+                        charts={charts}
+                        selectedDatasetId={selectedDatasetId}
+                        globalFilters={globalFilters}
+                        initialChartId={orgExplorerChartId}
+                        onBack={() => navigatePath('/')}
+                    />
+                </div>
+            </div>
         );
     }
 
     const effectiveView = isSharedView ? 'report' : view;
 
     return (
-        <div className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
-            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { if (!isSharedView) { setView('data'); navigatePath('/'); } }} />
+        <div data-tour="app-shell" className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
+            <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { if (!isSharedView) { setView('data'); navigatePath('/'); } }} onHelpClick={handleStartTour} />
             <div className="flex flex-1 overflow-hidden">
                 {!isSharedView && <Sidebar setView={setView} currentView={effectiveView} onNavigatePath={navigatePath} />}
-                <main className={`flex-1 flex flex-col min-w-0 ${effectiveView === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                <main data-tour="main-content" className={`flex-1 flex flex-col min-w-0 ${effectiveView === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
                     {effectiveView === 'templates' ? (
                         <TemplateRoutes
                             datasets={datasets}
@@ -1304,7 +1359,7 @@ const App = () => {
                     ) : effectiveView === 'relationships' ? (
                         <RelationshipDiagram datasets={datasets} companies={companies} />
                     ) : effectiveView === 'profiler' ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-10">
+                        <div data-tour="profiler-root" className="flex-1 flex flex-col items-center justify-center p-10">
                             {datasets.length > 0 ? (
                                 <div className="text-center space-y-6">
                                     <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
@@ -1331,7 +1386,7 @@ const App = () => {
                             )}
                         </div>
                     ) : effectiveView === 'merge' ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-10">
+                        <div data-tour="merge-root" className="flex-1 flex flex-col items-center justify-center p-10">
                             {datasets.length >= 2 ? (
                                 <div className="text-center space-y-6">
                                     <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
@@ -1356,8 +1411,8 @@ const App = () => {
                             )}
                         </div>
                     ) : (
-                        <div className="flex-1 flex flex-col overflow-hidden">
-                            <div className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                        <div data-tour="report-root" className="flex-1 flex flex-col overflow-hidden">
+                            <div data-tour="report-header" className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                                 <div className="flex flex-col">
                                     <div className={`flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                                         <Database size={12} />
@@ -1365,9 +1420,10 @@ const App = () => {
                                     </div>
                                     <h1 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>{isEditMode ? 'Visual Designer' : 'Report Preview'}</h1>
                                 </div>
-                                <div className="report-toolbar-controls flex items-center gap-2">
+                                <div data-tour="report-toolbar" className="report-toolbar-controls flex items-center gap-2">
                                     {datasets.length > 1 && (
                                         <select
+                                            data-tour="report-dataset-select"
                                             value={selectedDatasetId}
                                             onChange={(e) => setSelectedDatasetId(e.target.value)}
                                             disabled={isSharedView}
@@ -1415,6 +1471,7 @@ const App = () => {
                                         </button>
                                     )}
                                     <button
+                                        data-tour="report-settings-btn"
                                         onClick={() => setShowReportSettingsPopup(true)}
                                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all shadow-sm ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
                                     >
@@ -1426,7 +1483,7 @@ const App = () => {
                                         <span>{isSaving ? 'Saving...' : 'Save Layout'}</span>
                                     </button> */}
                                     {!isSharedView && (
-                                        <button onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
+                                        <button data-tour="report-add-visual-btn" onClick={handleAddChart} disabled={datasets.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
                                             <Plus size={16} />
                                             <span>Add Visual</span>
                                         </button>
@@ -1435,11 +1492,12 @@ const App = () => {
                             </div>
 
                             <div className="flex-1 flex overflow-hidden p-6 gap-6">
-                                <div ref={reportCanvasRef} className={`flex-1 overflow-y-scroll overflow-x-hidden report-canvas-scrollbar designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : (theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent')}`}>
+                                <div data-tour="report-canvas" ref={reportCanvasRef} className={`flex-1 overflow-y-scroll overflow-x-hidden report-canvas-scrollbar designer-scroll-container rounded-xl border relative transition-all duration-300 ${isEditMode ? `designer-canvas ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'} shadow-inner` : (theme === 'dark' ? 'bg-gray-800 border-transparent' : 'bg-white border-transparent')}`}>
                                     <ResponsiveGridLayout className="layout" layouts={{ lg: gridLayouts }} breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }} rowHeight={40} draggableHandle=".drag-handle" onLayoutChange={onLayoutChange} isDraggable={isEditMode} isResizable={isEditMode || isSharedView} margin={[16, 16]}>
                                         {currentPageCharts.map(config => (
                                             <div key={config.id} onClick={() => isEditMode && setActiveChartId(config.id)}>
                                                 <div
+                                                    data-tour="report-visual-card"
                                                     data-export-visual="true"
                                                     data-export-chart-id={config.id}
                                                     data-export-title={config.title || 'Visual'}
@@ -1459,7 +1517,9 @@ const App = () => {
                                 </div>
 
                                 {!isSharedView && (
-                                    <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} semanticMeasures={semanticMeasuresByDataset[selectedDatasetId] || []} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
+                                    <div data-tour="report-config-panel">
+                                        <DataPanel datasets={datasets} selectedDatasetId={selectedDatasetId} setSelectedDatasetId={setSelectedDatasetId} activeChartConfig={charts.find(c => c.id === activeChartId) || null} onUpdateConfig={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, ...updates } : c)); }} onUpdateLayout={(updates) => { if (activeChartId) setCharts(p => p.map(c => c.id === activeChartId ? { ...c, layout: { ...c.layout, ...updates } } : c)); }} semanticMeasures={semanticMeasuresByDataset[selectedDatasetId] || []} chartsCount={charts.length} showNewChartPrompt={showNewChartPrompt} onConfirmNewChart={handleConfirmNewChart} onCancelNewChart={() => setShowNewChartPrompt(false)} />
+                                    </div>
                                 )}
                             </div>
                         </div>

@@ -280,15 +280,15 @@ const TemplateMapping = ({
     }
 
     return (
-        <section className={`cv-template-page ${theme === 'dark' ? 'cv-template-page--dark' : ''}`}>
-            <header className="cv-template-page__header cv-template-page__header--map">
+        <section data-tour="templates-map-root" className={`cv-template-page ${theme === 'dark' ? 'cv-template-page--dark' : ''}`}>
+            <header data-tour="templates-map-header" className="cv-template-page__header cv-template-page__header--map">
                 <div>
                     <h1>{template.name} Mapping</h1>
                     <p>Map your dataset columns to the required template fields.</p>
                 </div>
                 <div className="cv-template-page__header-actions">
                     {Array.isArray(datasets) && datasets.length > 0 && (
-                        <label className="cv-field-select">
+                        <label data-tour="templates-map-dataset" className="cv-field-select">
                             <span>Dataset</span>
                             <select
                                 value={selectedDatasetId || ''}
@@ -314,8 +314,8 @@ const TemplateMapping = ({
                     No uploaded columns available. Upload data and revisit mapping.
                 </div>
             ) : (
-                <div className="cv-mapping-grid">
-                    <div className="cv-mapping-panel">
+                <div data-tour="templates-map-grid" className="cv-mapping-grid">
+                    <div data-tour="templates-map-fields" className="cv-mapping-panel">
                         <h2>Template Fields</h2>
                         {template.requiredFields.map((field) => {
                             const mismatch = validation.mismatches.find((entry) => entry.field === field.name);
@@ -399,7 +399,7 @@ const TemplateMapping = ({
                         })}
                     </div>
 
-                    <div className="cv-mapping-panel">
+                    <div data-tour="templates-map-columns" className="cv-mapping-panel">
                         <h2>Uploaded Dataset Columns</h2>
                         <div className="cv-column-list-compact">
                             {uploadedColumnLines.map((line, index) => (
@@ -428,7 +428,7 @@ const TemplateMapping = ({
                 </div>
             )}
 
-            <div className="cv-actions-row">
+            <div data-tour="templates-map-generate" className="cv-actions-row">
                 <button
                     type="button"
                     className="cv-btn cv-btn--primary"

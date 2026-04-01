@@ -1410,8 +1410,8 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
     }
 
     return (
-        <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-            <header className="cv-template-page__header cv-template-page__header--map">
+        <section data-tour="templates-dashboard-root" className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
+            <header data-tour="templates-dashboard-header" className="cv-template-page__header cv-template-page__header--map">
                 <div>
                     <h1>HR Analytics Dashboard</h1>
                     <p>Template-driven HR insights generated from mapped fields and dataset rows.</p>
@@ -1419,6 +1419,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
                 <div className="flex flex-wrap items-center gap-2">
                     {!isSharedView && (
                         <button
+                            data-tour="templates-dashboard-share"
                             type="button"
                             onClick={shareDashboard}
                             disabled={isSharingDashboard || loading || !!error}
@@ -1434,6 +1435,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
                         />
                     )}
                     <button
+                        data-tour="templates-dashboard-export"
                         type="button"
                         onClick={exportAllPdf}
                         disabled={exportAllLoading}
@@ -1476,7 +1478,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
 
             {!loading && !error && (
                 <>
-                    <div className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                    <div data-tour="templates-dashboard-mapped-fields" className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                         <h3 className={`text-sm font-bold mb-2 ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Mapped Fields</h3>
                         {mappedFields.length === 0 ? (
                             <p className={isDark ? 'text-gray-400 text-sm' : 'text-gray-600 text-sm'}>No field mappings found.</p>
@@ -1491,7 +1493,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
                         )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div data-tour="templates-dashboard-kpis" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                         <KpiCard title="Total Employees" value={summaryTotal} hint="Across mapped dataset" isDark={isDark} />
                         <KpiCard title="Active Employees" value={summaryActive} hint="Current active workforce" isDark={isDark} />
                         <KpiCard title="Inactive Employees" value={summaryInactive} hint="Derived from workforce status" isDark={isDark} />
@@ -1502,7 +1504,7 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
                         <KpiCard title="Missing Emergency Contacts" value={missingEmergencyContact} hint="Contact module" isDark={isDark} />
                     </div>
 
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+                    <div data-tour="templates-dashboard-charts" className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
                         <ChartCard
                             title="Department Distribution"
                             isDark={isDark}
