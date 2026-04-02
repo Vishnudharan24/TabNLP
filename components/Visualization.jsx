@@ -9,7 +9,7 @@ import { auditChartConfiguration } from '../services/chartValidationEngine';
 import { buildQuery } from '../services/queryBuilder';
 import { backendApi } from '../services/backendApi';
 import { adaptQueryResponse } from '../services/dataAdapter';
-import DrillDownTable from '../frontend/components/DrillDownTable';
+import DrillDownTable from './DrillDownTable';
 import { useTheme } from '../contexts/ThemeContext';
 import { GripHorizontal, Filter, ChevronRight, Home, MousePointerClick } from 'lucide-react';
 import { TYPO } from '../styles/typography';
