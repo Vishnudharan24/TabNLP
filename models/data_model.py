@@ -66,14 +66,22 @@ def infer_column_semantic_type(name: str, declared_type: str | None, values: lis
 
     declared = (declared_type or "").lower().strip()
 
-    if _looks_like_id(name) or unique_ratio >= 0.98:
-        return "id"
-
-    if declared in {"number", "numeric", "int", "float"} or number_ratio >= 0.9:
+    # Resolve numeric/date semantics before any cardinality-based heuristics.
+    # High-cardinality financial columns (Revenue/Profit/Target) are often near-unique
+    # and must remain numeric for SUM/AVG aggregations.
+    if declared in {"number", "numeric", "int", "float", "decimal", "double"} or number_ratio >= 0.85:
         return "numeric"
 
     if declared in {"date", "datetime", "timestamp"} or date_ratio >= 0.9:
         return "date"
+
+    # ID detection should be name-driven; uniqueness alone is not reliable for measures.
+    if _looks_like_id(name):
+        return "id"
+
+    # Retain a conservative uniqueness fallback only for non-numeric/non-date text-like fields.
+    if unique_ratio >= 0.995:
+        return "id"
 
     return "categorical"
 
