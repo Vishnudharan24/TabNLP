@@ -738,7 +738,7 @@ const DataPanel = ({
                             </div>
 
                             {/* Filtering Engine */}
-                            <div className="space-y-4">
+                            <div data-tour="datapanel-filters-section" className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Filters</h4>
                                     <button onClick={addFilter} disabled={!activeChartConfig} className="p-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all disabled:opacity-30">
@@ -746,7 +746,7 @@ const DataPanel = ({
                                     </button>
                                 </div>
 
-                                <div className="space-y-3">
+                                <div data-tour="datapanel-filter-list" className="space-y-3">
                                     {activeChartConfig?.filters?.map(f => {
                                         const col = selectedDataset?.columns.find(c => c.name === f.column);
                                         const ops = OPERATORS_MAP[col?.type || 'string'] || OPERATORS_MAP.string;
@@ -827,10 +827,10 @@ const DataPanel = ({
                             </div>
 
                             {/* Modern Field Assignment Panel */}
-                            <div className="space-y-4">
+                            <div data-tour="datapanel-field-mapping-section" className="space-y-4">
                                 <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Field Mapping</h4>
 
-                                <div className="space-y-3">
+                                <div data-tour="datapanel-available-fields-panel" className="space-y-3">
                                     <button
                                         onClick={() => setShowAvailableFields((prev) => !prev)}
                                         className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all"
@@ -841,7 +841,7 @@ const DataPanel = ({
 
                                     {showAvailableFields && (
                                         <>
-                                            <div className="space-y-1.5">
+                                            <div data-tour="datapanel-field-search" className="space-y-1.5">
                                                 <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Search Fields</label>
                                                 <div className="relative">
                                                     <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -860,7 +860,7 @@ const DataPanel = ({
                                                 </div>
                                             </div>
 
-                                            <div className="space-y-2">
+                                            <div data-tour="datapanel-field-groups" className="space-y-2">
                                                 {[
                                                     { title: 'Category', key: 'categorical' },
                                                     { title: 'Time', key: 'date' },
@@ -938,7 +938,7 @@ const DataPanel = ({
                                 </div>
 
                                 {activeChartConfig && (
-                                    <div className="space-y-3">
+                                    <div data-tour="datapanel-chart-setup-roles" className="space-y-3">
                                         <h4 className="text-[11px] font-bold text-gray-800 dark:text-gray-200 uppercase tracking-widest">Chart Setup</h4>
 
                                         <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">

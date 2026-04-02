@@ -317,7 +317,7 @@ const TemplateMapping = ({
                 <div data-tour="templates-map-grid" className="cv-mapping-grid">
                     <div data-tour="templates-map-fields" className="cv-mapping-panel">
                         <h2>Template Fields</h2>
-                        {template.requiredFields.map((field) => {
+                        {template.requiredFields.map((field, index) => {
                             const mismatch = validation.mismatches.find((entry) => entry.field === field.name);
                             const searchValue = (fieldSearch[field.name] || '').trim().toLowerCase();
                             const selectedColumnName = mapping[field.name] || '';
@@ -327,14 +327,15 @@ const TemplateMapping = ({
                                 || String(column.type || '').toLowerCase().includes(searchValue)
                             ));
                             return (
-                                <div key={field.name} className="cv-mapping-row">
+                                <div key={field.name} data-tour={index === 0 ? 'templates-map-first-row' : undefined} className="cv-mapping-row">
                                     <div>
                                         <strong>{field.name}</strong>
                                         <p className="cv-field-meta">Expected type: {field.type}</p>
                                     </div>
-                                    <div className="cv-searchable-dropdown">
+                                    <div data-tour={index === 0 ? 'templates-map-first-dropdown' : undefined} className="cv-searchable-dropdown">
                                         <button
                                             type="button"
+                                            data-tour={index === 0 ? 'templates-map-first-trigger' : undefined}
                                             className="cv-searchable-dropdown__trigger"
                                             onClick={() => handleToggleDropdown(field.name)}
                                         >
@@ -345,16 +346,17 @@ const TemplateMapping = ({
                                         </button>
 
                                         {openField === field.name && (
-                                            <div className="cv-searchable-dropdown__menu">
+                                            <div data-tour={index === 0 ? 'templates-map-first-menu' : undefined} className="cv-searchable-dropdown__menu">
                                                 <input
                                                     type="text"
+                                                    data-tour={index === 0 ? 'templates-map-first-search' : undefined}
                                                     value={fieldSearch[field.name] || ''}
                                                     onChange={(event) => handleSearchChange(field.name, event.target.value)}
                                                     placeholder="Search inside dropdown"
                                                     className="cv-searchable-dropdown__search"
                                                     autoFocus
                                                 />
-                                                <div className="cv-searchable-dropdown__options">
+                                                <div data-tour={index === 0 ? 'templates-map-first-options' : undefined} className="cv-searchable-dropdown__options">
                                                     <button
                                                         type="button"
                                                         className="cv-searchable-dropdown__option"

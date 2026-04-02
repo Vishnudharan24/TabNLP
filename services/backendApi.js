@@ -1,5 +1,5 @@
 const DEFAULT_BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_BASE_URL || '/api';
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_RETRY_COUNT = 2;
 const DEFAULT_RETRY_BASE_DELAY_MS = 350;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -98,8 +98,14 @@ async function request(path, options = {}, baseUrl, requestConfig = {}) {
             }
 
             if (!response.ok) {
-                const detail = typeof payload === 'object' ? payload?.detail : payload;
-                throw new Error(detail || `Request failed with status ${response.status}`);
+                const detail = typeof payload === 'object'
+                    ? (payload?.detail || payload?.error?.message || payload?.message)
+                    : payload;
+                const reason = typeof payload === 'object'
+                    ? payload?.error?.details?.reason
+                    : null;
+                const message = detail || `Request failed with status ${response.status}`;
+                throw new Error(reason ? `${message} (${reason})` : message);
             }
 
             return payload;

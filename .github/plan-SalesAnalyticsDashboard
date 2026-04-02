@@ -1,0 +1,252 @@
+You are a senior BI product architect building a **Sales Analytics Template** for a Power BI–like platform using React + ECharts + query-driven backend.
+
+The dataset is enterprise-grade and includes:
+
+* Legal Entities (Tata Motors, Tata Steel, Tata Power, Titan)
+* Product hierarchy (Division → Category → Subcategory → SKU)
+* Geography (Zone → Region → Country → City → Territory)
+* Sales hierarchy (Manager → Sales Rep)
+* Financials (MRP, Selling Price, Discount, Revenue, Cost, Profit)
+* Targets (Target Revenue, Variance, Achievement %)
+* Supply chain (Dispatch, Delivery, Warehouse)
+* Customer data (Segment, Industry, Repeat, Churn Risk)
+* Marketing (Campaign, Promotion)
+
+---
+
+# 🎯 OBJECTIVE
+
+Build a **complete Sales Analytics Dashboard Template** with:
+
+* Predefined pages
+* Preconfigured charts
+* Business-focused insights
+* Drill-down capability
+* Power BI–level UX
+
+---
+
+# 🧱 TEMPLATE STRUCTURE
+
+Create **6 Dashboard Pages**
+
+---
+
+# 📊 PAGE 1 — EXECUTIVE OVERVIEW
+
+## KPI CARDS
+
+* Total Revenue → SUM(Net_Revenue)
+* Total Profit → SUM(Profit)
+* Profit Margin % → Profit / Revenue
+* Achievement % → AVG(Achievement_%)
+
+---
+
+## CHARTS
+
+1. Revenue Trend (Line)
+
+* X: Month
+* Y: SUM(Net_Revenue)
+
+2. Revenue by Legal Entity (Bar)
+
+* X: Legal_Entity
+* Y: SUM(Net_Revenue)
+
+3. Profit Contribution (Donut)
+
+* Category: Legal_Entity
+* Value: SUM(Profit)
+
+---
+
+---
+
+# 📈    2 — SALES PERFORMANCE
+
+## CHARTS
+
+1. Manager Performance (Bar)
+
+* X: Manager
+* Y: SUM(Net_Revenue)
+
+2. Sales Rep Performance (Horizontal Bar)
+
+* X: SUM(Net_Revenue)
+* Y: Sales_Rep
+
+3. Channel Analysis (Stacked Bar)
+
+* X: Channel
+* Y: SUM(Net_Revenue)
+* Breakdown: Legal_Entity
+
+---
+
+## KPI
+
+* Avg Revenue per Sales Rep
+
+---
+
+---
+
+# 🌍    3 — GEOGRAPHICAL ANALYSIS
+
+## CHARTS
+
+1. Revenue by Zone (Map or Bar)
+
+* X: Zone
+* Y: SUM(Net_Revenue)
+
+2. Drilldown Chart
+
+* Zone → Region → Country → City
+
+3. Territory Performance (Bar)
+
+* X: Territory
+* Y: SUM(Net_Revenue)
+
+---
+
+---
+
+# 🏭    4 — PRODUCT ANALYTICS
+
+## CHARTS
+
+1. Treemap
+
+* Hierarchy: Division → Product_Category → Product_Subcategory
+* Value: SUM(Net_Revenue)
+
+2. Top Products (Bar)
+
+* X: Product_Name
+* Y: SUM(Net_Revenue)
+
+3. SKU Performance (Table)
+
+* Product_SKU, Revenue, Profit
+
+---
+
+---
+
+# 💰    5 — FINANCIAL ANALYSIS
+
+## CHARTS
+
+1. Discount vs Profit (Scatter)
+
+* X: Discount_%
+* Y: Profit
+
+2. Margin Analysis (Bar)
+
+* X: Product_Category
+* Y: Profit Margin %
+
+3. Target vs Actual (Combo Chart)
+
+* X: Month
+* Bars: SUM(Net_Revenue)
+* Line: SUM(Target_Revenue)
+
+---
+
+---
+
+# 🚚    6 — OPERATIONS & CUSTOMER INSIGHTS
+
+## CHARTS
+
+1. Delivery Performance (Bar)
+
+* X: Delivery_Status
+* Y: COUNT(Order_ID)
+
+2. Avg Delivery Time (Line)
+
+* X: Region
+* Y: AVG(Delivery_Time_Days)
+
+3. Customer Segmentation (Donut)
+
+* Category: Segment
+* Value: SUM(Net_Revenue)
+
+4. Churn Risk Analysis (Bar)
+
+* X: Churn_Risk
+* Y: SUM(Net_Revenue)
+
+---
+
+---
+
+# 🧠 GLOBAL FILTERS (APPLY TO ALL   S)
+
+* Fiscal Year
+* Quarter
+* Legal Entity
+* Region
+* Channel
+
+---
+
+# 🔥 INTERACTIONS
+
+* Click on chart → cross-filter other charts
+* Drill-down enabled (Geo + Product hierarchy)
+* Tooltip shows:
+
+  * Revenue
+  * Profit
+  * % contribution
+
+---
+
+# 🧱 TECHNICAL REQUIREMENTS
+
+* Use queryBuilder.js (NO frontend aggregation)
+* Use dataAdapter.js for formatting only
+* Use backend `/query` for all data
+* Maintain columns + rows response format
+
+---
+
+# 🧪 VALIDATION
+
+Ensure:
+
+* All charts load correctly
+* Filters work globally
+* Drill-down works
+* No frontend aggregation logic exists
+* Performance is optimized
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. Template configuration JSON
+2. Chart definitions for all pages
+3. Query structures per chart
+4. Filter configuration
+5. Interaction mapping
+
+---
+
+# 🚀 FINAL GOAL
+
+Transform raw data into:
+
+"Enterprise-ready Sales Analytics Template"
+
+usable by business users without manual configuration

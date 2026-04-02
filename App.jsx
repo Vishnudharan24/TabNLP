@@ -91,7 +91,7 @@ const parseReportRouteContext = (pathname, search = '') => {
 
 const parseTemplateSharedRouteContext = (pathname, search = '') => {
     const normalizedPath = normalizeRoutePath(pathname || '/');
-    const match = normalizedPath.match(/^\/templates\/hr\/dashboard\/shared\/([^/]+)\/?$/i);
+    const match = normalizedPath.match(/^\/templates\/[^/]+\/dashboard\/shared\/([^/]+)\/?$/i);
     if (!match) return null;
 
     const query = new URLSearchParams(search || '');
@@ -1273,6 +1273,12 @@ const App = () => {
         isSharedTemplateRoute,
     }), [routePath, view, isSharedView, isSharedTemplateRoute]);
     const handleStartTour = useCallback(() => {
+        if (currentTourPageKey === 'report') {
+            setShowReportSettingsPopup(true);
+            setTimeout(() => startPageTour(currentTourPageKey), 120);
+            return;
+        }
+
         startPageTour(currentTourPageKey);
     }, [currentTourPageKey]);
 
@@ -1632,6 +1638,7 @@ const App = () => {
 
             {showReportSettingsPopup && view === 'report' && (
                 <div
+                    data-tour="report-settings-modal"
                     className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm"
                     onClick={() => setShowReportSettingsPopup(false)}
                 >
@@ -1672,6 +1679,7 @@ const App = () => {
 
                             <label className={`block text-xs font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Share</label>
                             <button
+                                data-tour="report-settings-share-link"
                                 onClick={handleShareDashboard}
                                 disabled={isSharedView || isSharing || isPreparingExport || isExportingPdf || isExportingPpt}
                                 className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}

@@ -1,16 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import TemplateList from '../components/templates/TemplateList';
 import TemplateMapping from '../components/templates/TemplateMapping';
 import HRTemplateDashboard from '../components/templates/HRTemplateDashboard';
+import SalesTemplateDashboard from '../components/templates/SalesTemplateDashboard';
 import { ANALYTICS_TEMPLATES } from '../data/templates';
 import { backendApi } from '../services/backendApi';
 import '../components/templates/templateSystem.css';
 
-const extractHrDashboardSnapshot = (report) => {
+const extractTemplateDashboardSnapshot = (report) => {
     const charts = Array.isArray(report?.charts) ? report.charts : [];
     const snapshot = charts.find((item) => (
-        item?.type === 'hr-template-dashboard' || item?.id === 'hr-template-dashboard-snapshot'
+        item?.type === 'hr-template-dashboard'
+        || item?.id === 'hr-template-dashboard-snapshot'
+        || item?.type === 'sales-template-dashboard'
+        || item?.id === 'sales-template-dashboard-snapshot'
     ));
     const payload = snapshot?.payload;
     if (!payload || typeof payload !== 'object') return null;
@@ -20,7 +24,30 @@ const extractHrDashboardSnapshot = (report) => {
         mapping: payload.mapping && typeof payload.mapping === 'object' ? payload.mapping : {},
         missingFields: Array.isArray(payload.missingFields) ? payload.missingFields : [],
         datasetData: Array.isArray(payload.datasetData) ? payload.datasetData : [],
+        dataset: payload.dataset && typeof payload.dataset === 'object' ? payload.dataset : null,
     };
+};
+
+const TemplateDashboardSwitch = ({ sessionByTemplate, datasetData, dataset, isSharedView = false }) => {
+    const { id } = useParams();
+
+    if (id === 'sales') {
+        return (
+            <SalesTemplateDashboard
+                sessionByTemplate={sessionByTemplate}
+                dataset={dataset}
+                isSharedView={isSharedView}
+            />
+        );
+    }
+
+    return (
+        <HRTemplateDashboard
+            sessionByTemplate={sessionByTemplate}
+            datasetData={datasetData}
+            isSharedView={isSharedView}
+        />
+    );
 };
 
 const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDatasetId, sharedTemplateRoute = null }) => {
@@ -69,7 +96,7 @@ const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDa
                 const response = await backendApi.getSharedReport(reportId, shareToken);
                 if (cancelled) return;
 
-                const snapshot = extractHrDashboardSnapshot(response?.report);
+                const snapshot = extractTemplateDashboardSnapshot(response?.report);
                 if (!snapshot) {
                     throw new Error('Shared dashboard payload is missing or invalid');
                 }
@@ -92,8 +119,9 @@ const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDa
 
     const sharedTemplateSession = useMemo(() => {
         if (!sharedDashboardPayload) return {};
+        const templateId = String(sharedDashboardPayload.templateId || 'hr');
         return {
-            hr: {
+            [templateId]: {
                 mapping: sharedDashboardPayload.mapping || {},
                 warnings: [],
                 missingFields: sharedDashboardPayload.missingFields || [],
@@ -141,9 +169,10 @@ const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDa
             <Route
                 path="/templates/:id/dashboard"
                 element={(
-                    <HRTemplateDashboard
+                    <TemplateDashboardSwitch
                         sessionByTemplate={templateSession}
                         datasetData={datasetData}
+                        dataset={selectedDataset}
                     />
                 )}
             />
@@ -151,7 +180,7 @@ const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDa
                 path="/templates/:id/dashboard/shared/:reportId"
                 element={sharedDashboardLoading ? (
                     <section className="cv-template-page">
-                        <div className="cv-state-card">Loading shared HR dashboard...</div>
+                        <div className="cv-state-card">Loading shared dashboard...</div>
                     </section>
                 ) : sharedDashboardError ? (
                     <section className="cv-template-page">
@@ -160,9 +189,10 @@ const TemplateRoutes = ({ datasets = [], selectedDatasetId = null, setSelectedDa
                         </div>
                     </section>
                 ) : (
-                    <HRTemplateDashboard
+                    <TemplateDashboardSwitch
                         sessionByTemplate={sharedTemplateSession}
                         datasetData={sharedDashboardPayload?.datasetData || []}
+                        dataset={sharedDashboardPayload?.dataset || null}
                         isSharedView
                     />
                 )}
