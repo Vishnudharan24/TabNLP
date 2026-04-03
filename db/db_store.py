@@ -97,6 +97,10 @@ async def ensure_indexes():
         expireAfterSeconds=0,
         name="report_shares_expires_ttl",
     )
+    await report_shares_collection.create_index(
+        [("recipient_user_ids", 1), ("report_id", 1), ("expires_at", -1)],
+        name="report_shares_recipient_report_idx",
+    )
 
     _indexes_initialized = True
 
@@ -193,27 +197,43 @@ async def unset_source_config_fields(source_id: str, owner_user_id: str, fields:
 
 
 async def list_latest_datasets(owner_user_id: str, limit: int = 100):
-    cursor = collection.find({"owner_user_id": owner_user_id, "is_latest": True}).sort("ingested_at", -1).limit(limit)
-    return await cursor.to_list(length=limit)
+    own_cursor = collection.find({"owner_user_id": owner_user_id, "is_latest": True}).sort("ingested_at", -1).limit(limit)
+    own_docs = await own_cursor.to_list(length=limit)
+    shared_docs = await _list_shared_datasets_for_recipient(owner_user_id, latest_only=True)
+    return _merge_and_sort_datasets(own_docs, shared_docs, limit=limit)
 
 
 async def list_datasets(owner_user_id: str, limit: int = 1000):
-    cursor = collection.find({"owner_user_id": owner_user_id}).sort([("ingested_at", -1)]).limit(limit)
-    return await cursor.to_list(length=limit)
+    own_cursor = collection.find({"owner_user_id": owner_user_id}).sort([("ingested_at", -1)]).limit(limit)
+    own_docs = await own_cursor.to_list(length=limit)
+    shared_docs = await _list_shared_datasets_for_recipient(owner_user_id, latest_only=False)
+    return _merge_and_sort_datasets(own_docs, shared_docs, limit=limit)
 
 
 async def get_latest_dataset_by_source(source_id: str, owner_user_id: str):
-    return await collection.find_one(
+    own_doc = await collection.find_one(
         {"owner_user_id": owner_user_id, "source_key": source_id, "is_latest": True},
         sort=[("ingested_at", -1)],
     )
+    if own_doc:
+        return own_doc
+
+    shared_docs = await _list_shared_datasets_for_recipient(owner_user_id, latest_only=True)
+    matching = [doc for doc in shared_docs if str(doc.get("source_key") or "") == str(source_id or "")]
+    if not matching:
+        return None
+    matching.sort(key=lambda item: item.get("ingested_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return matching[0]
 
 
 async def get_dataset_by_id(document_id: str, owner_user_id: str):
-    if not ObjectId.is_valid(document_id):
-        return None
+    if ObjectId.is_valid(document_id):
+        own_doc = await collection.find_one({"_id": ObjectId(document_id), "owner_user_id": owner_user_id})
+        if own_doc:
+            return own_doc
 
-    return await collection.find_one({"_id": ObjectId(document_id), "owner_user_id": owner_user_id})
+    shared_doc = await _resolve_shared_dataset_for_recipient(owner_user_id, document_id)
+    return shared_doc
 
 
 async def get_dataset_for_query(dataset_id: str, owner_user_id: str):
@@ -241,6 +261,161 @@ async def get_dataset_for_query(dataset_id: str, owner_user_id: str):
     )
     if by_source_id_latest:
         return by_source_id_latest
+
+    shared_doc = await _resolve_shared_dataset_for_recipient(owner_user_id, dataset_id)
+    if shared_doc:
+        return shared_doc
+
+    return None
+
+
+def _extract_report_dataset_ids(report_doc: dict | None):
+    if not isinstance(report_doc, dict):
+        return set()
+
+    dataset_ids = set()
+    selected = str(report_doc.get("selected_dataset_id") or "").strip()
+    if selected:
+        dataset_ids.add(selected)
+
+    charts = report_doc.get("charts") or []
+    if isinstance(charts, list):
+        for chart in charts:
+            if not isinstance(chart, dict):
+                continue
+            chart_dataset = str(chart.get("datasetId") or chart.get("dataset_id") or "").strip()
+            if chart_dataset:
+                dataset_ids.add(chart_dataset)
+
+    return dataset_ids
+
+
+def _merge_and_sort_datasets(primary_docs: list[dict], secondary_docs: list[dict], limit: int):
+    merged = {}
+    for doc in (primary_docs or []):
+        if not doc:
+            continue
+        merged[str(doc.get("_id"))] = doc
+    for doc in (secondary_docs or []):
+        if not doc:
+            continue
+        merged.setdefault(str(doc.get("_id")), doc)
+
+    items = list(merged.values())
+    items.sort(key=lambda item: item.get("ingested_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return items[: max(0, int(limit or 0))]
+
+
+async def _list_shared_datasets_for_recipient(recipient_user_id: str, latest_only: bool):
+    now = datetime.now(timezone.utc)
+    share_cursor = report_shares_collection.find(
+        {
+            "recipient_user_ids": str(recipient_user_id),
+            "revoked": {"$ne": True},
+            "$or": [
+                {"expires_at": None},
+                {"expires_at": {"$gt": now}},
+            ],
+        },
+        {"report_id": 1},
+    )
+    shares = await share_cursor.to_list(length=5000)
+    report_id_strings = sorted({str(item.get("report_id") or "").strip() for item in shares if str(item.get("report_id") or "").strip()})
+    report_object_ids = [ObjectId(report_id) for report_id in report_id_strings if ObjectId.is_valid(report_id)]
+    if not report_object_ids:
+        return []
+
+    reports = await reports_collection.find({"_id": {"$in": report_object_ids}}).to_list(length=5000)
+
+    owner_to_dataset_ids: dict[str, set[str]] = {}
+    for report in reports:
+        owner = str(report.get("owner_user_id") or "").strip()
+        if not owner:
+            continue
+        ids = _extract_report_dataset_ids(report)
+        if not ids:
+            continue
+        owner_to_dataset_ids.setdefault(owner, set()).update(ids)
+
+    resolved_docs = []
+    seen_ids = set()
+    for owner_user_id, dataset_ids in owner_to_dataset_ids.items():
+        for dataset_id in dataset_ids:
+            doc = await _resolve_dataset_for_owner(dataset_id, owner_user_id, latest_only=latest_only)
+            if not doc:
+                continue
+            key = str(doc.get("_id"))
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            resolved_docs.append(doc)
+
+    return resolved_docs
+
+
+async def _resolve_dataset_for_owner(dataset_id: str, owner_user_id: str, latest_only: bool = False):
+    dataset_key = str(dataset_id or "").strip()
+    if not dataset_key:
+        return None
+
+    if ObjectId.is_valid(dataset_key):
+        query = {"_id": ObjectId(dataset_key), "owner_user_id": owner_user_id}
+        if latest_only:
+            query["is_latest"] = True
+        by_id = await collection.find_one(query)
+        if by_id:
+            return by_id
+
+    source_query_base = {"owner_user_id": owner_user_id, "source_key": dataset_key}
+    source_id_query_base = {"owner_user_id": owner_user_id, "source_id": dataset_key}
+    if latest_only:
+        source_query_base["is_latest"] = True
+        source_id_query_base["is_latest"] = True
+
+    by_source_key = await collection.find_one(source_query_base, sort=[("ingested_at", -1)])
+    if by_source_key:
+        return by_source_key
+
+    by_source_id = await collection.find_one(source_id_query_base, sort=[("ingested_at", -1)])
+    if by_source_id:
+        return by_source_id
+
+    return None
+
+
+async def _resolve_shared_dataset_for_recipient(recipient_user_id: str, dataset_id: str):
+    now = datetime.now(timezone.utc)
+    share_cursor = report_shares_collection.find(
+        {
+            "recipient_user_ids": str(recipient_user_id),
+            "revoked": {"$ne": True},
+            "$or": [
+                {"expires_at": None},
+                {"expires_at": {"$gt": now}},
+            ],
+        },
+        {"report_id": 1},
+    )
+    shares = await share_cursor.to_list(length=5000)
+    report_ids = [ObjectId(str(item.get("report_id"))) for item in shares if ObjectId.is_valid(str(item.get("report_id") or ""))]
+    if not report_ids:
+        return None
+
+    reports = await reports_collection.find({"_id": {"$in": report_ids}}).to_list(length=5000)
+    dataset_key = str(dataset_id or "").strip()
+    if not dataset_key:
+        return None
+
+    for report in reports:
+        dataset_ids = _extract_report_dataset_ids(report)
+        if dataset_key not in dataset_ids:
+            continue
+        owner = str(report.get("owner_user_id") or "").strip()
+        if not owner:
+            continue
+        doc = await _resolve_dataset_for_owner(dataset_key, owner, latest_only=False)
+        if doc:
+            return doc
 
     return None
 
@@ -486,6 +661,15 @@ async def get_user_by_email(email: str):
     return await users_collection.find_one({"email": email})
 
 
+async def get_users_by_emails(emails: list[str]):
+    normalized = [str(email or "").strip().lower() for email in (emails or []) if str(email or "").strip()]
+    if not normalized:
+        return []
+
+    cursor = users_collection.find({"email": {"$in": normalized}})
+    return await cursor.to_list(length=len(normalized))
+
+
 async def get_user_by_id(user_id: str):
     if not ObjectId.is_valid(user_id):
         return None
@@ -574,6 +758,8 @@ async def create_report_share(
     role: str,
     expires_at,
     created_by: str,
+    recipient_user_ids: list[str] | None = None,
+    recipient_emails: list[str] | None = None,
     created_ip: str | None = None,
 ):
     if not ObjectId.is_valid(report_id):
@@ -587,6 +773,8 @@ async def create_report_share(
         "expires_at": expires_at,
         "revoked": False,
         "created_by": created_by,
+        "recipient_user_ids": [str(user_id) for user_id in (recipient_user_ids or []) if str(user_id).strip()],
+        "recipient_emails": [str(email).strip().lower() for email in (recipient_emails or []) if str(email).strip()],
         "created_ip": created_ip,
         "created_at": now,
         "accessed_at": None,
@@ -597,18 +785,23 @@ async def create_report_share(
     return document
 
 
-async def get_active_report_share(report_id: str, token_hash: str):
+async def get_active_report_share(report_id: str, token_hash: str, recipient_user_id: str | None = None):
     now = datetime.now(timezone.utc)
+    query = {
+        "report_id": report_id,
+        "token_hash": token_hash,
+        "revoked": {"$ne": True},
+        "$or": [
+            {"expires_at": None},
+            {"expires_at": {"$gt": now}},
+        ],
+    }
+
+    if recipient_user_id:
+        query["recipient_user_ids"] = str(recipient_user_id)
+
     return await report_shares_collection.find_one(
-        {
-            "report_id": report_id,
-            "token_hash": token_hash,
-            "revoked": {"$ne": True},
-            "$or": [
-                {"expires_at": None},
-                {"expires_at": {"$gt": now}},
-            ],
-        }
+        query
     )
 
 

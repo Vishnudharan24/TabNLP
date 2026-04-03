@@ -7,7 +7,7 @@ from typing import Any
 
 from services.semantic_layer import resolve_query_measure, MeasureResolutionError
 
-EXPR_RE = re.compile(r"^\s*(SUM|AVG|COUNT|MIN|MAX)\s*\(\s*([a-zA-Z0-9_\.\*]+)\s*\)\s*$", re.IGNORECASE)
+EXPR_RE = re.compile(r"\s*(SUM|AVG|COUNT|MIN|MAX)\s*\(\s*([a-zA-Z0-9_\.\*]+)\s*\)\s*", re.IGNORECASE)
 
 
 def _split_table_field(value: str) -> tuple[str | None, str]:
@@ -16,6 +16,21 @@ def _split_table_field(value: str) -> tuple[str | None, str]:
         return None, text
     table, field = text.split(".", 1)
     return (table or None), field
+
+
+def _parse_simple_aggregate_expression(value: Any) -> tuple[str, str, str | None, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    parsed = EXPR_RE.fullmatch(text)
+    if not parsed:
+        return None
+
+    agg = parsed.group(1).upper()
+    raw = parsed.group(2)
+    table, field = _split_table_field(raw)
+    return agg, raw, table, field
 
 
 def _normalize_dimension(d: Any) -> dict[str, Any]:
@@ -34,11 +49,9 @@ def _normalize_dimension(d: Any) -> dict[str, Any]:
 
 def _normalize_measure(m: Any) -> dict[str, Any]:
     if isinstance(m, str):
-        parsed = EXPR_RE.match(m)
-        if parsed:
-            agg = parsed.group(1).upper()
-            raw = parsed.group(2)
-            table, field = _split_table_field(raw)
+        parsed_measure = _parse_simple_aggregate_expression(m)
+        if parsed_measure:
+            agg, raw, table, field = parsed_measure
             name = f"{agg}_{field}" if field != "*" else "Count"
             return {
                 "name": name,
@@ -57,11 +70,9 @@ def _normalize_measure(m: Any) -> dict[str, Any]:
 
     expression = m.get("expression")
     if expression and isinstance(expression, str):
-        parsed = EXPR_RE.match(expression)
-        if parsed:
-            agg = parsed.group(1).upper()
-            raw = parsed.group(2)
-            table, field = _split_table_field(raw)
+        parsed_measure = _parse_simple_aggregate_expression(expression)
+        if parsed_measure:
+            agg, raw, table, field = parsed_measure
             default_name = m.get("name") or m.get("alias") or ("Count" if field == "*" else f"{agg}_{field}")
             return {
                 "name": default_name,

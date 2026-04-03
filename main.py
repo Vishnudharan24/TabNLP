@@ -1,3 +1,4 @@
+import asyncio
 import os
 import math
 import mimetypes
@@ -20,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, Literal, Any
+from typing import Optional, Literal, Any, Annotated
 from pathlib import Path
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
@@ -54,6 +55,7 @@ from db.db_store import (
     store_dataset,
     create_user,
     get_user_by_email,
+    get_users_by_emails,
     get_user_by_id,
     update_user_last_login,
     create_report,
@@ -69,9 +71,19 @@ from db.db_store import (
 app = FastAPI()
 logger = logging.getLogger(__name__)
 
+_LOCAL_DEV_ORIGIN_SCHEMES = ("http", "https")
+_LOCAL_DEV_ORIGIN_HOSTS = ("localhost", "127.0.0.1")
+_LOCAL_DEV_ORIGIN_PORTS = (3000, 5173)
+DEFAULT_FRONTEND_ORIGINS = ",".join(
+    f"{scheme}://{host}:{port}"
+    for scheme in _LOCAL_DEV_ORIGIN_SCHEMES
+    for host in _LOCAL_DEV_ORIGIN_HOSTS
+    for port in _LOCAL_DEV_ORIGIN_PORTS
+)
+
 FRONTEND_ORIGINS = os.getenv(
     "FRONTEND_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
+    DEFAULT_FRONTEND_ORIGINS,
 )
 ALLOWED_ORIGINS = [origin.strip() for origin in FRONTEND_ORIGINS.split(",") if origin.strip()]
 
@@ -236,6 +248,7 @@ class ReportUpdateRequest(BaseModel):
 class ReportShareCreateRequest(BaseModel):
     role: Literal["viewer"] = "viewer"
     expires_in_hours: Optional[int] = 24
+    recipient_emails: list[str] = []
 
 
 class DatasetMergeRequest(BaseModel):
@@ -311,6 +324,18 @@ def _validate_source_config(payload: dict):
 
 def _normalize_email(email: str):
     return (email or "").strip().lower()
+
+
+def _normalize_email_list(emails: list[str] | None):
+    unique = []
+    seen = set()
+    for item in (emails or []):
+        value = _normalize_email(str(item or ""))
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
 
 
 def _hash_password(password: str, salt: Optional[str] = None):
@@ -442,7 +467,7 @@ def _is_admin_user(user_doc: dict) -> bool:
     return bool(email and email in configured)
 
 
-async def _require_admin_user(current_user: dict = Depends(_require_current_user)):
+async def _require_admin_user(current_user: Annotated[dict, Depends(_require_current_user)]):
     if not _is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
@@ -477,6 +502,61 @@ def _serialize_report(report_doc: dict[str, Any]):
         "created_at": report_doc.get("created_at"),
         "updated_at": report_doc.get("updated_at"),
     })
+
+
+def _extract_report_dataset_ids(report_doc: dict[str, Any]):
+    if not report_doc:
+        return set()
+
+    dataset_ids = set()
+    selected_dataset_id = str(report_doc.get("selected_dataset_id") or "").strip()
+    if selected_dataset_id:
+        dataset_ids.add(selected_dataset_id)
+
+    charts = report_doc.get("charts") or []
+    for chart in charts:
+        if not isinstance(chart, dict):
+            continue
+        chart_dataset_id = str(chart.get("datasetId") or chart.get("dataset_id") or "").strip()
+        if chart_dataset_id:
+            dataset_ids.add(chart_dataset_id)
+
+    return dataset_ids
+
+
+def _build_frontend_share_url(request: Request, report_id: str, share_token: str):
+    origin = ""
+    if request:
+        origin = str(request.headers.get("origin") or "").strip().rstrip("/")
+    if not origin:
+        origin = str(request.base_url).strip().rstrip("/")
+    return f"{origin}/report/{report_id}?shareToken={share_token}"
+
+
+async def _resolve_shared_access(report_id: str, share_token: str, current_user: dict, request: Request):
+    token_hash = _hash_share_token(share_token)
+    share_doc = await get_active_report_share(report_id=report_id, token_hash=token_hash)
+    if not share_doc:
+        raise HTTPException(status_code=404, detail="Shared report not found or link expired")
+
+    recipient_user_ids = [str(item) for item in (share_doc.get("recipient_user_ids") or []) if str(item).strip()]
+    current_user_id = str(current_user.get("_id"))
+    if recipient_user_ids and current_user_id not in recipient_user_ids:
+        raise HTTPException(status_code=403, detail="You are not authorized to access this shared report")
+
+    if (share_doc.get("role") or "viewer") != "viewer":
+        raise HTTPException(status_code=403, detail="Only viewer role is supported for shared reports")
+
+    report_doc = await get_report_by_id(report_id)
+    if not report_doc:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    await mark_report_share_accessed(
+        str(share_doc.get("_id")),
+        accessed_ip=(request.client.host if request and request.client else None),
+    )
+
+    return share_doc, report_doc
 
 
 def _slugify(text: str) -> str:
@@ -526,7 +606,7 @@ def _infer_semantic_type(column_name: str, series: pd.Series) -> str:
 
 
 @app.post("/datasets/merge")
-async def merge_datasets(payload: DatasetMergeRequest, current_user: dict = Depends(_require_current_user)):
+async def merge_datasets(payload: DatasetMergeRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         left_id = (payload.left_dataset_id or "").strip()
         right_id = (payload.right_dataset_id or "").strip()
@@ -690,7 +770,7 @@ async def auth_login(payload: LoginRequest):
 
 
 @app.get("/auth/me")
-async def auth_me(current_user: dict = Depends(_require_current_user)):
+async def auth_me(current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         return {
             "status": "success",
@@ -703,7 +783,7 @@ async def auth_me(current_user: dict = Depends(_require_current_user)):
 
 
 @app.post("/reports")
-async def create_report_endpoint(payload: ReportCreateRequest, current_user: dict = Depends(_require_current_user)):
+async def create_report_endpoint(payload: ReportCreateRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         report_doc = await create_report(
@@ -727,7 +807,7 @@ async def create_report_endpoint(payload: ReportCreateRequest, current_user: dic
 
 
 @app.put("/reports/{report_id}")
-async def update_report_endpoint(report_id: str, payload: ReportUpdateRequest, current_user: dict = Depends(_require_current_user)):
+async def update_report_endpoint(report_id: str, payload: ReportUpdateRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         updates = {
@@ -758,7 +838,7 @@ async def update_report_endpoint(report_id: str, payload: ReportUpdateRequest, c
 
 
 @app.get("/reports/{report_id}")
-async def get_report_endpoint(report_id: str, current_user: dict = Depends(_require_current_user)):
+async def get_report_endpoint(report_id: str, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         report_doc = await get_report_by_id(report_id)
         if not report_doc:
@@ -783,7 +863,7 @@ async def create_report_share_endpoint(
     report_id: str,
     payload: ReportShareCreateRequest,
     request: Request,
-    current_user: dict = Depends(_require_current_user),
+    current_user: Annotated[dict, Depends(_require_current_user)],
 ):
     try:
         report_doc = await get_report_by_id(report_id)
@@ -791,8 +871,41 @@ async def create_report_share_endpoint(
             raise HTTPException(status_code=404, detail="Report not found")
 
         owner_user_id = str(current_user.get("_id"))
+        owner_email = _normalize_email(str(current_user.get("email") or ""))
         if report_doc.get("owner_user_id") != owner_user_id:
             raise HTTPException(status_code=403, detail="Access denied")
+
+        recipient_emails = _normalize_email_list(payload.recipient_emails)
+        if not recipient_emails:
+            raise HTTPException(status_code=400, detail="At least one recipient email is required")
+
+        recipient_emails = [email for email in recipient_emails if email != owner_email]
+        if not recipient_emails:
+            raise HTTPException(status_code=400, detail="Recipient list cannot contain only the owner email")
+
+        recipient_users = await get_users_by_emails(recipient_emails)
+        matched_users_by_email = {
+            _normalize_email(str(user.get("email") or "")): user
+            for user in recipient_users
+            if user and user.get("email")
+        }
+        missing_emails = [email for email in recipient_emails if email not in matched_users_by_email]
+        if missing_emails:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Some recipient emails are not registered",
+                    "missing_emails": missing_emails,
+                },
+            )
+
+        recipient_user_ids = sorted({
+            str(user.get("_id"))
+            for user in matched_users_by_email.values()
+            if user and str(user.get("_id") or "").strip() and str(user.get("_id")) != owner_user_id
+        })
+        if not recipient_user_ids:
+            raise HTTPException(status_code=400, detail="No valid recipient users found")
 
         expires_in_hours = payload.expires_in_hours if payload.expires_in_hours is not None else 168
         if expires_in_hours <= 0:
@@ -808,6 +921,8 @@ async def create_report_share_endpoint(
             role=payload.role,
             expires_at=expires_at,
             created_by=owner_user_id,
+            recipient_user_ids=recipient_user_ids,
+            recipient_emails=recipient_emails,
             created_ip=(request.client.host if request and request.client else None),
         )
         if not share_doc:
@@ -819,8 +934,9 @@ async def create_report_share_endpoint(
                 "report_id": report_id,
                 "role": payload.role,
                 "expires_at": expires_at,
+                "recipient_emails": recipient_emails,
                 "token": share_token,
-                "share_url": f"{request.base_url}report/{report_id}?shareToken={share_token}",
+                "share_url": _build_frontend_share_url(request, report_id, share_token),
             },
         }
     except HTTPException:
@@ -832,25 +948,16 @@ async def create_report_share_endpoint(
 
 
 @app.get("/shared-reports/{report_id}")
-async def get_shared_report_endpoint(report_id: str, shareToken: str, request: Request):
+async def get_shared_report_endpoint(report_id: str, shareToken: str, request: Request, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         if not shareToken:
             raise HTTPException(status_code=400, detail="shareToken is required")
 
-        token_hash = _hash_share_token(shareToken)
-        share_doc = await get_active_report_share(report_id=report_id, token_hash=token_hash)
-        if not share_doc:
-            raise HTTPException(status_code=404, detail="Shared report not found or link expired")
-        if (share_doc.get("role") or "viewer") != "viewer":
-            raise HTTPException(status_code=403, detail="Only viewer role is supported for shared reports")
-
-        report_doc = await get_report_by_id(report_id)
-        if not report_doc:
-            raise HTTPException(status_code=404, detail="Report not found")
-
-        await mark_report_share_accessed(
-            str(share_doc.get("_id")),
-            accessed_ip=(request.client.host if request and request.client else None),
+        share_doc, report_doc = await _resolve_shared_access(
+            report_id=report_id,
+            share_token=shareToken,
+            current_user=current_user,
+            request=request,
         )
 
         serialized = _serialize_report(report_doc)
@@ -877,7 +984,7 @@ async def startup_event():
 @app.post("/admin/migrations/backfill-owner-user-ids")
 async def admin_backfill_owner_ids(
     payload: OwnerBackfillRequest,
-    _admin_user: dict = Depends(_require_admin_user),
+    _admin_user: Annotated[dict, Depends(_require_admin_user)],
 ):
     try:
         result = await backfill_owner_user_ids(
@@ -894,7 +1001,7 @@ async def admin_backfill_owner_ids(
         _raise_internal_error("Failed to run ownership migration", e)
 
 @app.post("/ingest")
-async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, current_user: dict = Depends(_require_current_user)):
+async def ingest(current_user: Annotated[dict, Depends(_require_current_user)], source_id: Optional[str] = None, url: Optional[str] = None):
     try:
         owner_user_id = str(current_user.get("_id"))
         result = await run_ingestion(source_id=source_id, url=url, owner_user_id=owner_user_id)
@@ -906,7 +1013,7 @@ async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, cur
 
 
 @app.post("/ingest/source/{source_id}")
-async def ingest_by_source_config(source_id: str, current_user: dict = Depends(_require_current_user)):
+async def ingest_by_source_config(source_id: str, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         return await run_ingestion(source_id=source_id, owner_user_id=owner_user_id)
@@ -917,7 +1024,7 @@ async def ingest_by_source_config(source_id: str, current_user: dict = Depends(_
 
 
 @app.post("/ingest/upload")
-async def ingest_uploaded_file(file: UploadFile = File(...), current_user: dict = Depends(_require_current_user)):
+async def ingest_uploaded_file(current_user: Annotated[dict, Depends(_require_current_user)], file: UploadFile = File(...)):
     try:
         owner_user_id = str(current_user.get("_id"))
         source_id = f"upload::{owner_user_id}::{(file.filename or 'uploaded_file').strip() or 'uploaded_file'}"
@@ -947,7 +1054,7 @@ async def ingest_uploaded_file(file: UploadFile = File(...), current_user: dict 
 
 
 @app.post("/source-config")
-async def create_or_update_source_config(payload: SourceConfigUpsertRequest, current_user: dict = Depends(_require_current_user)):
+async def create_or_update_source_config(payload: SourceConfigUpsertRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         config_payload = payload.model_dump(exclude_none=True)
@@ -982,7 +1089,7 @@ async def create_or_update_source_config(payload: SourceConfigUpsertRequest, cur
 
 
 @app.get("/source-config")
-async def get_all_source_configs(limit: int = 200, current_user: dict = Depends(_require_current_user)):
+async def get_all_source_configs(current_user: Annotated[dict, Depends(_require_current_user)], limit: int = 200):
     try:
         owner_user_id = str(current_user.get("_id"))
         configs = await list_source_configs(owner_user_id=owner_user_id, limit=limit)
@@ -996,7 +1103,7 @@ async def get_all_source_configs(limit: int = 200, current_user: dict = Depends(
 
 
 @app.get("/source-config/{source_id}")
-async def get_source_config_by_id(source_id: str, current_user: dict = Depends(_require_current_user)):
+async def get_source_config_by_id(source_id: str, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         source_config = await get_source_config(source_id, owner_user_id=owner_user_id)
@@ -1014,7 +1121,7 @@ async def get_source_config_by_id(source_id: str, current_user: dict = Depends(_
 
 
 @app.patch("/source-config/{source_id}")
-async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest, current_user: dict = Depends(_require_current_user)):
+async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         existing = await get_source_config(source_id, owner_user_id=owner_user_id)
@@ -1060,7 +1167,7 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest,
 
 
 @app.get("/datasets/latest")
-async def get_latest_datasets(limit: int = 100, current_user: dict = Depends(_require_current_user)):
+async def get_latest_datasets(current_user: Annotated[dict, Depends(_require_current_user)], limit: int = 100):
     try:
         owner_user_id = str(current_user.get("_id"))
         documents = await list_latest_datasets(owner_user_id=owner_user_id, limit=limit)
@@ -1074,7 +1181,7 @@ async def get_latest_datasets(limit: int = 100, current_user: dict = Depends(_re
 
 
 @app.get("/datasets")
-async def get_all_datasets(limit: int = 1000, current_user: dict = Depends(_require_current_user)):
+async def get_all_datasets(current_user: Annotated[dict, Depends(_require_current_user)], limit: int = 1000):
     try:
         owner_user_id = str(current_user.get("_id"))
         documents = await list_datasets(owner_user_id=owner_user_id, limit=limit)
@@ -1088,7 +1195,7 @@ async def get_all_datasets(limit: int = 1000, current_user: dict = Depends(_requ
 
 
 @app.get("/datasets/latest/{source_id}")
-async def get_latest_dataset_for_source(source_id: str, current_user: dict = Depends(_require_current_user)):
+async def get_latest_dataset_for_source(source_id: str, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         document = await get_latest_dataset_by_source(source_id, owner_user_id=owner_user_id)
@@ -1106,7 +1213,7 @@ async def get_latest_dataset_for_source(source_id: str, current_user: dict = Dep
 
 
 @app.get("/datasets/{document_id}")
-async def get_dataset_document(document_id: str, current_user: dict = Depends(_require_current_user)):
+async def get_dataset_document(document_id: str, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         owner_user_id = str(current_user.get("_id"))
         document = await get_dataset_by_id(document_id, owner_user_id=owner_user_id)
@@ -1136,7 +1243,7 @@ async def _run_hr_analytics_module(module: str, payload: HrAnalyticsRequest):
 
 
 @app.post("/chart/recommend")
-async def chart_recommend(payload: ChartEngineRequest, _current_user: dict = Depends(_require_current_user)):
+async def chart_recommend(payload: ChartEngineRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         return {
             "status": "success",
@@ -1147,7 +1254,7 @@ async def chart_recommend(payload: ChartEngineRequest, _current_user: dict = Dep
 
 
 @app.post("/chart/config")
-async def chart_config(payload: ChartConfigRequest, _current_user: dict = Depends(_require_current_user)):
+async def chart_config(payload: ChartConfigRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         return {
             "status": "success",
@@ -1163,9 +1270,35 @@ async def chart_config(payload: ChartConfigRequest, _current_user: dict = Depend
 
 
 @app.post("/query")
-async def query_data(payload: QueryRequest, current_user: dict = Depends(_require_current_user)):
+async def query_data(
+    payload: QueryRequest,
+    request: Request,
+    current_user: Annotated[dict, Depends(_require_current_user)],
+    reportId: Optional[str] = None,
+    shareToken: Optional[str] = None,
+):
     try:
         owner_user_id = str(current_user.get("_id"))
+
+        has_share_context = bool((reportId or "").strip() or (shareToken or "").strip())
+        if has_share_context:
+            if not reportId or not shareToken:
+                raise HTTPException(status_code=400, detail="Both reportId and shareToken are required for shared query access")
+
+            _, report_doc = await _resolve_shared_access(
+                report_id=str(reportId).strip(),
+                share_token=str(shareToken).strip(),
+                current_user=current_user,
+                request=request,
+            )
+
+            allowed_dataset_ids = _extract_report_dataset_ids(report_doc)
+            requested_dataset_id = str(payload.datasetId or "").strip()
+            if requested_dataset_id and allowed_dataset_ids and requested_dataset_id not in allowed_dataset_ids:
+                raise HTTPException(status_code=403, detail="Dataset is not part of this shared report")
+
+            owner_user_id = str(report_doc.get("owner_user_id") or "").strip() or owner_user_id
+
         response = await run_query(payload.model_dump(exclude_none=True), owner_user_id=owner_user_id)
         return _to_json_safe(response)
     except QueryEngineError as e:
@@ -1196,9 +1329,36 @@ async def query_data(payload: QueryRequest, current_user: dict = Depends(_requir
 
 
 @app.post("/query/export")
-async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks, current_user: dict = Depends(_require_current_user)):
+async def query_export(
+    payload: QueryRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    current_user: Annotated[dict, Depends(_require_current_user)],
+    reportId: Optional[str] = None,
+    shareToken: Optional[str] = None,
+):
     try:
         owner_user_id = str(current_user.get("_id"))
+
+        has_share_context = bool((reportId or "").strip() or (shareToken or "").strip())
+        if has_share_context:
+            if not reportId or not shareToken:
+                raise HTTPException(status_code=400, detail="Both reportId and shareToken are required for shared query export")
+
+            _, report_doc = await _resolve_shared_access(
+                report_id=str(reportId).strip(),
+                share_token=str(shareToken).strip(),
+                current_user=current_user,
+                request=request,
+            )
+
+            allowed_dataset_ids = _extract_report_dataset_ids(report_doc)
+            requested_dataset_id = str(payload.datasetId or "").strip()
+            if requested_dataset_id and allowed_dataset_ids and requested_dataset_id not in allowed_dataset_ids:
+                raise HTTPException(status_code=403, detail="Dataset is not part of this shared report")
+
+            owner_user_id = str(report_doc.get("owner_user_id") or "").strip() or owner_user_id
+
         response = await run_query(payload.model_dump(exclude_none=True), owner_user_id=owner_user_id)
         columns = response.get("columns", []) if isinstance(response, dict) else []
         rows = response.get("rows", []) if isinstance(response, dict) else []
@@ -1208,14 +1368,14 @@ async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks,
         else:
             df = pd.DataFrame(rows, columns=columns)
 
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        temp.close()
-        df.to_excel(temp.name, index=False)
+        fd, temp_path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        await asyncio.to_thread(df.to_excel, temp_path, index=False)
 
-        filename = f"query_export_{payload.datasetId}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        background_tasks.add_task(os.remove, temp.name)
+        filename = f"query_export_{payload.datasetId}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+        background_tasks.add_task(os.remove, temp_path)
         return FileResponse(
-            temp.name,
+            temp_path,
             filename=filename,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -1247,7 +1407,7 @@ async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks,
 
 
 @app.post("/semantic/measures")
-async def create_semantic_measure(payload: SemanticMeasureCreateRequest, current_user: dict = Depends(_require_current_user)):
+async def create_semantic_measure(payload: SemanticMeasureCreateRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         await _require_dataset_access(payload.datasetId, current_user)
         measure = set_measure(
@@ -1275,9 +1435,40 @@ async def create_semantic_measure(payload: SemanticMeasureCreateRequest, current
 
 
 @app.get("/semantic/measures")
-async def get_semantic_measures(datasetId: str, current_user: dict = Depends(_require_current_user)):
+async def get_semantic_measures(
+    datasetId: str,
+    request: Request,
+    current_user: Annotated[dict, Depends(_require_current_user)],
+    reportId: Optional[str] = None,
+    shareToken: Optional[str] = None,
+):
     try:
-        await _require_dataset_access(datasetId, current_user)
+        owner_user_id = str(current_user.get("_id"))
+        has_share_context = bool((reportId or "").strip() or (shareToken or "").strip())
+
+        if has_share_context:
+            if not reportId or not shareToken:
+                raise HTTPException(status_code=400, detail="Both reportId and shareToken are required for shared semantic access")
+
+            _, report_doc = await _resolve_shared_access(
+                report_id=str(reportId).strip(),
+                share_token=str(shareToken).strip(),
+                current_user=current_user,
+                request=request,
+            )
+
+            allowed_dataset_ids = _extract_report_dataset_ids(report_doc)
+            requested_dataset_id = str(datasetId or "").strip()
+            if requested_dataset_id and allowed_dataset_ids and requested_dataset_id not in allowed_dataset_ids:
+                raise HTTPException(status_code=403, detail="Dataset is not part of this shared report")
+
+            owner_user_id = str(report_doc.get("owner_user_id") or "").strip() or owner_user_id
+            doc = await get_dataset_for_query(datasetId, owner_user_id=owner_user_id)
+            if not doc:
+                raise HTTPException(status_code=404, detail=f"Dataset not found: {datasetId}")
+        else:
+            await _require_dataset_access(datasetId, current_user)
+
         items = list_measures(datasetId)
         return {
             "status": "success",
@@ -1292,7 +1483,7 @@ async def get_semantic_measures(datasetId: str, current_user: dict = Depends(_re
 
 
 @app.put("/semantic/measures/{name}")
-async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateRequest, current_user: dict = Depends(_require_current_user)):
+async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateRequest, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         await _require_dataset_access(payload.datasetId, current_user)
         measure = set_measure(
@@ -1320,7 +1511,7 @@ async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateReque
 
 
 @app.delete("/semantic/measures/{name}")
-async def remove_semantic_measure(name: str, datasetId: str, current_user: dict = Depends(_require_current_user)):
+async def remove_semantic_measure(name: str, datasetId: str, current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         await _require_dataset_access(datasetId, current_user)
         removed = delete_measure(dataset_id=datasetId, name=name)
@@ -1339,7 +1530,7 @@ async def remove_semantic_measure(name: str, datasetId: str, current_user: dict 
 
 
 @app.get("/relationships")
-async def get_relationships(limit: int = 1000, _current_user: dict = Depends(_require_current_user)):
+async def get_relationships(_current_user: Annotated[dict, Depends(_require_current_user)], limit: int = 1000):
     try:
         items = await list_relationships(limit=limit)
         return {
@@ -1352,7 +1543,7 @@ async def get_relationships(limit: int = 1000, _current_user: dict = Depends(_re
 
 
 @app.post("/relationships")
-async def create_relationship(payload: QueryJoin, _current_user: dict = Depends(_require_current_user)):
+async def create_relationship(payload: QueryJoin, _current_user: Annotated[dict, Depends(_require_current_user)]):
     try:
         result = await upsert_relationship(
             from_table=payload.from_table,
@@ -1370,78 +1561,78 @@ async def create_relationship(payload: QueryJoin, _current_user: dict = Depends(
 
 
 @app.post("/hr/analytics/summary")
-async def hr_analytics_summary(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_summary(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("summary", payload)
 
 
 @app.post("/hr/analytics/demographics")
-async def hr_analytics_demographics(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_demographics(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("demographics", payload)
 
 
 @app.post("/hr/analytics/hiring")
-async def hr_analytics_hiring(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_hiring(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("hiring", payload)
 
 
 @app.post("/hr/analytics/attrition")
-async def hr_analytics_attrition(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_attrition(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("attrition", payload)
 
 
 @app.post("/hr/analytics/experience")
-async def hr_analytics_experience(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_experience(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("experience", payload)
 
 
 @app.post("/hr/analytics/org")
-async def hr_analytics_org(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_org(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("org", payload)
 
 
 @app.post("/hr/analytics/payroll")
-async def hr_analytics_payroll(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_payroll(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("payroll", payload)
 
 
 @app.post("/hr/analytics/education")
-async def hr_analytics_education(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_education(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("education", payload)
 
 
 @app.post("/hr/analytics/location")
-async def hr_analytics_location(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_location(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("location", payload)
 
 
 @app.post("/hr/analytics/department")
-async def hr_analytics_department(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_department(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("department", payload)
 
 
 @app.post("/hr/analytics/lifecycle")
-async def hr_analytics_lifecycle(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_lifecycle(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("lifecycle", payload)
 
 
 @app.post("/hr/analytics/compliance")
-async def hr_analytics_compliance(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_compliance(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("compliance", payload)
 
 
 @app.post("/hr/analytics/contact")
-async def hr_analytics_contact(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_contact(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("contact", payload)
 
 
 @app.post("/hr/analytics/data-quality")
-async def hr_analytics_data_quality(payload: HrAnalyticsRequest, _current_user: dict = Depends(_require_current_user)):
+async def hr_analytics_data_quality(payload: HrAnalyticsRequest, _current_user: Annotated[dict, Depends(_require_current_user)]):
     return await _run_hr_analytics_module("data-quality", payload)
 
 
 #The below endpoints are added for testiing
 @app.get("/test/file")
-async def get_test_excel_file(_current_user: dict = Depends(_require_current_user)):
+async def get_test_excel_file(_current_user: Annotated[dict, Depends(_require_current_user)]):
     if not TEST_EXCEL_FILE.exists():
         raise HTTPException(status_code=404, detail="Test source file not found")
 
@@ -1455,7 +1646,7 @@ async def get_test_excel_file(_current_user: dict = Depends(_require_current_use
 
 
 @app.post("/test/source-config/excel")
-async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test", current_user: dict = Depends(_require_current_user)):
+async def add_test_excel_source_config(request: Request, current_user: Annotated[dict, Depends(_require_current_user)], source_id: str = "local_excel_test"):
     try:
         owner_user_id = str(current_user.get("_id"))
         api_endpoint = f"{str(request.base_url).rstrip('/')}/test/file"
@@ -1479,6 +1670,7 @@ async def add_test_excel_source_config(request: Request, source_id: str = "local
 
 @app.post("/test/source-config/sftp")
 async def add_test_sftp_source_config(
+    current_user: Annotated[dict, Depends(_require_current_user)],
     source_id: str = "local_sftp_test",
     host: str = "localhost",
     port: int = 22,
@@ -1487,7 +1679,6 @@ async def add_test_sftp_source_config(
     passphrase: Optional[str] = None,
     remote_path: str = DEFAULT_SFTP_REMOTE_PATH,
     known_hosts_path: Optional[str] = None,
-    current_user: dict = Depends(_require_current_user),
 ):
     try:
         owner_user_id = str(current_user.get("_id"))
@@ -1523,7 +1714,7 @@ async def add_test_sftp_source_config(
 
 
 @app.post("/test/ingest/excel")
-async def ingest_test_excel(source_id: str = "local_excel_test", current_user: dict = Depends(_require_current_user)):
+async def ingest_test_excel(current_user: Annotated[dict, Depends(_require_current_user)], source_id: str = "local_excel_test"):
     try:
         owner_user_id = str(current_user.get("_id"))
         return await run_ingestion(source_id=source_id, owner_user_id=owner_user_id)
@@ -1534,7 +1725,7 @@ async def ingest_test_excel(source_id: str = "local_excel_test", current_user: d
 
 
 @app.post("/test/ingest/sftp")
-async def ingest_test_sftp(source_id: str = "local_sftp_test", current_user: dict = Depends(_require_current_user)):
+async def ingest_test_sftp(current_user: Annotated[dict, Depends(_require_current_user)], source_id: str = "local_sftp_test"):
     try:
         owner_user_id = str(current_user.get("_id"))
         return await run_ingestion(source_id=source_id, owner_user_id=owner_user_id)

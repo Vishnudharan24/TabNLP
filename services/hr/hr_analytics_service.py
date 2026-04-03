@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -75,6 +74,53 @@ def _to_number(value: Any) -> float | None:
         return None
 
 
+_EXPERIENCE_YEAR_UNITS = ("year", "years", "yr", "yrs", "years")
+_EXPERIENCE_MONTH_UNITS = ("month", "months", "mo", "mos")
+
+
+def _sanitize_experience_tokens(text: str) -> list[str]:
+    sanitized = str(text or "").lower()
+    for symbol in ("(", ")", ",", ";", "/", "\\", "|", ":"):
+        sanitized = sanitized.replace(symbol, " ")
+    return [token for token in sanitized.split() if token]
+
+
+def _extract_prefixed_number(token: str, units: tuple[str, ...]) -> float | None:
+    for unit in units:
+        if not token.endswith(unit):
+            continue
+        number_text = token[: -len(unit)]
+        if not number_text:
+            continue
+        parsed = _to_number(number_text)
+        if parsed is not None and math.isfinite(parsed):
+            return float(parsed)
+    return None
+
+
+def _extract_unit_amount(text: str, units: tuple[str, ...]) -> float | None:
+    tokens = _sanitize_experience_tokens(text)
+    if not tokens:
+        return None
+
+    for idx, token in enumerate(tokens):
+        direct = _extract_prefixed_number(token, units)
+        if direct is not None:
+            return direct
+
+        numeric = _to_number(token)
+        if numeric is None or not math.isfinite(numeric):
+            continue
+
+        if idx + 1 >= len(tokens):
+            continue
+        next_token = tokens[idx + 1]
+        if next_token in units:
+            return float(numeric)
+
+    return None
+
+
 def _to_experience_years(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -89,13 +135,11 @@ def _to_experience_years(value: Any) -> float | None:
         return None
 
     lowered = text.lower()
-    year_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yr|year\(s\))", lowered)
-    month_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:months?|mos?|mo|month\(s\))", lowered)
+    years = _extract_unit_amount(lowered, _EXPERIENCE_YEAR_UNITS)
+    months = _extract_unit_amount(lowered, _EXPERIENCE_MONTH_UNITS)
 
-    if year_match or month_match:
-        years = float(year_match.group(1)) if year_match else 0.0
-        months = float(month_match.group(1)) if month_match else 0.0
-        total_years = years + (months / 12.0)
+    if years is not None or months is not None:
+        total_years = float(years or 0.0) + (float(months or 0.0) / 12.0)
         return total_years if math.isfinite(total_years) else None
 
     return _to_number(text)

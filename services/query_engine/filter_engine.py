@@ -58,9 +58,9 @@ def _match_operator(value: Any, operator: str, expected: Any) -> bool:
     if op == "IS_EMPTY":
         return value is None or str(value).strip() == ""
     if op == "IS_TRUE":
-        return bool(value) is True
+        return bool(value)
     if op == "IS_FALSE":
-        return bool(value) is False
+        return not bool(value)
 
     if op in {"IN", "NOT_IN"}:
         expected_values = expected if isinstance(expected, list) else [expected]

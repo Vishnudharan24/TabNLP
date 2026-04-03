@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
 import pandas as pd
@@ -109,7 +109,7 @@ def generate_metadata(source_url, df, source_type="api", source_details=None, re
     metadata = {
         "source": source_url,
         "source_type": source_type,
-        "timestamp": datetime.now(),
+        "timestamp": datetime.now(timezone.utc),
         "row_count": len(df),
         "columns": list(df.columns),
         "column_types": {column: classify_declared_type(df[column]) for column in df.columns},
