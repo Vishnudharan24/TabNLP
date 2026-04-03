@@ -42,6 +42,7 @@ from services.semantic_layer import (
 from db.db_store import (
     upsert_source_config,
     ensure_indexes,
+    backfill_owner_user_ids,
     get_source_config,
     list_source_configs,
     unset_source_config_fields,
@@ -246,6 +247,11 @@ class DatasetMergeRequest(BaseModel):
     merged_name: Optional[str] = None
 
 
+class OwnerBackfillRequest(BaseModel):
+    dry_run: bool = True
+    sample_size: int = 20
+
+
 def _serialize_source_config(source_config: dict):
     if not source_config:
         return None
@@ -426,6 +432,30 @@ async def _require_current_user(authorization: Optional[str] = Header(default=No
     return user_doc
 
 
+def _is_admin_user(user_doc: dict) -> bool:
+    email = (user_doc.get("email") or "").strip().lower()
+    configured = {
+        item.strip().lower()
+        for item in os.getenv("ADMIN_EMAILS", "").split(",")
+        if item.strip()
+    }
+    return bool(email and email in configured)
+
+
+async def _require_admin_user(current_user: dict = Depends(_require_current_user)):
+    if not _is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
+async def _require_dataset_access(dataset_id: str, current_user: dict):
+    owner_user_id = str(current_user.get("_id"))
+    doc = await get_dataset_for_query(dataset_id, owner_user_id=owner_user_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset_id}")
+    return doc
+
+
 def _raise_internal_error(public_message: str, exc: Exception):
     _ = exc
     logger.exception(public_message)
@@ -505,8 +535,9 @@ async def merge_datasets(payload: DatasetMergeRequest, current_user: dict = Depe
         if left_id == right_id:
             raise HTTPException(status_code=400, detail="Select two different datasets to merge")
 
-        left_doc = await get_dataset_for_query(left_id)
-        right_doc = await get_dataset_for_query(right_id)
+        owner_user_id = str(current_user.get("_id"))
+        left_doc = await get_dataset_for_query(left_id, owner_user_id=owner_user_id)
+        right_doc = await get_dataset_for_query(right_id, owner_user_id=owner_user_id)
         if not left_doc:
             raise HTTPException(status_code=404, detail=f"Left dataset not found: {left_id}")
         if not right_doc:
@@ -583,8 +614,13 @@ async def merge_datasets(payload: DatasetMergeRequest, current_user: dict = Depe
         }
 
         source_id = f"merged::{str(current_user.get('_id'))}::{_slugify(merged_name)}"
-        storage_result = await store_dataset(metadata, merged_df, source_id=source_id)
-        stored_doc = await get_dataset_by_id(storage_result["document_id"])
+        storage_result = await store_dataset(
+            metadata,
+            merged_df,
+            source_id=source_id,
+            owner_user_id=owner_user_id,
+        )
+        stored_doc = await get_dataset_by_id(storage_result["document_id"], owner_user_id=owner_user_id)
 
         return {
             "status": "success",
@@ -837,10 +873,31 @@ async def get_shared_report_endpoint(report_id: str, shareToken: str, request: R
 async def startup_event():
     await ensure_indexes()
 
-@app.post("/ingest")
-async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, _current_user: dict = Depends(_require_current_user)):
+
+@app.post("/admin/migrations/backfill-owner-user-ids")
+async def admin_backfill_owner_ids(
+    payload: OwnerBackfillRequest,
+    _admin_user: dict = Depends(_require_admin_user),
+):
     try:
-        result = await run_ingestion(source_id=source_id, url=url)
+        result = await backfill_owner_user_ids(
+            dry_run=payload.dry_run,
+            sample_size=payload.sample_size,
+        )
+        if not payload.dry_run:
+            # Re-ensure tenant indexes after migration run.
+            await ensure_indexes()
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to run ownership migration", e)
+
+@app.post("/ingest")
+async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, current_user: dict = Depends(_require_current_user)):
+    try:
+        owner_user_id = str(current_user.get("_id"))
+        result = await run_ingestion(source_id=source_id, url=url, owner_user_id=owner_user_id)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -849,9 +906,10 @@ async def ingest(source_id: Optional[str] = None, url: Optional[str] = None, _cu
 
 
 @app.post("/ingest/source/{source_id}")
-async def ingest_by_source_config(source_id: str, _current_user: dict = Depends(_require_current_user)):
+async def ingest_by_source_config(source_id: str, current_user: dict = Depends(_require_current_user)):
     try:
-        return await run_ingestion(source_id=source_id)
+        owner_user_id = str(current_user.get("_id"))
+        return await run_ingestion(source_id=source_id, owner_user_id=owner_user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -861,9 +919,8 @@ async def ingest_by_source_config(source_id: str, _current_user: dict = Depends(
 @app.post("/ingest/upload")
 async def ingest_uploaded_file(file: UploadFile = File(...), current_user: dict = Depends(_require_current_user)):
     try:
-        source_id = (current_user.get("name") or "").strip()
-        if not source_id:
-            raise ValueError("Authenticated user name is required for upload source id")
+        owner_user_id = str(current_user.get("_id"))
+        source_id = f"upload::{owner_user_id}::{(file.filename or 'uploaded_file').strip() or 'uploaded_file'}"
 
         file_bytes = await file.read()
         source_details = {
@@ -880,6 +937,7 @@ async def ingest_uploaded_file(file: UploadFile = File(...), current_user: dict 
             file_name=file.filename or "uploaded_file",
             content_type=file.content_type or "",
             source_id=source_id,
+            owner_user_id=owner_user_id,
             source_details=source_details,
         )
     except ValueError as e:
@@ -889,13 +947,15 @@ async def ingest_uploaded_file(file: UploadFile = File(...), current_user: dict 
 
 
 @app.post("/source-config")
-async def create_or_update_source_config(payload: SourceConfigUpsertRequest, _current_user: dict = Depends(_require_current_user)):
+async def create_or_update_source_config(payload: SourceConfigUpsertRequest, current_user: dict = Depends(_require_current_user)):
     try:
+        owner_user_id = str(current_user.get("_id"))
         config_payload = payload.model_dump(exclude_none=True)
         _validate_source_config(config_payload)
 
         result = await upsert_source_config(
             source_id=payload.source_id,
+            owner_user_id=owner_user_id,
             name=payload.name,
             source_type=payload.source_type,
             api_endpoint=payload.api_endpoint,
@@ -904,11 +964,11 @@ async def create_or_update_source_config(payload: SourceConfigUpsertRequest, _cu
         )
 
         if payload.source_type == "api":
-            await unset_source_config_fields(payload.source_id, ["sftp"])
+            await unset_source_config_fields(payload.source_id, owner_user_id=owner_user_id, fields=["sftp"])
         if payload.source_type == "sftp":
-            await unset_source_config_fields(payload.source_id, ["api_endpoint", "url"])
+            await unset_source_config_fields(payload.source_id, owner_user_id=owner_user_id, fields=["api_endpoint", "url"])
 
-        current = await get_source_config(payload.source_id)
+        current = await get_source_config(payload.source_id, owner_user_id=owner_user_id)
 
         return {
             "status": "success",
@@ -922,9 +982,10 @@ async def create_or_update_source_config(payload: SourceConfigUpsertRequest, _cu
 
 
 @app.get("/source-config")
-async def get_all_source_configs(limit: int = 200, _current_user: dict = Depends(_require_current_user)):
+async def get_all_source_configs(limit: int = 200, current_user: dict = Depends(_require_current_user)):
     try:
-        configs = await list_source_configs(limit=limit)
+        owner_user_id = str(current_user.get("_id"))
+        configs = await list_source_configs(owner_user_id=owner_user_id, limit=limit)
         return {
             "status": "success",
             "count": len(configs),
@@ -935,9 +996,10 @@ async def get_all_source_configs(limit: int = 200, _current_user: dict = Depends
 
 
 @app.get("/source-config/{source_id}")
-async def get_source_config_by_id(source_id: str, _current_user: dict = Depends(_require_current_user)):
+async def get_source_config_by_id(source_id: str, current_user: dict = Depends(_require_current_user)):
     try:
-        source_config = await get_source_config(source_id)
+        owner_user_id = str(current_user.get("_id"))
+        source_config = await get_source_config(source_id, owner_user_id=owner_user_id)
         if not source_config:
             raise HTTPException(status_code=404, detail=f"Source config not found for: {source_id}")
 
@@ -952,9 +1014,10 @@ async def get_source_config_by_id(source_id: str, _current_user: dict = Depends(
 
 
 @app.patch("/source-config/{source_id}")
-async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest, _current_user: dict = Depends(_require_current_user)):
+async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest, current_user: dict = Depends(_require_current_user)):
     try:
-        existing = await get_source_config(source_id)
+        owner_user_id = str(current_user.get("_id"))
+        existing = await get_source_config(source_id, owner_user_id=owner_user_id)
         if not existing:
             raise HTTPException(status_code=404, detail=f"Source config not found for: {source_id}")
 
@@ -968,6 +1031,7 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest,
 
         result = await upsert_source_config(
             source_id=source_id,
+            owner_user_id=owner_user_id,
             name=merged["name"],
             source_type=merged["source_type"],
             api_endpoint=merged.get("api_endpoint"),
@@ -976,11 +1040,11 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest,
         )
 
         if merged["source_type"] == "api":
-            await unset_source_config_fields(source_id, ["sftp"])
+            await unset_source_config_fields(source_id, owner_user_id=owner_user_id, fields=["sftp"])
         if merged["source_type"] == "sftp":
-            await unset_source_config_fields(source_id, ["api_endpoint", "url"])
+            await unset_source_config_fields(source_id, owner_user_id=owner_user_id, fields=["api_endpoint", "url"])
 
-        current = await get_source_config(source_id)
+        current = await get_source_config(source_id, owner_user_id=owner_user_id)
 
         return {
             "status": "success",
@@ -996,9 +1060,10 @@ async def patch_source_config(source_id: str, payload: SourceConfigPatchRequest,
 
 
 @app.get("/datasets/latest")
-async def get_latest_datasets(limit: int = 100, _current_user: dict = Depends(_require_current_user)):
+async def get_latest_datasets(limit: int = 100, current_user: dict = Depends(_require_current_user)):
     try:
-        documents = await list_latest_datasets(limit=limit)
+        owner_user_id = str(current_user.get("_id"))
+        documents = await list_latest_datasets(owner_user_id=owner_user_id, limit=limit)
         return {
             "status": "success",
             "count": len(documents),
@@ -1009,9 +1074,10 @@ async def get_latest_datasets(limit: int = 100, _current_user: dict = Depends(_r
 
 
 @app.get("/datasets")
-async def get_all_datasets(limit: int = 1000, _current_user: dict = Depends(_require_current_user)):
+async def get_all_datasets(limit: int = 1000, current_user: dict = Depends(_require_current_user)):
     try:
-        documents = await list_datasets(limit=limit)
+        owner_user_id = str(current_user.get("_id"))
+        documents = await list_datasets(owner_user_id=owner_user_id, limit=limit)
         return {
             "status": "success",
             "count": len(documents),
@@ -1022,9 +1088,10 @@ async def get_all_datasets(limit: int = 1000, _current_user: dict = Depends(_req
 
 
 @app.get("/datasets/latest/{source_id}")
-async def get_latest_dataset_for_source(source_id: str, _current_user: dict = Depends(_require_current_user)):
+async def get_latest_dataset_for_source(source_id: str, current_user: dict = Depends(_require_current_user)):
     try:
-        document = await get_latest_dataset_by_source(source_id)
+        owner_user_id = str(current_user.get("_id"))
+        document = await get_latest_dataset_by_source(source_id, owner_user_id=owner_user_id)
         if not document:
             raise HTTPException(status_code=404, detail=f"No latest dataset found for source: {source_id}")
 
@@ -1039,9 +1106,10 @@ async def get_latest_dataset_for_source(source_id: str, _current_user: dict = De
 
 
 @app.get("/datasets/{document_id}")
-async def get_dataset_document(document_id: str, _current_user: dict = Depends(_require_current_user)):
+async def get_dataset_document(document_id: str, current_user: dict = Depends(_require_current_user)):
     try:
-        document = await get_dataset_by_id(document_id)
+        owner_user_id = str(current_user.get("_id"))
+        document = await get_dataset_by_id(document_id, owner_user_id=owner_user_id)
         if not document:
             raise HTTPException(status_code=404, detail=f"Dataset not found: {document_id}")
 
@@ -1095,9 +1163,10 @@ async def chart_config(payload: ChartConfigRequest, _current_user: dict = Depend
 
 
 @app.post("/query")
-async def query_data(payload: QueryRequest, _current_user: dict = Depends(_require_current_user)):
+async def query_data(payload: QueryRequest, current_user: dict = Depends(_require_current_user)):
     try:
-        response = await run_query(payload.model_dump(exclude_none=True))
+        owner_user_id = str(current_user.get("_id"))
+        response = await run_query(payload.model_dump(exclude_none=True), owner_user_id=owner_user_id)
         return _to_json_safe(response)
     except QueryEngineError as e:
         return JSONResponse(status_code=400, content=e.to_dict())
@@ -1127,9 +1196,10 @@ async def query_data(payload: QueryRequest, _current_user: dict = Depends(_requi
 
 
 @app.post("/query/export")
-async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks, _current_user: dict = Depends(_require_current_user)):
+async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks, current_user: dict = Depends(_require_current_user)):
     try:
-        response = await run_query(payload.model_dump(exclude_none=True))
+        owner_user_id = str(current_user.get("_id"))
+        response = await run_query(payload.model_dump(exclude_none=True), owner_user_id=owner_user_id)
         columns = response.get("columns", []) if isinstance(response, dict) else []
         rows = response.get("rows", []) if isinstance(response, dict) else []
 
@@ -1177,8 +1247,9 @@ async def query_export(payload: QueryRequest, background_tasks: BackgroundTasks,
 
 
 @app.post("/semantic/measures")
-async def create_semantic_measure(payload: SemanticMeasureCreateRequest, _current_user: dict = Depends(_require_current_user)):
+async def create_semantic_measure(payload: SemanticMeasureCreateRequest, current_user: dict = Depends(_require_current_user)):
     try:
+        await _require_dataset_access(payload.datasetId, current_user)
         measure = set_measure(
             dataset_id=payload.datasetId,
             name=payload.name,
@@ -1204,8 +1275,9 @@ async def create_semantic_measure(payload: SemanticMeasureCreateRequest, _curren
 
 
 @app.get("/semantic/measures")
-async def get_semantic_measures(datasetId: str, _current_user: dict = Depends(_require_current_user)):
+async def get_semantic_measures(datasetId: str, current_user: dict = Depends(_require_current_user)):
     try:
+        await _require_dataset_access(datasetId, current_user)
         items = list_measures(datasetId)
         return {
             "status": "success",
@@ -1213,13 +1285,16 @@ async def get_semantic_measures(datasetId: str, _current_user: dict = Depends(_r
             "count": len(items),
             "measures": items,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         _raise_internal_error("Failed to list semantic measures", e)
 
 
 @app.put("/semantic/measures/{name}")
-async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateRequest, _current_user: dict = Depends(_require_current_user)):
+async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateRequest, current_user: dict = Depends(_require_current_user)):
     try:
+        await _require_dataset_access(payload.datasetId, current_user)
         measure = set_measure(
             dataset_id=payload.datasetId,
             name=name,
@@ -1245,8 +1320,9 @@ async def update_semantic_measure(name: str, payload: SemanticMeasureUpdateReque
 
 
 @app.delete("/semantic/measures/{name}")
-async def remove_semantic_measure(name: str, datasetId: str, _current_user: dict = Depends(_require_current_user)):
+async def remove_semantic_measure(name: str, datasetId: str, current_user: dict = Depends(_require_current_user)):
     try:
+        await _require_dataset_access(datasetId, current_user)
         removed = delete_measure(dataset_id=datasetId, name=name)
         if removed:
             clear_dataset_cache(datasetId)
@@ -1256,6 +1332,8 @@ async def remove_semantic_measure(name: str, datasetId: str, _current_user: dict
             "removed": removed,
             "name": name,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         _raise_internal_error("Failed to delete semantic measure", e)
 
@@ -1377,11 +1455,13 @@ async def get_test_excel_file(_current_user: dict = Depends(_require_current_use
 
 
 @app.post("/test/source-config/excel")
-async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test", _current_user: dict = Depends(_require_current_user)):
+async def add_test_excel_source_config(request: Request, source_id: str = "local_excel_test", current_user: dict = Depends(_require_current_user)):
     try:
+        owner_user_id = str(current_user.get("_id"))
         api_endpoint = f"{str(request.base_url).rstrip('/')}/test/file"
         result = await upsert_source_config(
             source_id=source_id,
+            owner_user_id=owner_user_id,
             name="Local Test Excel Source",
             api_endpoint=api_endpoint,
             source_type="api",
@@ -1407,9 +1487,10 @@ async def add_test_sftp_source_config(
     passphrase: Optional[str] = None,
     remote_path: str = DEFAULT_SFTP_REMOTE_PATH,
     known_hosts_path: Optional[str] = None,
-    _current_user: dict = Depends(_require_current_user),
+    current_user: dict = Depends(_require_current_user),
 ):
     try:
+        owner_user_id = str(current_user.get("_id"))
         sftp_config = {
             "host": host,
             "port": port,
@@ -1424,6 +1505,7 @@ async def add_test_sftp_source_config(
 
         result = await upsert_source_config(
             source_id=source_id,
+            owner_user_id=owner_user_id,
             name="Local Test SFTP Source",
             source_type="sftp",
             sftp=sftp_config,
@@ -1441,9 +1523,10 @@ async def add_test_sftp_source_config(
 
 
 @app.post("/test/ingest/excel")
-async def ingest_test_excel(source_id: str = "local_excel_test", _current_user: dict = Depends(_require_current_user)):
+async def ingest_test_excel(source_id: str = "local_excel_test", current_user: dict = Depends(_require_current_user)):
     try:
-        return await run_ingestion(source_id=source_id)
+        owner_user_id = str(current_user.get("_id"))
+        return await run_ingestion(source_id=source_id, owner_user_id=owner_user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1451,9 +1534,10 @@ async def ingest_test_excel(source_id: str = "local_excel_test", _current_user: 
 
 
 @app.post("/test/ingest/sftp")
-async def ingest_test_sftp(source_id: str = "local_sftp_test", _current_user: dict = Depends(_require_current_user)):
+async def ingest_test_sftp(source_id: str = "local_sftp_test", current_user: dict = Depends(_require_current_user)):
     try:
-        return await run_ingestion(source_id=source_id)
+        owner_user_id = str(current_user.get("_id"))
+        return await run_ingestion(source_id=source_id, owner_user_id=owner_user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

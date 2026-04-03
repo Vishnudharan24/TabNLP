@@ -6,7 +6,10 @@ from services.data_services.metadata_generator import generate_metadata
 from db.db_store import store_dataset, get_source_config
 
 
-async def run_ingestion(source_id=None, url=None):
+async def run_ingestion(source_id=None, url=None, owner_user_id: str | None = None):
+    if not owner_user_id:
+        raise ValueError("owner_user_id is required")
+
     source_config = None
     source_type = "api"
     source_descriptor = url
@@ -15,7 +18,7 @@ async def run_ingestion(source_id=None, url=None):
         if not source_id:
             raise ValueError("Either source_id or url is required")
 
-        source_config = await get_source_config(source_id)
+        source_config = await get_source_config(source_id, owner_user_id=owner_user_id)
 
         if not source_config:
             raise ValueError(f"Source config not found for: {source_id}")
@@ -51,7 +54,7 @@ async def run_ingestion(source_id=None, url=None):
     if source_id:
         metadata["source_id"] = source_id
 
-    storage_result = await store_dataset(metadata, df, source_id=source_id)
+    storage_result = await store_dataset(metadata, df, source_id=source_id, owner_user_id=owner_user_id)
 
     return {
         "status": "success",
@@ -68,6 +71,7 @@ async def run_uploaded_file_ingestion(
     file_name: str,
     content_type: str,
     source_id: str,
+    owner_user_id: str,
     source_details: dict | None = None,
 ):
     if not file_bytes:
@@ -91,7 +95,7 @@ async def run_uploaded_file_ingestion(
     )
     metadata["source_id"] = source_id
 
-    storage_result = await store_dataset(metadata, df, source_id=source_id)
+    storage_result = await store_dataset(metadata, df, source_id=source_id, owner_user_id=owner_user_id)
 
     return {
         "status": "success",

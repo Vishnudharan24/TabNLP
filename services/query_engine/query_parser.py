@@ -26,10 +26,11 @@ def _canonical_query_payload(query: dict) -> str:
     return json.dumps(query, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def _make_cache_key(normalized_query: dict, dataset_version: str) -> str:
+def _make_cache_key(normalized_query: dict, dataset_version: str, owner_user_id: str) -> str:
     payload = _canonical_query_payload({
         "query": normalized_query,
         "dataset_version": dataset_version,
+        "owner_user_id": owner_user_id,
     })
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -51,12 +52,12 @@ def _cache_set(key: str, value: dict):
     }
 
 
-async def run_query(query: dict) -> dict:
+async def run_query(query: dict, owner_user_id: str) -> dict:
     started_at = time.perf_counter()
 
     parsed_query = parse_query(query)
 
-    document = await get_dataset_for_query(parsed_query.get("datasetId"))
+    document = await get_dataset_for_query(parsed_query.get("datasetId"), owner_user_id=owner_user_id)
     if not document:
         dataset_id = parsed_query.get("datasetId")
         raise ValueError(f"Dataset not found for datasetId='{dataset_id}'")
@@ -66,7 +67,7 @@ async def run_query(query: dict) -> dict:
     validate_query(normalized_query, data_model)
 
     dataset_version = str(document.get("version") or document.get("ingested_at") or "latest")
-    cache_key = _make_cache_key(normalized_query, dataset_version)
+    cache_key = _make_cache_key(normalized_query, dataset_version, owner_user_id)
     cached = _cache_get(cache_key)
     if cached is not None:
         execution_ms = int((time.perf_counter() - started_at) * 1000)
