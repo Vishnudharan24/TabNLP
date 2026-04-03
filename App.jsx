@@ -50,6 +50,18 @@ const STORAGE_KEY_VIEW = 'power_bi_v3_view_restored';
 const STORAGE_KEY_BACKEND_SOURCE_IDS = 'power_bi_v3_backend_source_ids_restored';
 const STORAGE_KEY_AUTH_TOKEN = 'power_bi_v3_auth_token';
 const STORAGE_KEY_AUTH_USER = 'power_bi_v3_auth_user';
+const USER_SCOPED_STORAGE_KEYS = [
+    STORAGE_KEY_CHARTS,
+    STORAGE_KEY_PAGES,
+    STORAGE_KEY_DATASETS,
+    STORAGE_KEY_COMPANIES,
+    STORAGE_KEY_GLOBAL_FILTERS,
+    STORAGE_KEY_ACTIVE_PAGE,
+    STORAGE_KEY_SELECTED_DATASET,
+    STORAGE_KEY_ACTIVE_COMPANY,
+    STORAGE_KEY_VIEW,
+    STORAGE_KEY_BACKEND_SOURCE_IDS,
+];
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
 const APP_BASE_URL = (() => {
@@ -161,6 +173,16 @@ const writeStorageJson = (key, value) => {
         console.warn(`Failed to persist ${key}:`, error);
         return false;
     }
+};
+
+const clearUserScopedStorage = () => {
+    USER_SCOPED_STORAGE_KEYS.forEach((key) => {
+        try {
+            localStorage.removeItem(key);
+        } catch {
+            // ignore storage errors
+        }
+    });
 };
 
 const extractBackendSourceIds = (datasets = []) => (
@@ -360,6 +382,7 @@ const App = () => {
     const [semanticMeasuresByDataset, setSemanticMeasuresByDataset] = useState({});
     const [isSharedView, setIsSharedView] = useState(false);
     const [currentReportId, setCurrentReportId] = useState('');
+    const previousAuthUserIdRef = useRef(authUser?.id || '');
 
     useEffect(() => {
         document.body.style.fontFamily = TYPO.fontFamily;
@@ -466,6 +489,46 @@ const App = () => {
     const handleLogout = () => {
         applyAuthSession('', null);
     };
+
+    const resetWorkspaceState = useCallback(() => {
+        const firstPageId = 'page-1';
+        hasHydratedRef.current = false;
+        setDatasets([]);
+        setCompanies([]);
+        setCharts([]);
+        setPages([{ id: firstPageId, name: 'Page 1' }]);
+        setActivePageId(firstPageId);
+        setSelectedDatasetId('');
+        setActiveChartId(null);
+        setActiveCompanyId('__all__');
+        setGlobalFilters([]);
+        setDrillThroughContext(null);
+        setProfilerDatasetId(null);
+        setPreviewDatasetId(null);
+        setSemanticMeasuresByDataset({});
+        setCurrentReportId('');
+        setIsSharedView(false);
+        setIsEditMode(true);
+        setView('data');
+    }, []);
+
+    useEffect(() => {
+        const previousUserId = previousAuthUserIdRef.current;
+        const currentUserId = authUser?.id || '';
+
+        if (previousUserId === currentUserId) return;
+
+        clearUserScopedStorage();
+        resetWorkspaceState();
+        const rootPath = toBrowserRoutePath('/');
+        if (window.location.pathname !== rootPath) {
+            window.history.pushState({}, '', rootPath);
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        }
+        setRoutePath('/');
+
+        previousAuthUserIdRef.current = currentUserId;
+    }, [authUser?.id, resetWorkspaceState]);
 
     const applyReportToState = (report) => {
         const safeReport = report || {};
