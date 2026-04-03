@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
     X, Merge, ArrowRight, ArrowLeftRight, ChevronDown, Check,
     Database, Table, AlertCircle, Sparkles, Hash, Type,
@@ -29,6 +29,8 @@ const getDatasetFileName = (dataset) => (
     || ''
 );
 
+const createEmptyKeyPair = (id) => ({ id, leftKey: '', rightKey: '' });
+
 const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
     const { theme } = useTheme();
     const isDark = theme === 'dark';
@@ -36,7 +38,8 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
     const [leftId, setLeftId] = useState(datasets[0]?.id || '');
     const [rightId, setRightId] = useState(datasets[1]?.id || '');
     const [joinType, setJoinType] = useState('inner');
-    const [keyPairs, setKeyPairs] = useState([{ leftKey: '', rightKey: '' }]);
+    const keyPairIdRef = useRef(1);
+    const [keyPairs, setKeyPairs] = useState([createEmptyKeyPair(0)]);
     const [mergedName, setMergedName] = useState('');
     const [previewData, setPreviewData] = useState(null);
     const [error, setError] = useState('');
@@ -54,11 +57,15 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
 
     // Auto-fill first key pair from suggestions
     const applySuggestion = useCallback((suggestion) => {
-        setKeyPairs([{ leftKey: suggestion.leftKey, rightKey: suggestion.rightKey }]);
+        const id = keyPairIdRef.current;
+        keyPairIdRef.current += 1;
+        setKeyPairs([{ id, leftKey: suggestion.leftKey, rightKey: suggestion.rightKey }]);
     }, []);
 
     const addKeyPair = () => {
-        setKeyPairs(prev => [...prev, { leftKey: '', rightKey: '' }]);
+        const id = keyPairIdRef.current;
+        keyPairIdRef.current += 1;
+        setKeyPairs(prev => [...prev, createEmptyKeyPair(id)]);
     };
 
     const removeKeyPair = (idx) => {
@@ -225,9 +232,9 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
                                         <div className="flex-1">
                                             <p className={`text-[10px] font-bold mb-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Suggested join keys:</p>
                                             <div className="flex flex-wrap gap-1.5">
-                                                {suggestions.slice(0, 5).map((s, i) => (
+                                                {suggestions.slice(0, 5).map((s) => (
                                                     <button
-                                                        key={i}
+                                                        key={`${String(s.leftKey)}-${String(s.rightKey)}-${String(s.confidence)}`}
                                                         onClick={() => applySuggestion(s)}
                                                         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all ${isDark ? 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'}`}
                                                     >
@@ -246,7 +253,7 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
 
                                 {/* Key pair rows */}
                                 {keyPairs.map((kp, idx) => (
-                                    <div key={idx} className="grid grid-cols-[1fr,auto,1fr,auto] gap-3 items-center">
+                                    <div key={kp.id} className="grid grid-cols-[1fr,auto,1fr,auto] gap-3 items-center">
                                         <select
                                             value={kp.leftKey}
                                             onChange={e => updateKeyPair(idx, 'leftKey', e.target.value)}
@@ -319,8 +326,14 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {previewRows.map((row, i) => (
-                                    <tr key={i} className={`border-b ${isDark ? 'border-gray-800 hover:bg-gray-800/60' : 'border-gray-100 hover:bg-gray-50'}`}>
+                                {previewRows.map((row, i) => {
+                                    const rowKey = previewCols
+                                        .map((col) => `${col.name}:${String(row?.[col.name] ?? '')}`)
+                                        .join('|');
+                                    const stableRowKey = rowKey || `row-${i}`;
+
+                                    return (
+                                    <tr key={stableRowKey} className={`border-b ${isDark ? 'border-gray-800 hover:bg-gray-800/60' : 'border-gray-100 hover:bg-gray-50'}`}>
                                         <td className={`px-3 py-2 font-mono text-[10px] ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>{i + 1}</td>
                                         {previewCols.map(col => {
                                             const val = row[col.name];
@@ -332,7 +345,8 @@ const DataMerger = ({ datasets, onClose, onMergeComplete }) => {
                                             );
                                         })}
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                         {previewData && previewData.data.length > 50 && (

@@ -36,6 +36,7 @@ import { recommendVisualization } from './services/chartRecommender';
 import { backendApi } from './services/backendApi';
 import { TYPO } from './styles/typography';
 import { startPageTour } from './services/pageTour';
+import { createClientId } from './services/random';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const STORAGE_KEY_CHARTS = 'power_bi_v3_charts_restored';
@@ -63,6 +64,222 @@ const USER_SCOPED_STORAGE_KEYS = [
     STORAGE_KEY_BACKEND_SOURCE_IDS,
 ];
 const COMPANY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+const EXPERIENCE_YEAR_UNITS = ['year', 'years', 'yr', 'yrs'];
+const EXPERIENCE_MONTH_UNITS = ['month', 'months', 'mo', 'mos'];
+
+const isTemplateSharedDashboardPath = (routePath = '') => {
+    const segments = String(routePath || '').toLowerCase().split('/').filter(Boolean);
+    return segments.length >= 5
+        && segments[0] === 'templates'
+        && segments[2] === 'dashboard'
+        && segments[3] === 'shared';
+};
+
+const isTemplatesListPath = (routePath = '') => {
+    const segments = String(routePath || '').toLowerCase().split('/').filter(Boolean);
+    return segments.length === 1 && segments[0] === 'templates';
+};
+
+const isTemplateMapPath = (routePath = '') => {
+    const segments = String(routePath || '').toLowerCase().split('/').filter(Boolean);
+    return segments.length === 3
+        && segments[0] === 'templates'
+        && segments[2] === 'map';
+};
+
+const isTemplateDashboardPath = (routePath = '') => {
+    const segments = String(routePath || '').toLowerCase().split('/').filter(Boolean);
+    return segments.length === 3
+        && segments[0] === 'templates'
+        && segments[2] === 'dashboard';
+};
+
+const hasAnyToken = (value = '', tokens = []) => tokens.some((token) => String(value).includes(token));
+
+const normalizeAlphaNumeric = (value = '') => {
+    const text = String(value || '').toLowerCase();
+    let out = '';
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const code = ch.charCodeAt(0);
+        if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57)) {
+            out += ch;
+        }
+    }
+    return out;
+};
+
+const isIdLikeColumnName = (normalizedName = '') => {
+    const lower = String(normalizedName || '').toLowerCase();
+    const compact = normalizeAlphaNumeric(lower);
+    if (lower === 'id') return true;
+    if (lower.endsWith('_id') || lower.startsWith('id_')) return true;
+    if (lower.endsWith('code') || lower.includes('sku')) return true;
+    return ['employeeid', 'productid', 'orderid', 'customerid'].some((token) => compact.includes(token));
+};
+
+const toSafeSlug = (value = 'report') => {
+    const text = String(value || 'report').toLowerCase();
+    let slug = '';
+    let lastWasDash = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const code = ch.charCodeAt(0);
+        const isLetter = code >= 97 && code <= 122;
+        const isDigit = code >= 48 && code <= 57;
+        const isAllowedPunctuation = ch === '-' || ch === '_';
+
+        if (isLetter || isDigit || isAllowedPunctuation) {
+            slug += ch;
+            lastWasDash = false;
+            continue;
+        }
+
+        if (!lastWasDash) {
+            slug += '-';
+            lastWasDash = true;
+        }
+    }
+
+    while (slug.startsWith('-')) slug = slug.slice(1);
+    while (slug.endsWith('-')) slug = slug.slice(0, -1);
+    return slug || 'report';
+};
+
+const toNormalizedString = (value) => String(value ?? '').trim();
+
+const stripNumericNoise = (value = '') => {
+    const drop = new Set([',', '$', '£', '€', '¥', '₹', '%', ' ', '\t', '\n', '\r']);
+    let out = '';
+    const text = String(value || '');
+    for (let i = 0; i < text.length; i += 1) {
+        if (!drop.has(text[i])) out += text[i];
+    }
+    return out;
+};
+
+const hasDigit = (value = '') => {
+    const text = String(value || '');
+    for (let i = 0; i < text.length; i += 1) {
+        const code = text.charCodeAt(i);
+        if (code >= 48 && code <= 57) return true;
+    }
+    return false;
+};
+
+const stripToNumberCharacters = (value = '') => {
+    const text = String(value || '');
+    let out = '';
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const code = ch.charCodeAt(0);
+        const isDigit = code >= 48 && code <= 57;
+        if (isDigit || ch === '-' || ch === '.') out += ch;
+    }
+    return out;
+};
+
+const sanitizeExperienceTokens = (value = '') => {
+    const cleaned = String(value || '')
+        .toLowerCase()
+        .replaceAll('(', ' ')
+        .replaceAll(')', ' ')
+        .replaceAll(',', ' ')
+        .replaceAll(';', ' ')
+        .replaceAll('/', ' ')
+        .replaceAll('\\', ' ')
+        .replaceAll(':', ' ')
+        .trim();
+    return cleaned ? cleaned.split(' ').filter(Boolean) : [];
+};
+
+const extractUnitNumber = (text = '', units = []) => {
+    const tokens = sanitizeExperienceTokens(text);
+    for (let i = 0; i < tokens.length; i += 1) {
+        const token = tokens[i];
+        for (let u = 0; u < units.length; u += 1) {
+            const unit = units[u];
+            if (token.endsWith(unit)) {
+                const prefixed = Number(token.slice(0, token.length - unit.length));
+                if (Number.isFinite(prefixed)) return prefixed;
+            }
+        }
+
+        const number = Number(token);
+        if (!Number.isFinite(number) || i + 1 >= tokens.length) continue;
+        if (units.includes(tokens[i + 1])) return number;
+    }
+    return null;
+};
+
+const hasDateCue = (value = '') => {
+    const text = String(value || '').toLowerCase();
+    if (!text) return false;
+    if (text.includes('-') || text.includes('/')) return true;
+    const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'];
+    return months.some((month) => text.includes(month));
+};
+
+const isNumericValue = (value) => {
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value !== 'string') return false;
+
+    let text = value.trim();
+    if (!text) return false;
+
+    if (text.startsWith('(') && text.endsWith(')') && text.length > 2) {
+        text = `-${text.slice(1, -1)}`;
+    }
+
+    text = stripNumericNoise(text);
+    if (!text) return false;
+    if (!hasDigit(text)) return false;
+
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const isDigit = ch >= '0' && ch <= '9';
+        if (isDigit || ch === '+' || ch === '-' || ch === '.' || ch === 'e' || ch === 'E') continue;
+        return false;
+    }
+    return true;
+};
+
+const isDateLikeValue = (value) => {
+    if (value instanceof Date) return !Number.isNaN(value.getTime());
+    if (typeof value !== 'string') return false;
+
+    const text = value.trim();
+    if (!text) return false;
+    if (isNumericValue(text)) return false;
+
+    if (!hasDateCue(text)) return false;
+
+    const parsed = Date.parse(text);
+    return !Number.isNaN(parsed);
+};
+
+const toExperienceMonths = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value * 12;
+
+    const text = String(value).toLowerCase().trim();
+    if (!text) return null;
+
+    const years = extractUnitNumber(text, EXPERIENCE_YEAR_UNITS);
+    const months = extractUnitNumber(text, EXPERIENCE_MONTH_UNITS);
+
+    if (years !== null || months !== null) {
+        const total = (years || 0) * 12 + (months || 0);
+        return Number.isFinite(total) ? total : null;
+    }
+
+    const numeric = Number(stripToNumberCharacters(text));
+    return Number.isFinite(numeric) ? numeric : null;
+};
 
 const APP_BASE_URL = (() => {
     const raw = String(import.meta.env.BASE_URL || '/').trim() || '/';
@@ -91,27 +308,31 @@ const toBrowserRoutePath = (internalPath) => {
 
 const parseReportRouteContext = (pathname, search = '') => {
     const normalizedPath = normalizeRoutePath(pathname || '/');
-    const match = normalizedPath.match(/^\/report\/([^/]+)\/?$/i);
-    if (!match) return null;
+    const segments = normalizedPath.split('/').filter(Boolean);
+    if (segments.length !== 2 || segments[0].toLowerCase() !== 'report') return null;
 
     const query = new URLSearchParams(search || '');
     return {
-        reportId: decodeURIComponent(match[1]),
+        reportId: decodeURIComponent(segments[1]),
         shareToken: String(query.get('shareToken') || '').trim(),
     };
 };
 
 const parseTemplateSharedRouteContext = (pathname, search = '') => {
     const normalizedPath = normalizeRoutePath(pathname || '/');
-    const match = normalizedPath.match(/^\/templates\/[^/]+\/dashboard\/shared\/([^/]+)\/?$/i);
-    if (!match) return null;
+    const segments = normalizedPath.split('/').filter(Boolean);
+    const isMatch = segments.length >= 5
+        && segments[0].toLowerCase() === 'templates'
+        && segments[2].toLowerCase() === 'dashboard'
+        && segments[3].toLowerCase() === 'shared';
+    if (!isMatch) return null;
 
     const query = new URLSearchParams(search || '');
     const shareToken = String(query.get('shareToken') || '').trim();
     if (!shareToken) return null;
 
     return {
-        reportId: decodeURIComponent(match[1]),
+        reportId: decodeURIComponent(segments[4]),
         shareToken,
     };
 };
@@ -122,7 +343,7 @@ const resolveTourPageKey = ({
     isSharedView,
     isSharedTemplateRoute,
 }) => {
-    if (isSharedTemplateRoute || /\/templates\/[^/]+\/dashboard\/shared\//i.test(String(routePath || ''))) {
+    if (isSharedTemplateRoute || isTemplateSharedDashboardPath(routePath)) {
         return 'templates-dashboard-shared';
     }
 
@@ -130,9 +351,9 @@ const resolveTourPageKey = ({
         return 'org-chart';
     }
 
-    if (/^\/templates\/?$/i.test(String(routePath || ''))) return 'templates-list';
-    if (/\/templates\/[^/]+\/map\/?$/i.test(String(routePath || ''))) return 'templates-map';
-    if (/\/templates\/[^/]+\/dashboard\/?$/i.test(String(routePath || ''))) return 'templates-dashboard';
+    if (isTemplatesListPath(routePath)) return 'templates-list';
+    if (isTemplateMapPath(routePath)) return 'templates-map';
+    if (isTemplateDashboardPath(routePath)) return 'templates-dashboard';
 
     const effectiveView = isSharedView ? 'report-shared' : view;
     switch (effectiveView) {
@@ -198,48 +419,10 @@ const inferColumnType = (columnName = '', values = []) => {
     const sample = values.filter(v => v !== null && v !== undefined && v !== '').slice(0, 50);
     if (sample.length === 0) return 'string';
 
-    const toNormalizedString = (value) => String(value ?? '').trim();
-
-    const isNumericValue = (value) => {
-        if (typeof value === 'number') return Number.isFinite(value);
-        if (typeof value !== 'string') return false;
-
-        let text = value.trim();
-        if (!text) return false;
-
-        if (/^\(.*\)$/.test(text)) {
-            text = `-${text.slice(1, -1)}`;
-        }
-
-        text = text
-            .replace(/[,$£€¥₹%\s]/g, '');
-
-        if (!text) return false;
-        return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text);
-    };
-
-    const isDateLikeValue = (value) => {
-        if (value instanceof Date) return !Number.isNaN(value.getTime());
-        if (typeof value !== 'string') return false;
-
-        const text = value.trim();
-        if (!text) return false;
-
-        // Avoid classifying pure numerics (e.g. 1, 202401) as dates.
-        if (isNumericValue(text)) return false;
-
-        // Require common date cues before trusting Date.parse.
-        const hasDateCue = /[-/]|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b|\d{4}-\d{1,2}-\d{1,2}/i.test(text);
-        if (!hasDateCue) return false;
-
-        const parsed = Date.parse(text);
-        return !Number.isNaN(parsed);
-    };
-
     const normalizedName = String(columnName || '').trim().toLowerCase();
-    const isExperienceColumn = /(experience|exp|tenure|service)/i.test(normalizedName);
-    const isIdLikeColumn = /(^id$|_id$|id_|code$|sku|employee.?id|product.?id|order.?id|customer.?id)/i.test(normalizedName);
-    const isCategoricalByName = /(name|product|item|category|brand|department|city|state|country|segment|status|type)/i.test(normalizedName);
+    const isExperienceColumn = hasAnyToken(normalizedName, ['experience', 'exp', 'tenure', 'service']);
+    const isIdLikeColumn = isIdLikeColumnName(normalizedName);
+    const isCategoricalByName = hasAnyToken(normalizedName, ['name', 'product', 'item', 'category', 'brand', 'department', 'city', 'state', 'country', 'segment', 'status', 'type']);
 
     const uniqueRatio = sample.length > 0
         ? (new Set(sample.map(v => toNormalizedString(v))).size / sample.length)
@@ -252,27 +435,6 @@ const inferColumnType = (columnName = '', values = []) => {
     const dateRatio = sample.length > 0
         ? (sample.filter(v => isDateLikeValue(v)).length / sample.length)
         : 0;
-
-    const toExperienceMonths = (value) => {
-        if (value === null || value === undefined || value === '') return null;
-        if (typeof value === 'number' && Number.isFinite(value)) return value * 12;
-
-        const text = String(value).toLowerCase().trim();
-        if (!text) return null;
-
-        const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yr|year\(s\))/);
-        const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:months?|mos?|mo|month\(s\))/);
-
-        if (yearMatch || monthMatch) {
-            const years = yearMatch ? Number(yearMatch[1]) : 0;
-            const months = monthMatch ? Number(monthMatch[1]) : 0;
-            const total = years * 12 + months;
-            return Number.isFinite(total) ? total : null;
-        }
-
-        const numeric = Number(text.replace(/[^0-9.-]/g, ''));
-        return Number.isFinite(numeric) ? numeric : null;
-    };
 
     const allExperienceLike = isExperienceColumn && sample.every(v => toExperienceMonths(v) !== null);
     if (allExperienceLike) return 'number';
@@ -556,54 +718,66 @@ const App = () => {
     useEffect(() => {
         let isCancelled = false;
 
-        const loadDatasetsFromBackend = async (restoredBackendSourceIds = []) => {
+        const mergePrimaryBackendDatasets = (prev, loaded) => {
+            const nonBackendDatasets = prev.filter(ds => !ds?._meta?.backend);
+            const existingById = new Map(prev.map(ds => [ds.id, ds]));
+
+            const backendDatasets = loaded.map(ds => {
+                const existing = existingById.get(ds.id);
+                return {
+                    ...ds,
+                    companyId: existing?.companyId ?? ds.companyId,
+                };
+            });
+
+            return [...nonBackendDatasets, ...backendDatasets];
+        };
+
+        const mergeFallbackBackendDatasets = (prev, loaded) => {
+            const map = new Map();
+            [...prev, ...loaded].forEach(ds => map.set(ds.id, ds));
+            return Array.from(map.values());
+        };
+
+        const fetchAllDatasets = async () => {
             try {
                 const response = await backendApi.listDatasets(1000);
-                if (isCancelled) return;
-
-                const loaded = Array.isArray(response?.items)
+                if (isCancelled) return [];
+                return Array.isArray(response?.items)
                     ? response.items.map(mapBackendDatasetToAppDataset)
                     : [];
-
-                if (loaded.length > 0) {
-                    setDatasets(prev => {
-                        const nonBackendDatasets = prev.filter(ds => !ds?._meta?.backend);
-                        const existingById = new Map(prev.map(ds => [ds.id, ds]));
-
-                        const backendDatasets = loaded.map(ds => {
-                            const existing = existingById.get(ds.id);
-                            return {
-                                ...ds,
-                                companyId: existing?.companyId ?? ds.companyId,
-                            };
-                        });
-
-                        return [...nonBackendDatasets, ...backendDatasets];
-                    });
-                    return;
-                }
             } catch (error) {
                 console.error('Failed to load datasets from backend:', error);
+                return [];
+            }
+        };
+
+        const fetchFallbackLatestDatasets = async (restoredBackendSourceIds = []) => {
+            if (!Array.isArray(restoredBackendSourceIds) || restoredBackendSourceIds.length === 0) {
+                return [];
             }
 
-            if (Array.isArray(restoredBackendSourceIds) && restoredBackendSourceIds.length > 0) {
-                const results = await Promise.allSettled(
-                    restoredBackendSourceIds.map(sourceId => backendApi.getLatestDatasetBySourceId(sourceId))
-                );
-                if (isCancelled) return;
+            const results = await Promise.allSettled(
+                restoredBackendSourceIds.map(sourceId => backendApi.getLatestDatasetBySourceId(sourceId))
+            );
+            if (isCancelled) return [];
 
-                const loaded = results
-                    .filter(r => r.status === 'fulfilled' && r.value?.item)
-                    .map(r => mapBackendDatasetToAppDataset(r.value.item));
+            return results
+                .filter(r => r.status === 'fulfilled' && r.value?.item)
+                .map(r => mapBackendDatasetToAppDataset(r.value.item));
+        };
 
-                if (loaded.length === 0) return;
-
-                setDatasets(prev => {
-                    const map = new Map();
-                    [...prev, ...loaded].forEach(ds => map.set(ds.id, ds));
-                    return Array.from(map.values());
-                });
+        const loadDatasetsFromBackend = async (restoredBackendSourceIds = []) => {
+            const loadedPrimary = await fetchAllDatasets();
+            if (loadedPrimary.length > 0) {
+                setDatasets(prev => mergePrimaryBackendDatasets(prev, loadedPrimary));
+                return;
             }
+
+            const loadedFallback = await fetchFallbackLatestDatasets(restoredBackendSourceIds);
+            if (loadedFallback.length === 0) return;
+
+            setDatasets(prev => mergeFallbackBackendDatasets(prev, loadedFallback));
         };
 
         const hydrateFromLocalStorage = () => {
@@ -647,32 +821,38 @@ const App = () => {
             return restoredBackendSourceIds;
         };
 
+        const tryHydrateFromRoute = async (routeInfo) => {
+            if (!routeInfo?.reportId) return false;
+
+            try {
+                const response = routeInfo.shareToken
+                    ? await backendApi.getSharedReport(routeInfo.reportId, routeInfo.shareToken)
+                    : await backendApi.getReport(routeInfo.reportId);
+                if (isCancelled) return true;
+
+                const report = response?.report || null;
+                if (!report) return false;
+
+                applyReportToState(report);
+                setCurrentReportId(String(report?.id || routeInfo.reportId));
+                setIsSharedView(Boolean(routeInfo.shareToken));
+                if (routeInfo.shareToken) {
+                    setIsEditMode(false);
+                }
+                hasHydratedRef.current = true;
+                await loadDatasetsFromBackend([]);
+                return true;
+            } catch (error) {
+                console.error('Failed to load report from backend route:', error);
+                return false;
+            }
+        };
+
         const runHydration = async () => {
             const routeInfo = parseReportRouteContext(window.location.pathname || '/', window.location.search || '');
 
-            if (routeInfo?.reportId) {
-                try {
-                    const response = routeInfo.shareToken
-                        ? await backendApi.getSharedReport(routeInfo.reportId, routeInfo.shareToken)
-                        : await backendApi.getReport(routeInfo.reportId);
-                    if (isCancelled) return;
-
-                    const report = response?.report || null;
-                    if (report) {
-                        applyReportToState(report);
-                        setCurrentReportId(String(report?.id || routeInfo.reportId));
-                        setIsSharedView(Boolean(routeInfo.shareToken));
-                        if (routeInfo.shareToken) {
-                            setIsEditMode(false);
-                        }
-                        hasHydratedRef.current = true;
-                        await loadDatasetsFromBackend([]);
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Failed to load report from backend route:', error);
-                }
-            }
+            const hydratedFromRoute = await tryHydrateFromRoute(routeInfo);
+            if (hydratedFromRoute) return;
 
             const restoredBackendSourceIds = hydrateFromLocalStorage();
             await loadDatasetsFromBackend(restoredBackendSourceIds);
@@ -785,6 +965,18 @@ const App = () => {
             return;
         }
 
+        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
+        const recipientEmails = Array.from(new Set(
+            String(rawRecipients || '')
+                .split(',')
+                .map((item) => String(item || '').trim().toLowerCase())
+                .filter(Boolean)
+        ));
+        if (recipientEmails.length === 0) {
+            globalThis.alert?.('Please add at least one recipient email.');
+            return;
+        }
+
         setIsSharing(true);
         try {
             const payload = {
@@ -813,6 +1005,7 @@ const App = () => {
             const shareResponse = await backendApi.createReportShare(reportId, {
                 role: 'viewer',
                 expires_in_hours: 168,
+                recipient_emails: recipientEmails,
             });
 
             const shareToken = String(shareResponse?.share?.token || '').trim();
@@ -856,11 +1049,7 @@ const App = () => {
     };
 
     const buildFileSafeName = (baseName, extension) => {
-        const cleaned = (baseName || 'report')
-            .toLowerCase()
-            .replace(/[^a-z0-9-_]+/g, '-')
-            .replace(/-{2,}/g, '-')
-            .replace(/^-+|-+$/g, '');
+        const cleaned = toSafeSlug(baseName || 'report');
         return `${cleaned || 'report'}.${extension}`;
     };
 
@@ -1130,7 +1319,7 @@ const App = () => {
             : (dataset.columns.find(c => c.type === 'number')?.name ? [dataset.columns.find(c => c.type === 'number')?.name] : []);
 
         const newChart = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: createClientId('chart'),
             pageId: activePageId,
             datasetId: dataset.id,
             title: name.trim() || 'New Visual',
@@ -1171,7 +1360,7 @@ const App = () => {
 
     const handleAddCompany = (name, color) => {
         const newCompany = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: createClientId('company'),
             name: name.trim(),
             color: color || COMPANY_COLORS[companies.length % COMPANY_COLORS.length],
             createdAt: Date.now(),
@@ -1353,7 +1542,7 @@ const App = () => {
         );
     }
 
-    if (!authUser && !isSharedTemplateRoute) {
+    if (!authUser) {
         return <AuthScreen onLogin={handleLogin} onSignUp={handleSignUp} isLoading={isAuthSubmitting} />;
     }
 
@@ -1393,93 +1582,108 @@ const App = () => {
 
     const effectiveView = isSharedView ? 'report' : view;
 
+    const renderNonReportView = () => {
+        switch (effectiveView) {
+            case 'templates':
+                return (
+                    <TemplateRoutes
+                        datasets={datasets}
+                        selectedDatasetId={selectedDatasetId}
+                        setSelectedDatasetId={setSelectedDatasetId}
+                        sharedTemplateRoute={null}
+                    />
+                );
+            case 'data':
+                return (
+                    <DataSourceView
+                        datasets={datasets}
+                        companies={companies}
+                        activeCompanyId={activeCompanyId}
+                        onSetActiveCompany={setActiveCompanyId}
+                        onAddCompany={handleAddCompany}
+                        onRemoveCompany={handleRemoveCompany}
+                        onRenameCompany={handleRenameCompany}
+                        onAssignDatasetCompany={handleAssignDatasetCompany}
+                        onAddDataset={ds => { setDatasets(p => [...p, ds]); setSelectedDatasetId(ds.id); }}
+                        onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))}
+                        onPreviewDataset={id => setPreviewDatasetId(id)}
+                        onOpenMerge={() => setShowMerger(true)}
+                        onProfileDataset={id => setProfilerDatasetId(id)}
+                        onBackendIngestionSuccess={handleBackendIngestionSuccess}
+                    />
+                );
+            case 'source-config':
+                return <SourceConfigIngestionPage onIngestionSuccess={handleBackendIngestionSuccess} />;
+            case 'relationships':
+                return <RelationshipDiagram datasets={datasets} companies={companies} />;
+            case 'profiler':
+                return (
+                    <div data-tour="profiler-root" className="flex-1 flex flex-col items-center justify-center p-10">
+                        {datasets.length > 0 ? (
+                            <div className="text-center space-y-6">
+                                <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                                </div>
+                                <div>
+                                    <h2 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Data Profiler</h2>
+                                    <p className={`mt-2 max-w-md mx-auto ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Select a dataset to analyze its columns, distributions, outliers, and correlations.</p>
+                                </div>
+                                <div className="flex flex-wrap justify-center gap-3">
+                                    {datasets.map(ds => (
+                                        <button key={ds.id} onClick={() => setProfilerDatasetId(ds.id)}
+                                            className={`px-5 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm border ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}>
+                                            {ds.name} <span className="ml-2 text-xs text-gray-400">{ds.columns.length} cols · {ds.data.length} rows</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center space-y-4">
+                                <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Upload a dataset to start profiling.</p>
+                                <button onClick={() => setView('data')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${theme === 'dark' ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700'}`}>Go to Data Hub</button>
+                            </div>
+                        )}
+                    </div>
+                );
+            case 'merge':
+                return (
+                    <div data-tour="merge-root" className="flex-1 flex flex-col items-center justify-center p-10">
+                        {datasets.length >= 2 ? (
+                            <div className="text-center space-y-6">
+                                <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}><path d="m8 6 4-4 4 4"/><path d="M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22"/><path d="m20 22-5-5"/></svg>
+                                </div>
+                                <div>
+                                    <h2 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Merge Datasets</h2>
+                                    <p className={`mt-2 max-w-md mx-auto ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Combine multiple data sources using joins or unions to create powerful cross-dataset visualizations.</p>
+                                </div>
+                                <button onClick={() => setShowMerger(true)} className={`inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shadow-sm ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
+                                    Open Merge Builder
+                                </button>
+                                <div className={`pt-4 text-xs font-semibold ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
+                                    {datasets.length} datasets available · {datasets.filter(d => d._meta?.merged).length} merged
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center space-y-4">
+                                <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Upload at least 2 datasets to start merging.</p>
+                                <button onClick={() => setView('data')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${theme === 'dark' ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700'}`}>Go to Data Hub</button>
+                            </div>
+                        )}
+                    </div>
+                );
+            default:
+                return null;
+        }
+    };
+
     return (
         <div data-tour="app-shell" className={`app-type-system flex flex-col h-screen overflow-hidden font-jakarta ${theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-gray-50 text-gray-800'}`}>
             <Header authUser={authUser} onLogout={handleLogout} onLogoClick={() => { if (!isSharedView) { setView('data'); navigatePath('/'); } }} onHelpClick={handleStartTour} />
             <div className="flex flex-1 overflow-hidden">
                 {!isSharedView && <Sidebar setView={setView} currentView={effectiveView} onNavigatePath={navigatePath} />}
                 <main data-tour="main-content" className={`flex-1 flex flex-col min-w-0 ${effectiveView === 'templates' ? 'overflow-auto' : 'overflow-hidden'} ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                    {effectiveView === 'templates' ? (
-                        <TemplateRoutes
-                            datasets={datasets}
-                            selectedDatasetId={selectedDatasetId}
-                            setSelectedDatasetId={setSelectedDatasetId}
-                            sharedTemplateRoute={null}
-                        />
-                    ) : effectiveView === 'data' ? (
-                        <DataSourceView
-                            datasets={datasets}
-                            companies={companies}
-                            activeCompanyId={activeCompanyId}
-                            onSetActiveCompany={setActiveCompanyId}
-                            onAddCompany={handleAddCompany}
-                            onRemoveCompany={handleRemoveCompany}
-                            onRenameCompany={handleRenameCompany}
-                            onAssignDatasetCompany={handleAssignDatasetCompany}
-                            onAddDataset={ds => { setDatasets(p => [...p, ds]); setSelectedDatasetId(ds.id); }}
-                            onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))}
-                            onPreviewDataset={id => setPreviewDatasetId(id)}
-                            onOpenMerge={() => setShowMerger(true)}
-                            onProfileDataset={id => setProfilerDatasetId(id)}
-                            onBackendIngestionSuccess={handleBackendIngestionSuccess}
-                        />
-                    ) : effectiveView === 'source-config' ? (
-                        <SourceConfigIngestionPage onIngestionSuccess={handleBackendIngestionSuccess} />
-                    ) : effectiveView === 'relationships' ? (
-                        <RelationshipDiagram datasets={datasets} companies={companies} />
-                    ) : effectiveView === 'profiler' ? (
-                        <div data-tour="profiler-root" className="flex-1 flex flex-col items-center justify-center p-10">
-                            {datasets.length > 0 ? (
-                                <div className="text-center space-y-6">
-                                    <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-                                    </div>
-                                    <div>
-                                        <h2 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Data Profiler</h2>
-                                        <p className={`mt-2 max-w-md mx-auto ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Select a dataset to analyze its columns, distributions, outliers, and correlations.</p>
-                                    </div>
-                                    <div className="flex flex-wrap justify-center gap-3">
-                                        {datasets.map(ds => (
-                                            <button key={ds.id} onClick={() => setProfilerDatasetId(ds.id)}
-                                                className={`px-5 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm border ${theme === 'dark' ? 'bg-gray-700 text-gray-200 border-gray-600 hover:bg-gray-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}>
-                                                {ds.name} <span className={`ml-2 text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-400'}`}>{ds.columns.length} cols · {ds.data.length} rows</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="text-center space-y-4">
-                                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Upload a dataset to start profiling.</p>
-                                    <button onClick={() => setView('data')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${theme === 'dark' ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700'}`}>Go to Data Hub</button>
-                                </div>
-                            )}
-                        </div>
-                    ) : effectiveView === 'merge' ? (
-                        <div data-tour="merge-root" className="flex-1 flex flex-col items-center justify-center p-10">
-                            {datasets.length >= 2 ? (
-                                <div className="text-center space-y-6">
-                                    <div className={`inline-flex p-5 rounded-2xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white shadow-sm border border-gray-200'}`}>
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}><path d="m8 6 4-4 4 4"/><path d="M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22"/><path d="m20 22-5-5"/></svg>
-                                    </div>
-                                    <div>
-                                        <h2 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>Merge Datasets</h2>
-                                        <p className={`mt-2 max-w-md mx-auto ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Combine multiple data sources using joins or unions to create powerful cross-dataset visualizations.</p>
-                                    </div>
-                                    <button onClick={() => setShowMerger(true)} className={`inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold transition-all shadow-sm ${theme === 'dark' ? 'bg-gray-200 text-gray-800 hover:bg-gray-300' : 'bg-gray-800 text-white hover:bg-gray-900'}`}>
-                                        Open Merge Builder
-                                    </button>
-                                    <div className={`pt-4 text-xs font-semibold ${theme === 'dark' ? 'text-gray-600' : 'text-gray-400'}`}>
-                                        {datasets.length} datasets available · {datasets.filter(d => d._meta?.merged).length} merged
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="text-center space-y-4">
-                                    <p className={`text-lg font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Upload at least 2 datasets to start merging.</p>
-                                    <button onClick={() => setView('data')} className={`px-4 py-2 rounded-xl text-sm font-semibold ${theme === 'dark' ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700'}`}>Go to Data Hub</button>
-                                </div>
-                            )}
-                        </div>
-                    ) : (
+                    {effectiveView !== 'report' ? renderNonReportView() : (
                         <div data-tour="report-root" className="flex-1 flex flex-col overflow-hidden">
                             <div data-tour="report-header" className={`px-6 py-4 flex items-center justify-between shrink-0 z-20 border-b ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                                 <div className="flex flex-col">
@@ -1796,13 +2000,20 @@ const App = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {drillThroughContext.rows.map((row, idx) => (
-                                            <tr key={idx} className={`border-b ${theme === 'dark' ? 'border-gray-700/60' : 'border-gray-100'}`}>
-                                                {Object.entries(row).map(([col, val]) => (
-                                                    <td key={`${idx}-${col}`} className="py-2 px-3 whitespace-nowrap">{String(val ?? '')}</td>
-                                                ))}
-                                            </tr>
-                                        ))}
+                                        {drillThroughContext.rows.map((row, idx) => {
+                                            const rowKey = Object.entries(row)
+                                                .map(([col, val]) => `${col}:${String(val ?? '')}`)
+                                                .join('|');
+                                            const stableRowKey = rowKey || `row-${idx}`;
+
+                                            return (
+                                                <tr key={stableRowKey} className={`border-b ${theme === 'dark' ? 'border-gray-700/60' : 'border-gray-100'}`}>
+                                                    {Object.entries(row).map(([col, val]) => (
+                                                        <td key={`${stableRowKey}-${col}`} className="py-2 px-3 whitespace-nowrap">{String(val ?? '')}</td>
+                                                    ))}
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             )}
@@ -1827,7 +2038,7 @@ const App = () => {
                         </>
                     )}
                 </div>
-                <div className={`flex items-center gap-4 font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                <div className="flex items-center gap-4 font-semibold text-gray-500">
                     <span>{currentPageCharts.length} Objects</span>
                     <div className={`h-3 w-[1px] ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-300'}`} />
                     <span className={theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>ChillAnalytics v1.0</span>

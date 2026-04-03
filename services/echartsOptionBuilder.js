@@ -122,7 +122,7 @@ export function buildChartOption(visualType, processedData, config, theme = 'lig
     const scaledFont = (size) => Math.max(11, Math.round((fontSize / axisBase) * Number(size || axisBase)));
     const labelMode = style.labelMode || 'auto';
     const pieLabelPosition = String(style.pieLabelPosition || 'inside').toLowerCase() === 'outside' ? 'outside' : 'inside';
-    const tooltipEnabled = style.tooltipEnabled !== false;
+    const tooltipEnabled = style.tooltipEnabled ?? true;
     const tooltipDecimals = Number.isFinite(Number(style.tooltipDecimals)) ? Number(style.tooltipDecimals) : 2;
     let categories = processedData.map(d => d.name);
     const axisNameFromDimension = String(dimension || 'Category');

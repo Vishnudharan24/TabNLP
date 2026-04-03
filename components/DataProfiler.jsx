@@ -258,8 +258,8 @@ const DataProfiler = ({ dataset, onClose }) => {
                             { label: 'Numeric', value: profile.numericCols.length, icon: Hash },
                             { label: 'Categorical', value: profile.columnCount - profile.numericCols.length, icon: Type },
                             { label: 'Correlations', value: profile.correlations.filter(c => Math.abs(c.value) >= 0.5).length + ' strong', icon: TrendingUp },
-                        ].map((card, i) => (
-                            <div key={i} className={`p-4 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+                        ].map((card) => (
+                            <div key={card.label} className={`p-4 rounded-xl border ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
                                 <card.icon size={14} className={isDark ? 'text-gray-500 mb-2' : 'text-gray-400 mb-2'} />
                                 <p className={`text-2xl font-black tracking-tight ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{card.value}</p>
                                 <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{card.label}</p>
@@ -328,8 +328,8 @@ const DataProfiler = ({ dataset, onClose }) => {
                                                                 { label: 'Q3', value: col.stats.q3?.toLocaleString() },
                                                                 { label: 'IQR', value: col.stats.iqr?.toLocaleString() },
                                                                 { label: 'Zeros', value: col.stats.zeros },
-                                                            ].map((s, i) => (
-                                                                <div key={i} className={`p-2 rounded-lg ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                                                            ].map((s) => (
+                                                                <div key={s.label} className={`p-2 rounded-lg ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
                                                                     <p className={`text-[9px] font-bold uppercase ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{s.label}</p>
                                                                     <p className={`text-xs font-bold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>{s.value}</p>
                                                                 </div>
@@ -373,8 +373,8 @@ const DataProfiler = ({ dataset, onClose }) => {
                                                                 { label: 'Min Length', value: col.stats.minLength },
                                                                 { label: 'Max Length', value: col.stats.maxLength },
                                                                 { label: 'Nulls', value: col.nullCount },
-                                                            ].map((s, i) => (
-                                                                <div key={i} className={`p-2 rounded-lg ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                                                            ].map((s) => (
+                                                                <div key={s.label} className={`p-2 rounded-lg ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
                                                                     <p className={`text-[9px] font-bold uppercase ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{s.label}</p>
                                                                     <p className={`text-xs font-bold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>{s.value}</p>
                                                                 </div>
@@ -384,8 +384,8 @@ const DataProfiler = ({ dataset, onClose }) => {
                                                     <div className="col-span-2 space-y-3">
                                                         <h4 className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Top Values</h4>
                                                         <div className="space-y-1.5">
-                                                            {col.stats.topValues?.map((v, i) => (
-                                                                <div key={i} className="flex items-center gap-3">
+                                                            {col.stats.topValues?.map((v) => (
+                                                                <div key={`${String(v.value)}-${String(v.count)}`} className="flex items-center gap-3">
                                                                     <span className={`text-xs font-semibold truncate w-32 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>{v.value}</span>
                                                                     <div className="flex-1 h-5 relative">
                                                                         <div className={`absolute inset-0 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`} />
@@ -422,8 +422,8 @@ const DataProfiler = ({ dataset, onClose }) => {
                                             {profile.correlations
                                                 .filter(c => Math.abs(c.value) >= 0.5)
                                                 .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-                                                .map((c, i) => (
-                                                    <span key={i} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                                                .map((c) => (
+                                                    <span key={`${String(c.col1)}-${String(c.col2)}`} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
                                                         <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>{c.col1} × {c.col2}</span>
                                                         <span style={{ color: getCorrelationColor(c.value) }} className="font-bold">{c.value > 0 ? '+' : ''}{c.value}</span>
                                                     </span>

@@ -583,23 +583,30 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                             </tr>
                         </thead>
                         <tbody>
-                            {chartData.map((row, idx) => (
-                                <tr key={idx} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                    {tableColumns.map((col) => {
-                                        const value = row?.[col];
-                                        const isNumeric = typeof value === 'number' && Number.isFinite(value);
-                                        return (
-                                            <td
-                                                key={col}
-                                                className={`py-3 px-4 ${col === tableColumns[0] ? 'font-bold text-gray-900 dark:text-gray-100' : ''}`}
-                                                style={{ fontSize: `${configuredFontSize}px`, fontWeight: TYPO.tableCell.fontWeight }}
-                                            >
-                                                {isNumeric ? value.toLocaleString() : String(value ?? '')}
-                                            </td>
-                                        );
-                                    })}
-                                </tr>
-                            ))}
+                            {chartData.map((row, idx) => {
+                                const rowKey = tableColumns
+                                    .map((col) => `${col}:${String(row?.[col] ?? '')}`)
+                                    .join('|');
+                                const stableRowKey = rowKey || `row-${idx}`;
+
+                                return (
+                                    <tr key={stableRowKey} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                        {tableColumns.map((col) => {
+                                            const value = row?.[col];
+                                            const isNumeric = typeof value === 'number' && Number.isFinite(value);
+                                            return (
+                                                <td
+                                                    key={`${stableRowKey}-${col}`}
+                                                    className={`py-3 px-4 ${col === tableColumns[0] ? 'font-bold text-gray-900 dark:text-gray-100' : ''}`}
+                                                    style={{ fontSize: `${configuredFontSize}px`, fontWeight: TYPO.tableCell.fontWeight }}
+                                                >
+                                                    {isNumeric ? value.toLocaleString() : String(value ?? '')}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -779,7 +786,7 @@ const Visualization = ({ config, dataset, isActive, isEditMode, globalFilters = 
                         <Home size={9} /> All
                     </button>
                     {drillPath.map((drill, i) => (
-                        <React.Fragment key={i}>
+                        <React.Fragment key={drillPath.slice(0, i + 1).map((d) => String(d?.value ?? '')).join('>')}>
                             <ChevronRight size={8} className={isDark ? 'text-gray-600' : 'text-gray-300'} />
                             <button onClick={() => handleDrillUp(i + 1)}
                                 className={`px-1.5 py-0.5 rounded truncate max-w-[80px] transition-colors ${i === drillPath.length - 1

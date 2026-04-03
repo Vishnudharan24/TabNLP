@@ -105,17 +105,24 @@ const DrillDownTable = ({ open, datasetId, columns = [], filters = [], title = '
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((row, idx) => (
-                                <tr key={idx} className="border-b border-gray-100 dark:border-gray-800">
-                                    {tableColumns.map((col, cIdx) => (
-                                        <td key={`${idx}-${cIdx}`} className="px-4 py-2 text-gray-700 dark:text-gray-200">
-                                            {Array.isArray(row)
-                                                ? String(row[cIdx] ?? '')
-                                                : String(row?.[col] ?? '')}
-                                        </td>
-                                    ))}
-                                </tr>
-                            ))}
+                            {rows.map((row, idx) => {
+                                const rowKey = Array.isArray(row)
+                                    ? row.map((value) => String(value ?? '')).join('|')
+                                    : tableColumns.map((col) => `${col}:${String(row?.[col] ?? '')}`).join('|');
+                                const stableRowKey = rowKey || `row-${idx}`;
+
+                                return (
+                                    <tr key={stableRowKey} className="border-b border-gray-100 dark:border-gray-800">
+                                        {tableColumns.map((col, cIdx) => (
+                                            <td key={`${stableRowKey}-${col}-${cIdx}`} className="px-4 py-2 text-gray-700 dark:text-gray-200">
+                                                {Array.isArray(row)
+                                                    ? String(row[cIdx] ?? '')
+                                                    : String(row?.[col] ?? '')}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}

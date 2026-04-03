@@ -1,3 +1,5 @@
+import { secureRandomFloat } from './random';
+
 const DEFAULT_BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_BASE_URL || '/api';
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_RETRY_COUNT = 2;
@@ -6,6 +8,52 @@ const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const STORAGE_KEY_AUTH_TOKEN = 'power_bi_v3_auth_token';
 
 const normalizeBaseUrl = (baseUrl) => (baseUrl || DEFAULT_BACKEND_BASE_URL).replace(/\/$/, '');
+
+const parseSharedRouteContext = () => {
+    if (typeof globalThis === 'undefined' || !globalThis.location) return null;
+
+    const pathname = String(globalThis.location.pathname || '').trim();
+    const segments = pathname.split('/').filter(Boolean);
+    const search = new URLSearchParams(String(globalThis.location.search || ''));
+    const shareToken = String(search.get('shareToken') || '').trim();
+    if (!shareToken) return null;
+
+    if (segments.length === 2 && segments[0].toLowerCase() === 'report') {
+        return { reportId: decodeURIComponent(segments[1]), shareToken };
+    }
+
+    const isTemplateSharedRoute = segments.length >= 5
+        && segments[0].toLowerCase() === 'templates'
+        && segments[2].toLowerCase() === 'dashboard'
+        && segments[3].toLowerCase() === 'shared';
+
+    if (isTemplateSharedRoute) {
+        return { reportId: decodeURIComponent(segments[4]), shareToken };
+    }
+
+    return null;
+};
+
+const withShareContext = (path) => {
+    const rawPath = String(path || '');
+    const normalizedPath = rawPath.split('?')[0];
+    const needsShareContext = (
+        normalizedPath === '/query'
+        || normalizedPath === '/query/export'
+        || normalizedPath === '/semantic/measures'
+    );
+    if (!needsShareContext) return rawPath;
+
+    const context = parseSharedRouteContext();
+    if (!context?.reportId || !context?.shareToken) return rawPath;
+
+    const [basePath, queryText = ''] = rawPath.split('?');
+    const query = new URLSearchParams(queryText);
+    if (!query.get('reportId')) query.set('reportId', context.reportId);
+    if (!query.get('shareToken')) query.set('shareToken', context.shareToken);
+    const nextQuery = query.toString();
+    return nextQuery ? `${basePath}?${nextQuery}` : basePath;
+};
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -42,14 +90,14 @@ const withCancellationAndTimeout = (signal, timeoutMs) => {
 const isRetryableError = (error) => {
     if (!error) return false;
     if (isAbortLikeError(error)) return false;
-    if (error?.retryable === true) return true;
+    if (error?.retryable) return true;
     if (error?.name === 'TypeError') return true; // network failure in fetch
     return false;
 };
 
 const computeBackoffDelay = (attempt, baseDelayMs) => {
     const exponential = baseDelayMs * (2 ** attempt);
-    const jitter = 0.85 + Math.random() * 0.3;
+    const jitter = 0.85 + secureRandomFloat() * 0.3;
     return Math.round(exponential * jitter);
 };
 
@@ -72,7 +120,7 @@ async function request(path, options = {}, baseUrl, requestConfig = {}) {
         const hasContentTypeHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'content-type');
 
         try {
-            const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+            const response = await fetch(`${normalizeBaseUrl(baseUrl)}${withShareContext(path)}`, {
                 headers: {
                     ...(!isFormDataBody && !hasContentTypeHeader ? { 'Content-Type': 'application/json' } : {}),
                     ...(persistedToken && !hasAuthorizationHeader ? { Authorization: `Bearer ${persistedToken}` } : {}),
@@ -149,7 +197,7 @@ async function requestBlob(path, options = {}, baseUrl, requestConfig = {}) {
         const hasContentTypeHeader = Object.keys(providedHeaders).some((key) => key.toLowerCase() === 'content-type');
 
         try {
-            const response = await fetch(`${normalizeBaseUrl(baseUrl)}${path}`, {
+            const response = await fetch(`${normalizeBaseUrl(baseUrl)}${withShareContext(path)}`, {
                 headers: {
                     ...(!isFormDataBody && !hasContentTypeHeader ? { 'Content-Type': 'application/json' } : {}),
                     ...(persistedToken && !hasAuthorizationHeader ? { Authorization: `Bearer ${persistedToken}` } : {}),

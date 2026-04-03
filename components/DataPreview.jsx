@@ -130,7 +130,7 @@ const DataPreview = ({ dataset, onClose, onUpdateDataset }) => {
         const nullCount = dataset.data.length - vals.length;
 
         if (col.type === 'number') {
-            const nums = vals.map(Number).filter(n => !isNaN(n));
+            const nums = vals.map(Number).filter(n => !Number.isNaN(n));
             if (nums.length === 0) return { nullCount, unique: 0 };
             return {
                 min: Math.min(...nums),
@@ -294,8 +294,14 @@ const DataPreview = ({ dataset, onClose, onUpdateDataset }) => {
                             </tr>
                         </thead>
                         <tbody>
-                            {pageData.map((row, rowIdx) => (
-                                <tr key={rowIdx} className={`border-b transition-colors ${isDark ? 'border-gray-800 hover:bg-gray-800/60' : 'border-gray-100 hover:bg-gray-50'}`}>
+                            {pageData.map((row, rowIdx) => {
+                                const rowKey = visibleColumns
+                                    .map((col) => `${col.name}:${String(row?.[col.name] ?? '')}`)
+                                    .join('|');
+                                const stableRowKey = rowKey || `row-${page}-${rowIdx}`;
+
+                                return (
+                                <tr key={stableRowKey} className={`border-b transition-colors ${isDark ? 'border-gray-800 hover:bg-gray-800/60' : 'border-gray-100 hover:bg-gray-50'}`}>
                                     <td className={`px-4 py-2.5 font-mono text-[10px] ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
                                         {page * pageSize + rowIdx + 1}
                                     </td>
@@ -309,7 +315,8 @@ const DataPreview = ({ dataset, onClose, onUpdateDataset }) => {
                                         );
                                     })}
                                 </tr>
-                            ))}
+                                );
+                            })}
                             {pageData.length === 0 && (
                                 <tr>
                                     <td colSpan={visibleColumns.length + 1} className="text-center py-16">

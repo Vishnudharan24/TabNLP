@@ -16,6 +16,7 @@ import {
 } from '../services/chartRecommender';
 import { autoAssignFields, configFromAssignments, convertOldConfig, FieldRoles } from '../services/chartConfigSystem';
 import { TYPO } from '../styles/typography';
+import { createClientId } from '../services/random';
 
 const CHART_ICON_MAP = {
     BAR: BarChart,
@@ -370,7 +371,7 @@ const DataPanel = ({
         if (!col) return;
         const colOps = OPERATORS_MAP[col.type] || OPERATORS_MAP.string;
         const newFilter = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: createClientId('filter'),
             column: col.name,
             operator: colOps[0].value,
             value: col.type === 'number' ? 0 : '',
@@ -1108,7 +1109,7 @@ const DataPanel = ({
                                         <div className="space-y-1.5">
                                             <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Tooltips</label>
                                             <select
-                                                value={chartStyle.tooltipEnabled === false ? 'off' : 'on'}
+                                                value={(chartStyle.tooltipEnabled ?? true) ? 'on' : 'off'}
                                                 onChange={(e) => onUpdateConfig({ style: { ...chartStyle, tooltipEnabled: e.target.value === 'on' } })}
                                                 className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg py-2 px-2 text-[11px] font-bold text-gray-700 dark:text-gray-200"
                                             >

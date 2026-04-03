@@ -5,6 +5,43 @@ import { useTheme } from '../../contexts/ThemeContext';
 const normalizeFieldName = (value) => String(value || '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
+const EXPERIENCE_YEAR_UNITS = ['year', 'years', 'yr', 'yrs'];
+const EXPERIENCE_MONTH_UNITS = ['month', 'months', 'mo', 'mos'];
+
+const sanitizeExperienceTokens = (value = '') => {
+    const cleaned = String(value || '')
+        .toLowerCase()
+        .replaceAll('(', ' ')
+        .replaceAll(')', ' ')
+        .replaceAll(',', ' ')
+        .replaceAll(';', ' ')
+        .replaceAll('/', ' ')
+        .replaceAll('\\', ' ')
+        .replaceAll(':', ' ')
+        .trim();
+    return cleaned ? cleaned.split(' ').filter(Boolean) : [];
+};
+
+const extractUnitNumber = (text = '', units = []) => {
+    const tokens = sanitizeExperienceTokens(text);
+    for (let i = 0; i < tokens.length; i += 1) {
+        const token = tokens[i];
+
+        for (let u = 0; u < units.length; u += 1) {
+            const unit = units[u];
+            if (token.endsWith(unit)) {
+                const prefix = token.slice(0, token.length - unit.length);
+                const prefixedNumber = Number(prefix);
+                if (Number.isFinite(prefixedNumber)) return prefixedNumber;
+            }
+        }
+
+        const number = Number(token);
+        if (!Number.isFinite(number) || i + 1 >= tokens.length) continue;
+        if (units.includes(tokens[i + 1])) return number;
+    }
+    return null;
+};
 
 const inferColumnType = (columnName = '') => {
     const value = String(columnName || '').toLowerCase();
@@ -77,13 +114,11 @@ const parseExperienceToMonths = (value) => {
     const text = String(value).toLowerCase().trim();
     if (!text) return null;
 
-    const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:years?|yrs?|yr|year\(s\))/);
-    const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:months?|mos?|mo|month\(s\))/);
+    const years = extractUnitNumber(text, EXPERIENCE_YEAR_UNITS);
+    const months = extractUnitNumber(text, EXPERIENCE_MONTH_UNITS);
 
-    if (yearMatch || monthMatch) {
-        const years = yearMatch ? Number(yearMatch[1]) : 0;
-        const months = monthMatch ? Number(monthMatch[1]) : 0;
-        const total = years * 12 + months;
+    if (years !== null || months !== null) {
+        const total = (years || 0) * 12 + (months || 0);
         return Number.isFinite(total) ? total : null;
     }
 
@@ -113,6 +148,16 @@ const isSampleTypeCompatible = (samples = [], expectedType, fieldName = '') => {
         if (value === null || value === undefined || value === '') return true;
         if (isExperienceField) return parseExperienceToMonths(value) !== null;
         return parseNumberLike(value) !== null;
+    });
+};
+
+const toOccurrenceKeyedLines = (lines = []) => {
+    const seen = new Map();
+    return (Array.isArray(lines) ? lines : []).map((line) => {
+        const value = String(line || '');
+        const count = (seen.get(value) || 0) + 1;
+        seen.set(value, count);
+        return { value, key: `${value}__${count}` };
     });
 };
 
@@ -213,6 +258,11 @@ const TemplateMapping = ({
         }
         return lines;
     }, [normalizedColumns]);
+
+    const uploadedColumnLineEntries = useMemo(
+        () => toOccurrenceKeyedLines(uploadedColumnLines),
+        [uploadedColumnLines]
+    );
 
     const handleChangeMapping = (fieldName, columnName) => {
         setMapping((prev) => ({
@@ -404,10 +454,10 @@ const TemplateMapping = ({
                     <div data-tour="templates-map-columns" className="cv-mapping-panel">
                         <h2>Uploaded Dataset Columns</h2>
                         <div className="cv-column-list-compact">
-                            {uploadedColumnLines.map((line, index) => (
-                                <p key={`${line}-${index}`}>
-                                    {line}
-                                    {index < uploadedColumnLines.length - 1 ? ',' : ''}
+                            {uploadedColumnLineEntries.map((entry, index) => (
+                                <p key={entry.key}>
+                                    {entry.value}
+                                    {index < uploadedColumnLineEntries.length - 1 ? ',' : ''}
                                 </p>
                             ))}
                         </div>

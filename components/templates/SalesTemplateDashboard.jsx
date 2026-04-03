@@ -76,14 +76,38 @@ const toServerFilters = (filters = []) => (Array.isArray(filters) ? filters : []
         return {
             field: filter.column,
             operator: 'IN',
-            value: filter.values.map((item) => String(item)),
+            value: filter.values.map(String),
         };
     })
     .filter(Boolean);
 
-const ID_AGGREGATION_ERROR = /Invalid aggregation\s+['"]?[^'"]+['"]?\s+on ID field\s+['"]?([^'"\.]+)['"]?/i;
-const IS_ID_AGGREGATION_ERROR = /Invalid aggregation/i;
-const USE_COUNT_HINT = /Use COUNT/i;
+const isIdAggregationErrorMessage = (message = '') => {
+    const lower = String(message || '').toLowerCase();
+    return lower.includes('invalid aggregation') && lower.includes('id field');
+};
+
+const hasUseCountHint = (message = '') => String(message || '').toLowerCase().includes('use count');
+
+const extractIdFieldFromError = (message = '') => {
+    const source = String(message || '');
+    const lower = source.toLowerCase();
+    const marker = 'on id field';
+    const markerIndex = lower.indexOf(marker);
+    if (markerIndex < 0) return '';
+
+    let remainder = source.slice(markerIndex + marker.length).trim();
+    while (remainder.startsWith('"') || remainder.startsWith("'")) remainder = remainder.slice(1);
+
+    const stopChars = ['"', "'", '.', ',', ';', ':', ')', '(', ' '];
+    let end = remainder.length;
+    for (let i = 0; i < remainder.length; i += 1) {
+        if (stopChars.includes(remainder[i])) {
+            end = i;
+            break;
+        }
+    }
+    return remainder.slice(0, end).trim();
+};
 
 const withCountFallbackPayload = (payload = {}, idField = '') => {
     const targetField = String(idField || '').trim().toLowerCase();
@@ -135,19 +159,18 @@ const runQuerySafe = async (payload = {}) => {
         return await backendApi.runQuery(payload);
     } catch (error) {
         const message = String(error?.message || '');
-        if (!IS_ID_AGGREGATION_ERROR.test(message) || !USE_COUNT_HINT.test(message)) {
+        if (!isIdAggregationErrorMessage(message) || !hasUseCountHint(message)) {
             throw error;
         }
 
-        const match = message.match(ID_AGGREGATION_ERROR);
-        const fieldFromError = match?.[1] || '';
+        const fieldFromError = extractIdFieldFromError(message);
 
         try {
             const fallbackPayload = withCountFallbackPayload(payload, fieldFromError);
             return await backendApi.runQuery(fallbackPayload);
         } catch (retryError) {
             const retryMessage = String(retryError?.message || '');
-            if (!IS_ID_AGGREGATION_ERROR.test(retryMessage) || !USE_COUNT_HINT.test(retryMessage)) {
+            if (!isIdAggregationErrorMessage(retryMessage) || !hasUseCountHint(retryMessage)) {
                 throw retryError;
             }
 
@@ -155,6 +178,341 @@ const runQuerySafe = async (payload = {}) => {
             return await backendApi.runQuery(finalFallbackPayload);
         }
     }
+};
+
+const getFirstRowValue = (response) => {
+    const firstRow = Array.isArray(response?.rows) ? response.rows[0] : null;
+    if (Array.isArray(firstRow)) return toNumber(firstRow[0]);
+    if (firstRow && typeof firstRow === 'object') return toNumber(Object.values(firstRow)[0]);
+    return 0;
+};
+
+const runMarginPctKpiQuery = async ({ datasetId, mappedMeasureField, serverFilters }) => {
+    const revenueField = mappedMeasureField('Net_Revenue', 'SUM');
+    const profitField = mappedMeasureField('Profit', 'SUM');
+    if (!revenueField || !profitField) return null;
+
+    const [revRes, profitRes] = await Promise.all([
+        runQuerySafe({
+            datasetId,
+            chartType: 'KPI_SINGLE',
+            dimensions: [],
+            measures: [{ name: 'Revenue', field: revenueField, aggregation: 'SUM' }],
+            filters: serverFilters,
+            limit: 1,
+        }),
+        runQuerySafe({
+            datasetId,
+            chartType: 'KPI_SINGLE',
+            dimensions: [],
+            measures: [{ name: 'Profit', field: profitField, aggregation: 'SUM' }],
+            filters: serverFilters,
+            limit: 1,
+        }),
+    ]);
+
+    const revenue = getFirstRowValue(revRes);
+    const profit = getFirstRowValue(profitRes);
+    return revenue > 0 ? (profit / revenue) * 100 : 0;
+};
+
+const runAvgRevenuePerRepKpiQuery = async ({ datasetId, mappedMeasureField, mappedField, serverFilters }) => {
+    const revenueField = mappedMeasureField('Net_Revenue', 'SUM');
+    const repField = mappedField('Sales_Rep');
+    if (!revenueField || !repField) return null;
+
+    const [revRes, repRes] = await Promise.all([
+        runQuerySafe({
+            datasetId,
+            chartType: 'KPI_SINGLE',
+            dimensions: [],
+            measures: [{ name: 'Revenue', field: revenueField, aggregation: 'SUM' }],
+            filters: serverFilters,
+            limit: 1,
+        }),
+        runQuerySafe({
+            datasetId,
+            chartType: 'TABLE',
+            dimensions: [repField],
+            measures: [{ name: 'Count', field: '__count__', aggregation: 'COUNT' }],
+            filters: serverFilters,
+            sort: { field: repField, order: 'asc' },
+            limit: 5000,
+        }),
+    ]);
+
+    const revenue = getFirstRowValue(revRes);
+    const distinctReps = Array.isArray(repRes?.rows) ? repRes.rows.length : 0;
+    return distinctReps > 0 ? revenue / distinctReps : 0;
+};
+
+const runStandardKpiQuery = async ({ kpi, datasetId, mappedMeasureField, serverFilters }) => {
+    const measureField = mappedMeasureField(kpi.measure, kpi.aggregation || 'SUM');
+    const measurePayload = kpi.measureExpression
+        ? [{ name: kpi.measureName || 'Value', expression: kpi.measureExpression }]
+        : [{ name: kpi.label, field: measureField, aggregation: kpi.aggregation || 'SUM' }];
+
+    if (!kpi.measureExpression && !measureField) return null;
+
+    const response = await runQuerySafe({
+        datasetId,
+        chartType: 'KPI_SINGLE',
+        dimensions: [],
+        measures: measurePayload,
+        filters: serverFilters,
+        limit: 1,
+    });
+
+    return getFirstRowValue(response);
+};
+
+const runKpiQueryForSpec = async ({ kpi, datasetId, mappedMeasureField, mappedField, globalFilterPayload }) => {
+    const serverFilters = toServerFilters(globalFilterPayload);
+
+    if (kpi.formula === 'margin_pct') {
+        return runMarginPctKpiQuery({ datasetId, mappedMeasureField, serverFilters });
+    }
+
+    if (kpi.formula === 'avg_rev_rep') {
+        return runAvgRevenuePerRepKpiQuery({ datasetId, mappedMeasureField, mappedField, serverFilters });
+    }
+
+    return runStandardKpiQuery({ kpi, datasetId, mappedMeasureField, serverFilters });
+};
+
+const isDismissOverlayKey = (key = '') => key === 'Escape' || key === 'Enter' || key === ' ';
+
+const formatKpiValue = (kpi, value) => {
+    const safe = toNumber(value);
+    if (kpi.format === 'percent' || kpi.id === 'profit_margin') return `${safe.toFixed(2)}%`;
+    if (kpi.format === 'currency' || kpi.id.includes('revenue') || kpi.id.includes('profit')) return `₹${currencyFmt.format(safe)}`;
+    return numberFmt.format(safe);
+};
+
+const createChartClickHandler = ({ mappedField, geoDrillPath, setGeoDrillPath, setInteractionFilter }) => (chartSpec) => (params) => {
+    if (!params?.name) return;
+
+    if (chartSpec.id === 'geo_drilldown') {
+        const hierarchy = chartSpec.hierarchy || [];
+        const levelIndex = Math.min(geoDrillPath.length, hierarchy.length - 1);
+        if (levelIndex < hierarchy.length - 1) {
+            setGeoDrillPath((prev) => [...prev, { logicalField: hierarchy[levelIndex], value: String(params.name) }]);
+        }
+        return;
+    }
+
+    const dimField = mappedField(chartSpec.dimension);
+    if (!dimField) return;
+    setInteractionFilter({ field: dimField, value: String(params.name), sourceChartId: chartSpec.id });
+};
+
+const mapResultsById = (items = [], values = []) => {
+    const result = {};
+    items.forEach((item, idx) => {
+        const id = String(item?.id || '').trim();
+        if (!id) return;
+        result[id] = values[idx];
+    });
+    return result;
+};
+
+const joinPathSegments = (...segments) => {
+    const cleaned = segments
+        .map((segment) => String(segment || '').trim())
+        .filter(Boolean)
+        .map((segment) => {
+            let value = segment;
+            while (value.startsWith('/')) value = value.slice(1);
+            while (value.endsWith('/')) value = value.slice(0, -1);
+            return value;
+        })
+        .filter(Boolean);
+    return `/${cleaned.join('/')}`;
+};
+
+const buildSharedDashboardUrl = ({ reportId, shareToken, pathTemplate }) => {
+    const basePathRaw = String(import.meta.env.BASE_URL || '/').trim() || '/';
+    const sharePath = joinPathSegments(basePathRaw, pathTemplate, encodeURIComponent(reportId));
+    const url = new URL(globalThis.location.origin + sharePath);
+    url.searchParams.set('shareToken', shareToken);
+    return url.toString();
+};
+
+const extractDistinctSortedOptions = (rows = [], field = '') => {
+    if (!Array.isArray(rows)) return [];
+    const options = rows
+        .map((row) => (Array.isArray(row) ? row[0] : row?.[field]))
+        .filter((value) => value !== null && value !== undefined && String(value) !== '')
+        .map(String);
+    return Array.from(new Set(options)).sort((a, b) => a.localeCompare(b));
+};
+
+const loadSingleFilterOptions = async ({ item, datasetId, mappedField }) => {
+    const field = mappedField(item.field);
+    if (!field) return [item.id, []];
+
+    const payload = {
+        datasetId,
+        chartType: 'TABLE',
+        dimensions: [field],
+        measures: [{ name: 'Count', field: '__count__', aggregation: 'COUNT' }],
+        filters: [],
+        sort: { field, order: 'asc' },
+        limit: 200,
+    };
+    const response = await runQuerySafe(payload);
+    return [item.id, extractDistinctSortedOptions(response?.rows, field)];
+};
+
+const runSalesChartSpecQuery = async ({
+    rawSpec,
+    mappedField,
+    mappedMeasureField,
+    geoDrillPath,
+    datasetId,
+    dataset,
+    globalFilterPayload,
+    isDark,
+}) => {
+    const spec = resolveGeoChartSpec({
+        spec: rawSpec,
+        mappedField,
+        geoDrillPath,
+        datasetId,
+    });
+    const assignments = buildChartAssignments(spec, mappedField, mappedMeasureField);
+    if (assignments.length === 0) {
+        return { error: 'Required mapped fields are unavailable for this chart.' };
+    }
+
+    const dimensionField = mappedField(spec.dimension);
+    const config = {
+        id: spec.id,
+        datasetId,
+        type: spec.type,
+        dimension: dimensionField,
+        measures: spec.measure ? [mappedMeasureField(spec.measure, spec.aggregation || 'SUM')].filter(Boolean) : [],
+        assignments,
+        hierarchyFields: (spec.hierarchy || []).map((h) => mappedField(h)).filter(Boolean),
+        aggregation: spec.aggregation || 'SUM',
+        filters: [],
+        style: spec.type === ChartType.COMBO_BAR_LINE ? { seriesTypes: ['bar', 'line'] } : {},
+    };
+
+    const payload = buildQuery({
+        config,
+        dataset,
+        datasetId,
+        globalFilters: [...globalFilterPayload, ...(spec.extraFilters || [])],
+        drillPath: [],
+        effectiveDimension: dimensionField,
+    });
+
+    const response = await runQuerySafe(payload);
+    const adapted = adaptQueryResponse(response, {
+        chartType: spec.type,
+        dimensionFields: payload.dimensions,
+        measures: payload.measures,
+        hierarchyFields: config.hierarchyFields,
+        xMeasure: spec.xMeasure ? mappedField(spec.xMeasure) : undefined,
+        yMeasure: spec.yMeasure ? mappedField(spec.yMeasure) : undefined,
+    });
+
+    const option = buildChartOption(
+        spec.type,
+        adapted.rows,
+        config,
+        isDark ? 'dark' : 'light',
+        'clear',
+        'vibrant'
+    );
+
+    return {
+        option,
+        rows: adapted.rows,
+        config,
+        spec,
+    };
+};
+
+const canLoadSalesPageData = ({ id, datasetId, mapping }) => (
+    id === 'sales' && !!datasetId && !!mapping
+);
+
+const fetchSalesPagePayloads = async ({ runChartQuery, runKpiQuery }) => {
+    const pageCharts = SALES_CHARTS;
+    const [chartPayloads, kpiPayloads] = await Promise.all([
+        Promise.all(pageCharts.map((chart) => runChartQuery(chart))),
+        Promise.all(KPI_ALL.map((kpi) => runKpiQuery(kpi))),
+    ]);
+    return { pageCharts, chartPayloads, kpiPayloads };
+};
+
+const buildChartAssignments = (spec, mappedField, mappedMeasureField) => {
+    const assignments = [];
+
+    if (spec.hierarchy?.length > 0) {
+        spec.hierarchy.forEach((h) => {
+            const field = mappedField(h);
+            if (field) assignments.push({ field, role: 'hierarchy' });
+        });
+    }
+
+    const dimensionField = mappedField(spec.dimension);
+    if (dimensionField) {
+        assignments.push({
+            field: dimensionField,
+            role: spec.dimensionRole === 'time' ? 'time' : (spec.dimensionRole === 'legend' ? 'legend' : 'x'),
+        });
+    }
+
+    const legendField = mappedField(spec.legend);
+    if (legendField) assignments.push({ field: legendField, role: 'legend' });
+
+    if (spec.measures?.length > 0) {
+        spec.measures.forEach((item) => {
+            const field = mappedMeasureField(item.field, item.aggregation || 'SUM');
+            if (!field) return;
+            assignments.push({
+                field,
+                role: item.role || 'y',
+                aggregation: item.aggregation || 'SUM',
+            });
+        });
+    } else if (spec.xMeasure && spec.yMeasure) {
+        const xField = mappedMeasureField(spec.xMeasure, spec.xAggregation || 'AVG');
+        const yField = mappedMeasureField(spec.yMeasure, spec.yAggregation || 'SUM');
+        if (xField) assignments.push({ field: xField, role: 'x', aggregation: spec.xAggregation || 'AVG' });
+        if (yField) assignments.push({ field: yField, role: 'y', aggregation: spec.yAggregation || 'SUM' });
+    } else if (spec.measure) {
+        const measureField = mappedMeasureField(spec.measure, spec.aggregation || 'SUM');
+        if (measureField) {
+            assignments.push({
+                field: measureField,
+                role: spec.type === ChartType.DONUT ? 'value' : 'y',
+                aggregation: spec.aggregation || 'SUM',
+            });
+        }
+    } else if (spec.measureExpression && spec.measureName) {
+        assignments.push({ role: 'y', field: spec.measureName, expression: spec.measureExpression });
+    }
+
+    return assignments;
+};
+
+const resolveGeoChartSpec = ({ spec, mappedField, geoDrillPath, datasetId }) => {
+    if (spec.id !== 'geo_drilldown') return spec;
+    const hierarchy = Array.isArray(spec.hierarchy) ? spec.hierarchy : [];
+    const levelIndex = Math.min(geoDrillPath.length, hierarchy.length - 1);
+    return {
+        ...spec,
+        dimension: hierarchy[levelIndex],
+        extraFilters: geoDrillPath.map((entry) => {
+            const field = mappedField(entry.logicalField);
+            if (!field) return null;
+            return { column: field, type: 'include', values: [String(entry.value)], columnType: 'string', datasetId };
+        }).filter(Boolean),
+    };
 };
 
 const KpiCard = ({ title, value, hint, isDark }) => (
@@ -185,7 +543,17 @@ const ChartCard = ({ title, option, isDark, onEvents, height = 320 }) => {
             </div>
 
             {expanded && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setExpanded(false)}>
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
+                    onClick={() => setExpanded(false)}
+                    onKeyDown={(event) => {
+                        if (isDismissOverlayKey(event.key)) {
+                            setExpanded(false);
+                        }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                >
                     <div
                         className={`relative h-[92vh] w-[96vw] rounded-2xl border p-4 ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}
                         onClick={(event) => event.stopPropagation()}
@@ -208,6 +576,55 @@ const ChartCard = ({ title, option, isDark, onEvents, height = 320 }) => {
         </>
     );
 };
+
+const TemplateStateCard = ({ isDark, children }) => (
+    <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
+        <div className="cv-state-card">{children}</div>
+    </section>
+);
+
+const SalesMappedFieldsCard = ({ isDark, mappedFields }) => (
+    <div className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h3 className={`text-sm font-bold mb-2 ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Mapped Fields</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
+            {mappedFields.map(([field, column]) => (
+                <div key={field} className={`px-2 py-1 rounded border ${isDark ? 'border-gray-600 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                    <strong>{field}</strong> → {column}
+                </div>
+            ))}
+        </div>
+    </div>
+);
+
+const SalesKpiGrid = ({ isDark, kpiResults }) => {
+    if (KPI_ALL.length === 0) return null;
+    return (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+            {KPI_ALL.map((kpi) => (
+                <KpiCard
+                    key={kpi.id}
+                    title={kpi.label}
+                    value={formatKpiValue(kpi, kpiResults[kpi.id])}
+                    hint="Query-driven KPI"
+                    isDark={isDark}
+                />
+            ))}
+        </div>
+    );
+};
+
+const SalesDashboardNotices = ({ loading, error, missingMappedFields }) => (
+    <>
+        {missingMappedFields.length > 0 ? (
+            <div className="cv-validation-summary">
+                <p>Partial analysis mode: unmapped fields ({missingMappedFields.join(', ')}).</p>
+            </div>
+        ) : null}
+
+        {loading ? <div className="cv-state-card">Generating Sales analytics...</div> : null}
+        {!loading && error ? <div className="cv-validation-summary"><p>{error}</p></div> : null}
+    </>
+);
 
 const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedView = false }) => {
     const { id } = useParams();
@@ -290,7 +707,19 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
     const shareDashboard = async () => {
         if (isSharedView || isSharingDashboard) return;
         if (!mapping || !datasetId) {
-            window.alert('Dashboard data is not ready to share yet.');
+            globalThis.alert?.('Dashboard data is not ready to share yet.');
+            return;
+        }
+
+        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
+        const recipientEmails = Array.from(new Set(
+            String(rawRecipients || '')
+                .split(',')
+                .map((item) => String(item || '').trim().toLowerCase())
+                .filter(Boolean)
+        ));
+        if (recipientEmails.length === 0) {
+            globalThis.alert?.('Please add at least one recipient email.');
             return;
         }
 
@@ -328,27 +757,27 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
             const shareResponse = await backendApi.createReportShare(reportId, {
                 role: 'viewer',
                 expires_in_hours: 168,
+                recipient_emails: recipientEmails,
             });
 
             const shareToken = String(shareResponse?.share?.token || '').trim();
             if (!shareToken) throw new Error('Share token was not returned');
 
-            const basePathRaw = String(import.meta.env.BASE_URL || '/').trim() || '/';
-            const basePath = basePathRaw.endsWith('/') ? basePathRaw.slice(0, -1) : basePathRaw;
-            const sharePath = `${basePath}/templates/sales/dashboard/shared/${encodeURIComponent(reportId)}`.replace(/\/\/+/, '/');
-            const url = new URL(window.location.origin + sharePath);
-            url.searchParams.set('shareToken', shareToken);
-            const finalUrl = url.toString();
+            const finalUrl = buildSharedDashboardUrl({
+                reportId,
+                shareToken,
+                pathTemplate: '/templates/sales/dashboard/shared',
+            });
 
-            if (navigator?.clipboard?.writeText) {
-                await navigator.clipboard.writeText(finalUrl);
-                window.alert('Sales dashboard share link copied to clipboard.');
+            if (globalThis.navigator?.clipboard?.writeText) {
+                await globalThis.navigator.clipboard.writeText(finalUrl);
+                globalThis.alert?.('Sales dashboard share link copied to clipboard.');
                 return;
             }
 
-            window.prompt('Copy your Sales dashboard share link:', finalUrl);
+            globalThis.prompt?.('Copy your Sales dashboard share link:', finalUrl);
         } catch (error) {
-            window.alert(error?.message || 'Unable to generate Sales dashboard share link.');
+            globalThis.alert?.(error?.message || 'Unable to generate Sales dashboard share link.');
         } finally {
             setIsSharingDashboard(false);
         }
@@ -361,27 +790,7 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
             if (!datasetId || !mapping) return;
             try {
                 const entries = await Promise.all(
-                    FILTER_FIELDS.map(async (item) => {
-                        const field = mappedField(item.field);
-                        if (!field) return [item.id, []];
-                        const payload = {
-                            datasetId,
-                            chartType: 'TABLE',
-                            dimensions: [field],
-                            measures: [{ name: 'Count', field: '__count__', aggregation: 'COUNT' }],
-                            filters: [],
-                            sort: { field, order: 'asc' },
-                            limit: 200,
-                        };
-                        const response = await runQuerySafe(payload);
-                        const options = Array.isArray(response?.rows)
-                            ? response.rows
-                                .map((row) => Array.isArray(row) ? row[0] : row?.[field])
-                                .filter((value) => value !== null && value !== undefined && String(value) !== '')
-                                .map((value) => String(value))
-                            : [];
-                        return [item.id, Array.from(new Set(options)).sort((a, b) => a.localeCompare(b))];
-                    })
+                    FILTER_FIELDS.map((item) => loadSingleFilterOptions({ item, datasetId, mappedField }))
                 );
                 if (!isMounted) return;
                 setFilterOptions(Object.fromEntries(entries));
@@ -397,243 +806,43 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
         };
     }, [datasetId, mapping, mappedField]);
 
-    const buildAssignments = (spec) => {
-        const assignments = [];
+    const runChartQuery = async (rawSpec) => runSalesChartSpecQuery({
+        rawSpec,
+        mappedField,
+        mappedMeasureField,
+        geoDrillPath,
+        datasetId,
+        dataset,
+        globalFilterPayload,
+        isDark,
+    });
 
-        if (spec.hierarchy?.length > 0) {
-            spec.hierarchy.forEach((h) => {
-                const field = mappedField(h);
-                if (field) assignments.push({ field, role: 'hierarchy' });
-            });
-        }
-
-        const dimensionField = mappedField(spec.dimension);
-        if (dimensionField) {
-            assignments.push({
-                field: dimensionField,
-                role: spec.dimensionRole === 'time' ? 'time' : (spec.dimensionRole === 'legend' ? 'legend' : 'x'),
-            });
-        }
-
-        const legendField = mappedField(spec.legend);
-        if (legendField) assignments.push({ field: legendField, role: 'legend' });
-
-        if (spec.measures?.length > 0) {
-            spec.measures.forEach((item) => {
-                const field = mappedMeasureField(item.field, item.aggregation || 'SUM');
-                if (!field) return;
-                assignments.push({
-                    field,
-                    role: item.role || 'y',
-                    aggregation: item.aggregation || 'SUM',
-                });
-            });
-        } else if (spec.xMeasure && spec.yMeasure) {
-            const xField = mappedMeasureField(spec.xMeasure, spec.xAggregation || 'AVG');
-            const yField = mappedMeasureField(spec.yMeasure, spec.yAggregation || 'SUM');
-            if (xField) assignments.push({ field: xField, role: 'x', aggregation: spec.xAggregation || 'AVG' });
-            if (yField) assignments.push({ field: yField, role: 'y', aggregation: spec.yAggregation || 'SUM' });
-        } else if (spec.measure) {
-            const measureField = mappedMeasureField(spec.measure, spec.aggregation || 'SUM');
-            if (measureField) {
-                assignments.push({
-                    field: measureField,
-                    role: spec.type === ChartType.DONUT ? 'value' : 'y',
-                    aggregation: spec.aggregation || 'SUM',
-                });
-            }
-        } else if (spec.measureExpression && spec.measureName) {
-            assignments.push({ role: 'y', field: spec.measureName, expression: spec.measureExpression });
-        }
-
-        return assignments;
-    };
-
-    const resolveGeoSpec = (spec) => {
-        if (spec.id !== 'geo_drilldown') return spec;
-        const hierarchy = Array.isArray(spec.hierarchy) ? spec.hierarchy : [];
-        const levelIndex = Math.min(geoDrillPath.length, hierarchy.length - 1);
-        return {
-            ...spec,
-            dimension: hierarchy[levelIndex],
-            extraFilters: geoDrillPath.map((entry) => {
-                const field = mappedField(entry.logicalField);
-                if (!field) return null;
-                return { column: field, type: 'include', values: [String(entry.value)], columnType: 'string', datasetId };
-            }).filter(Boolean),
-        };
-    };
-
-    const runChartQuery = async (rawSpec) => {
-        const spec = resolveGeoSpec(rawSpec);
-        const assignments = buildAssignments(spec);
-        if (assignments.length === 0) {
-            return { error: 'Required mapped fields are unavailable for this chart.' };
-        }
-
-        const dimensionField = mappedField(spec.dimension);
-        const config = {
-            id: spec.id,
-            datasetId,
-            type: spec.type,
-            dimension: dimensionField,
-            measures: spec.measure ? [mappedMeasureField(spec.measure, spec.aggregation || 'SUM')].filter(Boolean) : [],
-            assignments,
-            hierarchyFields: (spec.hierarchy || []).map((h) => mappedField(h)).filter(Boolean),
-            aggregation: spec.aggregation || 'SUM',
-            filters: [],
-            style: spec.type === ChartType.COMBO_BAR_LINE ? { seriesTypes: ['bar', 'line'] } : {},
-        };
-
-        const payload = buildQuery({
-            config,
-            dataset,
-            datasetId,
-            globalFilters: [...globalFilterPayload, ...(spec.extraFilters || [])],
-            drillPath: [],
-            effectiveDimension: dimensionField,
-        });
-
-        const response = await runQuerySafe(payload);
-        const adapted = adaptQueryResponse(response, {
-            chartType: spec.type,
-            dimensionFields: payload.dimensions,
-            measures: payload.measures,
-            hierarchyFields: config.hierarchyFields,
-            xMeasure: spec.xMeasure ? mappedField(spec.xMeasure) : undefined,
-            yMeasure: spec.yMeasure ? mappedField(spec.yMeasure) : undefined,
-        });
-
-        const option = buildChartOption(
-            spec.type,
-            adapted.rows,
-            config,
-            isDark ? 'dark' : 'light',
-            'clear',
-            'vibrant'
-        );
-
-        return {
-            option,
-            rows: adapted.rows,
-            config,
-            spec,
-        };
-    };
-
-    const runKpiQuery = async (kpi) => {
-        const serverFilters = toServerFilters(globalFilterPayload);
-
-        if (kpi.formula === 'margin_pct') {
-            const revenueField = mappedMeasureField('Net_Revenue', 'SUM');
-            const profitField = mappedMeasureField('Profit', 'SUM');
-            if (!revenueField || !profitField) return null;
-
-            const [revRes, profitRes] = await Promise.all([
-                runQuerySafe({
-                    datasetId,
-                    chartType: 'KPI_SINGLE',
-                    dimensions: [],
-                    measures: [{ name: 'Revenue', field: revenueField, aggregation: 'SUM' }],
-                    filters: serverFilters,
-                    limit: 1,
-                }),
-                runQuerySafe({
-                    datasetId,
-                    chartType: 'KPI_SINGLE',
-                    dimensions: [],
-                    measures: [{ name: 'Profit', field: profitField, aggregation: 'SUM' }],
-                    filters: serverFilters,
-                    limit: 1,
-                }),
-            ]);
-
-            const revenue = toNumber(Array.isArray(revRes?.rows) ? (Array.isArray(revRes.rows[0]) ? revRes.rows[0][0] : Object.values(revRes.rows[0] || {})[0]) : 0);
-            const profit = toNumber(Array.isArray(profitRes?.rows) ? (Array.isArray(profitRes.rows[0]) ? profitRes.rows[0][0] : Object.values(profitRes.rows[0] || {})[0]) : 0);
-            return revenue > 0 ? (profit / revenue) * 100 : 0;
-        }
-
-        if (kpi.formula === 'avg_rev_rep') {
-            const revenueField = mappedMeasureField('Net_Revenue', 'SUM');
-            const repField = mappedField('Sales_Rep');
-            if (!revenueField || !repField) return null;
-
-            const [revRes, repRes] = await Promise.all([
-                runQuerySafe({
-                    datasetId,
-                    chartType: 'KPI_SINGLE',
-                    dimensions: [],
-                    measures: [{ name: 'Revenue', field: revenueField, aggregation: 'SUM' }],
-                    filters: serverFilters,
-                    limit: 1,
-                }),
-                runQuerySafe({
-                    datasetId,
-                    chartType: 'TABLE',
-                    dimensions: [repField],
-                    measures: [{ name: 'Count', field: '__count__', aggregation: 'COUNT' }],
-                    filters: serverFilters,
-                    sort: { field: repField, order: 'asc' },
-                    limit: 5000,
-                }),
-            ]);
-
-            const revenue = toNumber(Array.isArray(revRes?.rows) ? (Array.isArray(revRes.rows[0]) ? revRes.rows[0][0] : Object.values(revRes.rows[0] || {})[0]) : 0);
-            const distinctReps = Array.isArray(repRes?.rows) ? repRes.rows.length : 0;
-            return distinctReps > 0 ? revenue / distinctReps : 0;
-        }
-
-        const measureField = mappedMeasureField(kpi.measure, kpi.aggregation || 'SUM');
-        const measurePayload = kpi.measureExpression
-            ? [{ name: kpi.measureName || 'Value', expression: kpi.measureExpression }]
-            : [{ name: kpi.label, field: measureField, aggregation: kpi.aggregation || 'SUM' }];
-
-        if (!kpi.measureExpression && !measureField) return null;
-
-        const response = await runQuerySafe({
-            datasetId,
-            chartType: 'KPI_SINGLE',
-            dimensions: [],
-            measures: measurePayload,
-            filters: serverFilters,
-            limit: 1,
-        });
-
-        const firstRow = Array.isArray(response?.rows) ? response.rows[0] : null;
-        if (Array.isArray(firstRow)) return toNumber(firstRow[0]);
-        if (firstRow && typeof firstRow === 'object') return toNumber(Object.values(firstRow)[0]);
-        return 0;
-    };
+    const runKpiQuery = async (kpi) => runKpiQueryForSpec({
+        kpi,
+        datasetId,
+        mappedMeasureField,
+        mappedField,
+        globalFilterPayload,
+    });
 
     useEffect(() => {
         let isMounted = true;
 
         const loadPageData = async () => {
-            if (id !== 'sales') return;
-            if (!datasetId || !mapping) return;
+            if (!canLoadSalesPageData({ id, datasetId, mapping })) return;
 
             setLoading(true);
             setError('');
             try {
-                const pageCharts = SALES_CHARTS;
-                const [chartPayloads, kpiPayloads] = await Promise.all([
-                    Promise.all(pageCharts.map((chart) => runChartQuery(chart))),
-                    Promise.all(KPI_ALL.map((kpi) => runKpiQuery(kpi))),
-                ]);
+                const { pageCharts, chartPayloads, kpiPayloads } = await fetchSalesPagePayloads({
+                    runChartQuery,
+                    runKpiQuery,
+                });
 
                 if (!isMounted) return;
 
-                const chartMap = {};
-                pageCharts.forEach((chart, idx) => {
-                    chartMap[chart.id] = chartPayloads[idx];
-                });
-                setChartResults((prev) => ({ ...prev, ...chartMap }));
-
-                const kpiMap = {};
-                KPI_ALL.forEach((kpi, idx) => {
-                    kpiMap[kpi.id] = kpiPayloads[idx];
-                });
-                setKpiResults((prev) => ({ ...prev, ...kpiMap }));
+                setChartResults((prev) => ({ ...prev, ...mapResultsById(pageCharts, chartPayloads) }));
+                setKpiResults((prev) => ({ ...prev, ...mapResultsById(KPI_ALL, kpiPayloads) }));
             } catch (err) {
                 if (!isMounted) return;
                 setError(err?.message || 'Failed to load Sales analytics');
@@ -650,58 +859,20 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
 
     const mappedFields = useMemo(() => Object.entries(mapping || {}).filter(([, value]) => value), [mapping]);
     const activeCharts = useMemo(() => SALES_CHARTS, []);
+    const isPageReady = !loading && !error;
 
-    const formatKpiValue = (kpi, value) => {
-        const safe = toNumber(value);
-        if (kpi.format === 'percent' || kpi.id === 'profit_margin') return `${safe.toFixed(2)}%`;
-        if (kpi.format === 'currency' || kpi.id.includes('revenue') || kpi.id.includes('profit')) return `₹${currencyFmt.format(safe)}`;
-        return numberFmt.format(safe);
-    };
+    const onChartClick = createChartClickHandler({
+        mappedField,
+        geoDrillPath,
+        setGeoDrillPath,
+        setInteractionFilter,
+    });
 
-    const onChartClick = (chartSpec) => (params) => {
-        if (!params?.name) return;
+    if (id !== 'sales') return <TemplateStateCard isDark={isDark}>Dashboard is available only for Sales template. <Link to="/templates">Go back</Link></TemplateStateCard>;
 
-        if (chartSpec.id === 'geo_drilldown') {
-            const hierarchy = chartSpec.hierarchy || [];
-            const levelIndex = Math.min(geoDrillPath.length, hierarchy.length - 1);
-            if (levelIndex < hierarchy.length - 1) {
-                setGeoDrillPath((prev) => [...prev, { logicalField: hierarchy[levelIndex], value: String(params.name) }]);
-            }
-            return;
-        }
+    if (!session || !mapping) return <TemplateStateCard isDark={isDark}>Mapping not found. Please map your template fields first. <Link to="/templates/sales/map">Go to mapping</Link></TemplateStateCard>;
 
-        const dimField = mappedField(chartSpec.dimension);
-        if (!dimField) return;
-        setInteractionFilter({ field: dimField, value: String(params.name), sourceChartId: chartSpec.id });
-    };
-
-    if (id !== 'sales') {
-        return (
-            <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-                <div className="cv-state-card">
-                    Dashboard is available only for Sales template. <Link to="/templates">Go back</Link>
-                </div>
-            </section>
-        );
-    }
-
-    if (!session || !mapping) {
-        return (
-            <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-                <div className="cv-state-card">
-                    Mapping not found. Please map your template fields first. <Link to="/templates/sales/map">Go to mapping</Link>
-                </div>
-            </section>
-        );
-    }
-
-    if (!datasetId) {
-        return (
-            <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-                <div className="cv-state-card">No dataset selected for Sales analytics.</div>
-            </section>
-        );
-    }
+    if (!datasetId) return <TemplateStateCard isDark={isDark}>No dataset selected for Sales analytics.</TemplateStateCard>;
 
     return (
         <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
@@ -725,11 +896,7 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
                 </div>
             </header>
 
-            {missingMappedFields.length > 0 ? (
-                <div className="cv-validation-summary">
-                    <p>Partial analysis mode: unmapped fields ({missingMappedFields.join(', ')}).</p>
-                </div>
-            ) : null}
+            <SalesDashboardNotices loading={loading} error={error} missingMappedFields={missingMappedFields} />
 
             <div className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
                 <h3 className={`text-sm font-bold mb-2 ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Global Filters</h3>
@@ -758,35 +925,11 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
                 </div>
             </div>
 
-            <div className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-                <h3 className={`text-sm font-bold mb-2 ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Mapped Fields</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
-                    {mappedFields.map(([field, column]) => (
-                        <div key={field} className={`px-2 py-1 rounded border ${isDark ? 'border-gray-600 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
-                            <strong>{field}</strong> → {column}
-                        </div>
-                    ))}
-                </div>
-            </div>
+            <SalesMappedFieldsCard isDark={isDark} mappedFields={mappedFields} />
 
-            {loading ? <div className="cv-state-card">Generating Sales analytics...</div> : null}
-            {!loading && error ? <div className="cv-validation-summary"><p>{error}</p></div> : null}
-
-            {!loading && !error ? (
+            {isPageReady ? (
                 <>
-                    {KPI_ALL.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
-                            {KPI_ALL.map((kpi) => (
-                                <KpiCard
-                                    key={kpi.id}
-                                    title={kpi.label}
-                                    value={formatKpiValue(kpi, kpiResults[kpi.id])}
-                                    hint="Query-driven KPI"
-                                    isDark={isDark}
-                                />
-                            ))}
-                        </div>
-                    ) : null}
+                    <SalesKpiGrid isDark={isDark} kpiResults={kpiResults} />
 
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                         {activeCharts.map((chart) => {
@@ -901,13 +1044,16 @@ const SkuPerformanceTable = ({ datasetId, mappedField, mappedMeasureField, globa
                     </tr>
                 </thead>
                 <tbody>
-                    {rows.map((row, index) => (
-                        <tr key={`${row.sku}-${index}`} className={isDark ? 'text-gray-200 border-t border-gray-700' : 'text-gray-800 border-t border-gray-200'}>
+                    {rows.map((row) => {
+                        const rowKey = `${String(row.sku || 'sku')}-${toNumber(row.revenue)}-${toNumber(row.profit)}`;
+                        return (
+                            <tr key={rowKey} className={isDark ? 'text-gray-200 border-t border-gray-700' : 'text-gray-800 border-t border-gray-200'}>
                             <td className="py-2 pr-4">{row.sku}</td>
                             <td className="py-2 pr-4 text-right">₹{currencyFmt.format(row.revenue)}</td>
                             <td className="py-2 text-right">₹{currencyFmt.format(row.profit)}</td>
-                        </tr>
-                    ))}
+                            </tr>
+                        );
+                    })}
                 </tbody>
             </table>
         </div>

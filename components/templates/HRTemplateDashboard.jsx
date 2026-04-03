@@ -570,6 +570,8 @@ const treeOption = (isDark, treeData) => ({
     ],
 });
 
+const isDismissOverlayKey = (key = '') => key === 'Escape' || key === 'Enter' || key === ' ';
+
 const KpiCard = ({ title, value, hint, isDark }) => (
     <div className={`rounded-2xl border p-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <p className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{title}</p>
@@ -613,13 +615,13 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
         setExpandedZoomPct(100);
 
         const onKeyDown = (event) => {
-            if (event.key === 'Escape') {
+            if (isDismissOverlayKey(event.key)) {
                 setExpanded(false);
             }
         };
 
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
+        globalThis.addEventListener('keydown', onKeyDown);
+        return () => globalThis.removeEventListener('keydown', onKeyDown);
     }, [expanded]);
 
     const getExpandedChartImage = async () => {
@@ -661,8 +663,7 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
         setIsExporting(true);
         try {
             const { dataUrl } = await getExpandedChartImage();
-            const safeTitle = String(title || 'chart').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-            triggerDownload(dataUrl, `${safeTitle || 'chart'}.png`);
+            triggerDownload(dataUrl, `${toSafeFileName(title)}.png`);
         } catch (error) {
             setExportError(error?.message || 'Failed to export PNG');
         } finally {
@@ -675,34 +676,14 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
         setIsExporting(true);
         try {
             const { dataUrl, width, height: imageHeight } = await getExpandedChartImage();
-            const orientation = width >= imageHeight ? 'landscape' : 'portrait';
-            const pdf = new jsPDF({ orientation, unit: 'pt', format: 'a4' });
-
-            const pageWidth = pdf.internal.pageSize.getWidth();
-            const pageHeight = pdf.internal.pageSize.getHeight();
-            const margin = 24;
-            const headerY = 24;
-            const axisLine = `X-axis: ${axisFields.x} | Y-axis: ${axisFields.y}`;
-
-            pdf.setFontSize(14);
-            pdf.setTextColor(30, 41, 59);
-            pdf.text(String(title || 'Chart'), margin, headerY);
-            pdf.setFontSize(10);
-            pdf.setTextColor(71, 85, 105);
-            pdf.text(axisLine, margin, headerY + 16);
-            pdf.text(`Exported on: ${new Date().toLocaleString()}`, margin, headerY + 30);
-
-            const maxW = pageWidth - margin * 2;
-            const maxH = pageHeight - margin * 2 - 44;
-            const ratio = Math.min(maxW / width, maxH / imageHeight);
-            const renderWidth = width * ratio;
-            const renderHeight = imageHeight * ratio;
-            const x = (pageWidth - renderWidth) / 2;
-            const y = headerY + 44 + ((maxH - renderHeight) / 2);
-
-            pdf.addImage(dataUrl, 'PNG', x, y, renderWidth, renderHeight, undefined, 'FAST');
-            const safeTitle = String(title || 'chart').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-            pdf.save(`${safeTitle || 'chart'}.pdf`);
+            const pdf = appendChartPdfPage(null, {
+                title,
+                axisFields,
+                dataUrl,
+                width,
+                height: imageHeight,
+            });
+            pdf.save(`${toSafeFileName(title)}.pdf`);
         } catch (error) {
             setExportError(error?.message || 'Failed to export PDF');
         } finally {
@@ -748,6 +729,13 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
                 <div
                     className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
                     onClick={() => setExpanded(false)}
+                    onKeyDown={(event) => {
+                        if (isDismissOverlayKey(event.key)) {
+                            setExpanded(false);
+                        }
+                    }}
+                    role="button"
+                    tabIndex={0}
                 >
                     <div
                         className={`relative h-[92vh] w-[96vw] rounded-2xl border p-4 ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}
@@ -824,6 +812,827 @@ const ChartCard = ({ title, option, isDark, height = 320, onEvents, headerExtras
     );
 };
 
+const OrgFilterControls = ({
+    isDark,
+    orgSearchQuery,
+    orgDepartmentFilter,
+    orgDepartmentOptions,
+    orgSelectedPathNames,
+    onOrgSearchChange,
+    onOrgDepartmentChange,
+    onCollapseAll,
+    onExpandAll,
+    onReset,
+    showZoomControls = false,
+    showSelectedPath = true,
+    zoomPct = 100,
+    onZoomIn = null,
+    onZoomOut = null,
+}) => (
+    <div className="flex flex-wrap items-center gap-2">
+        <input
+            value={orgSearchQuery}
+            onChange={onOrgSearchChange}
+            placeholder="Search employee..."
+            className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'bg-white border-gray-300 text-gray-700 placeholder:text-gray-400'}`}
+        />
+        <select
+            value={orgDepartmentFilter}
+            onChange={onOrgDepartmentChange}
+            className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-700'}`}
+        >
+            <option value="__all__">All Departments</option>
+            {orgDepartmentOptions.map((dep) => (
+                <option key={dep} value={dep}>{dep}</option>
+            ))}
+        </select>
+        <button
+            type="button"
+            onClick={onCollapseAll}
+            className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+        >
+            Collapse All
+        </button>
+        <button
+            type="button"
+            onClick={onExpandAll}
+            className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+        >
+            Expand All
+        </button>
+        <button
+            type="button"
+            onClick={onReset}
+            className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+        >
+            Reset
+        </button>
+
+        {showZoomControls && (
+            <div className="ml-auto flex items-center gap-2">
+                <button
+                    type="button"
+                    onClick={onZoomIn}
+                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                    Zoom +
+                </button>
+                <button
+                    type="button"
+                    onClick={onZoomOut}
+                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                    Zoom -
+                </button>
+                <span className={`text-[11px] font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{zoomPct}%</span>
+            </div>
+        )}
+
+        {showSelectedPath && orgSelectedPathNames.length > 0 && (
+            <span className={`max-w-full truncate text-[10px] ${isDark ? 'text-gray-300' : 'text-gray-600'}`} title={orgSelectedPathNames.join(' / ')}>
+                {orgSelectedPathNames.join(' / ')}
+            </span>
+        )}
+    </div>
+);
+
+const TemplateStateCard = ({ isDark, children }) => (
+    <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
+        <div className="cv-state-card">{children}</div>
+    </section>
+);
+
+const HRDashboardNotices = ({
+    exportAllError,
+    loading,
+    error,
+    mappingMissingFields,
+    hasValidationWarnings,
+    validation,
+}) => (
+    <>
+        {exportAllError && (
+            <div className="cv-validation-summary">
+                <p>{exportAllError}</p>
+            </div>
+        )}
+
+        {loading && <div className="cv-state-card">Generating HR analytics...</div>}
+        {!loading && error && <div className="cv-validation-summary"><p>{error}</p></div>}
+
+        {!loading && !error && mappingMissingFields.length > 0 && (
+            <div className="cv-validation-summary">
+                <p>
+                    Partial analysis mode: some template fields were not mapped ({mappingMissingFields.join(', ')}).
+                    Related analytics are not available for missing fields.
+                </p>
+            </div>
+        )}
+
+        {!loading && !error && hasValidationWarnings && (
+            <div className="cv-validation-summary">
+                {validation.map((v) => (
+                    <div key={v.module}>
+                        {v.missingFields?.length > 0 && <p>{v.module}: missing fields - {v.missingFields.join(', ')}</p>}
+                        {v.typeWarnings?.length > 0 && <p>{v.module}: type warnings - {v.typeWarnings.map((w) => w.field).join(', ')}</p>}
+                    </div>
+                ))}
+            </div>
+        )}
+    </>
+);
+
+const MappedFieldsCard = ({ isDark, mappedFields }) => (
+    <div data-tour="templates-dashboard-mapped-fields" className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <h3 className={`text-sm font-bold mb-2 ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Mapped Fields</h3>
+        {mappedFields.length === 0 ? (
+            <p className={isDark ? 'text-gray-400 text-sm' : 'text-gray-600 text-sm'}>No field mappings found.</p>
+        ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
+                {mappedFields.map(([field, column]) => (
+                    <div key={field} className={`px-2 py-1 rounded border ${isDark ? 'border-gray-600 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                        <strong>{field}</strong> → {column}
+                    </div>
+                ))}
+            </div>
+        )}
+    </div>
+);
+
+const HRSummaryKpis = ({
+    isDark,
+    summaryTotal,
+    summaryActive,
+    summaryInactive,
+    attrRatePct,
+    avgExp,
+    probationSuccess,
+    completenessPct,
+    missingEmergencyContact,
+}) => (
+    <div data-tour="templates-dashboard-kpis" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard title="Total Employees" value={summaryTotal} hint="Across mapped dataset" isDark={isDark} />
+        <KpiCard title="Active Employees" value={summaryActive} hint="Current active workforce" isDark={isDark} />
+        <KpiCard title="Inactive Employees" value={summaryInactive} hint="Derived from workforce status" isDark={isDark} />
+        <KpiCard title="Attrition Rate" value={`${Number(attrRatePct || 0).toFixed(2)}%`} hint="Based on exits" isDark={isDark} />
+        <KpiCard title="Avg Experience" value={`${Number(avgExp || 0).toFixed(2)} yrs`} hint="Experience module" isDark={isDark} />
+        <KpiCard title="Probation Success" value={`${Number(probationSuccess || 0).toFixed(2)}%`} hint="Lifecycle module" isDark={isDark} />
+        <KpiCard title="Completeness" value={`${Number(completenessPct || 0).toFixed(2)}%`} hint="Data quality module" isDark={isDark} />
+        <KpiCard title="Missing Emergency Contacts" value={missingEmergencyContact} hint="Contact module" isDark={isDark} />
+    </div>
+);
+
+const toSafeFileName = (title = 'chart') => {
+    const text = String(title || 'chart').toLowerCase();
+    let out = '';
+    let lastDash = false;
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const code = ch.charCodeAt(0);
+        const isLetter = code >= 97 && code <= 122;
+        const isDigit = code >= 48 && code <= 57;
+        if (isLetter || isDigit) {
+            out += ch;
+            lastDash = false;
+            continue;
+        }
+        if (!lastDash) {
+            out += '-';
+            lastDash = true;
+        }
+    }
+    while (out.startsWith('-')) out = out.slice(1);
+    while (out.endsWith('-')) out = out.slice(0, -1);
+    return out || 'chart';
+};
+
+const joinPathSegments = (...segments) => {
+    const cleaned = segments
+        .map((segment) => String(segment || '').trim())
+        .filter(Boolean)
+        .map((segment) => {
+            let value = segment;
+            while (value.startsWith('/')) value = value.slice(1);
+            while (value.endsWith('/')) value = value.slice(0, -1);
+            return value;
+        })
+        .filter(Boolean);
+    return `/${cleaned.join('/')}`;
+};
+
+const appendChartPdfPage = (pdf, image) => {
+    const orientation = image.width >= image.height ? 'landscape' : 'portrait';
+    const nextPdf = pdf || new jsPDF({ orientation, unit: 'pt', format: 'a4' });
+    if (pdf) {
+        nextPdf.addPage('a4', orientation);
+    }
+    const pageWidth = nextPdf.internal.pageSize.getWidth();
+    const pageHeight = nextPdf.internal.pageSize.getHeight();
+    const margin = 24;
+    const headerY = 24;
+    const axisLine = `X-axis: ${image.axisFields.x} | Y-axis: ${image.axisFields.y}`;
+    nextPdf.setFontSize(14);
+    nextPdf.setTextColor(30, 41, 59);
+    nextPdf.text(String(image.title || 'Chart'), margin, headerY);
+    nextPdf.setFontSize(10);
+    nextPdf.setTextColor(71, 85, 105);
+    nextPdf.text(axisLine, margin, headerY + 16);
+    nextPdf.text(`Exported on: ${new Date().toLocaleString()}`, margin, headerY + 30);
+    const maxW = pageWidth - margin * 2;
+    const maxH = pageHeight - margin * 2 - 44;
+    const ratio = Math.min(maxW / image.width, maxH / image.height);
+    const renderWidth = image.width * ratio;
+    const renderHeight = image.height * ratio;
+    const x = (pageWidth - renderWidth) / 2;
+    const y = headerY + 44 + ((maxH - renderHeight) / 2);
+    nextPdf.addImage(image.dataUrl, 'PNG', x, y, renderWidth, renderHeight, undefined, 'FAST');
+    return nextPdf;
+};
+const collectChartExportImages = async (entries = [], getChartImageFromRef) => {
+    const images = [];
+    for (const entry of entries) {
+        const { title, ref } = entry || {};
+        // eslint-disable-next-line no-await-in-loop
+        const image = await getChartImageFromRef(ref, title);
+        if (image) images.push(image);
+    }
+    return images;
+};
+
+const buildSharedDashboardUrl = ({ reportId, shareToken, pathTemplate }) => {
+    const basePathRaw = String(import.meta.env.BASE_URL || '/').trim() || '/';
+    const sharePath = joinPathSegments(basePathRaw, pathTemplate, encodeURIComponent(reportId));
+    const url = new URL(globalThis.location.origin + sharePath);
+    url.searchParams.set('shareToken', shareToken);
+    return url.toString();
+};
+
+const summarizeHrModuleResponses = (moduleNames = [], responses = []) => {
+    const nextAnalytics = {};
+    const validationList = [];
+    let successCount = 0;
+
+    responses.forEach((res, idx) => {
+        if (res.status === 'fulfilled') {
+            const value = res.value;
+            nextAnalytics[value.module] = value.data || {};
+            if (value.validation) {
+                validationList.push({ module: value.module, ...value.validation });
+            }
+            successCount += 1;
+            return;
+        }
+
+        const moduleName = moduleNames[idx];
+        validationList.push({
+            module: moduleName,
+            missingFields: [],
+            missingColumns: [],
+            typeWarnings: [],
+            isValid: false,
+            error: res.reason?.message || 'Module unavailable',
+        });
+    });
+
+    return { nextAnalytics, validationList, successCount };
+};
+
+const canLoadHrDashboardAnalytics = ({ id, mapping, datasetData }) => (
+    id === 'hr' && !!mapping && Array.isArray(datasetData) && datasetData.length > 0
+);
+
+const fetchHrModuleResponses = ({ datasetData, mapping }) => {
+    const payload = { data: datasetData, mapping };
+    return Promise.allSettled(
+        MODULES.map((moduleName) => backendApi.getHrAnalytics(moduleName, payload))
+    );
+};
+
+const extractHrKpiValues = (analytics) => ({
+    summaryTotal: readKpi(analytics, 'summary', 'totalEmployees', ['totalEmployees']),
+    summaryActive: readKpi(analytics, 'summary', 'activeEmployees', ['activeEmployees']),
+    summaryInactive: readKpi(analytics, 'summary', 'inactiveEmployees', ['inactiveEmployees']),
+    attrRatePct: readKpi(analytics, 'attrition', 'attrition_rate_percentage', ['attritionRate']),
+    avgExp: readKpi(analytics, 'experience', 'avg_experience', ['averageExperience']),
+    probationSuccess: readKpi(analytics, 'lifecycle', 'probation_success_rate', ['probationSuccessRate']),
+    completenessPct: readKpi(analytics, 'data-quality', 'completeness_percentage', ['completenessPercentage']),
+    missingPan: readKpi(analytics, 'compliance', 'missingPAN', ['missingPAN']),
+    missingAadhar: readKpi(analytics, 'compliance', 'missingAadhar', ['missingAadhar']),
+    missingPf: readKpi(analytics, 'compliance', 'missingPF', ['missingPF']),
+    missingUan: readKpi(analytics, 'compliance', 'missingUAN', ['missingUAN']),
+    missingEmergencyContact: readKpi(analytics, 'contact', 'missingEmergencyContact', ['missingEmergencyContact']),
+    totalNullValues: readKpi(analytics, 'data-quality', 'total_null_values'),
+    duplicateEmployeeCount: readKpi(analytics, 'data-quality', 'duplicate_employees', ['duplicateEmployees']),
+});
+
+const extractHrChartValues = (analytics) => ({
+    deptItems: readChart(analytics, 'summary', 'headcount_by_department', ['headcountByDepartment']),
+    businessUnitItems: readChart(analytics, 'summary', 'headcount_by_business_unit', ['headcountByBusinessUnit']),
+    locationItems: readChart(analytics, 'summary', 'headcount_by_location', ['headcountByLocation']),
+    workforceCategoryItems: readChart(analytics, 'summary', 'workforce_category_distribution', ['workforceCategoryDistribution']),
+    genderItems: readChart(analytics, 'summary', 'gender_ratio', ['genderRatio']),
+    maritalStatusItems: readChart(analytics, 'summary', 'marital_status_distribution', ['maritalStatusDistribution']),
+    ageItems: readChart(analytics, 'demographics', 'age_distribution', ['ageDistribution']),
+    genderByDepartmentRaw: readChart(analytics, 'demographics', 'gender_by_department', ['genderDiversityByDepartment']),
+    nationalityItems: readChart(analytics, 'demographics', 'nationality_distribution', ['nationalityDistribution']),
+    demographicLocationItems: readChart(analytics, 'demographics', 'location_distribution', ['locationDistribution']),
+    monthlyHiring: readChart(analytics, 'hiring', 'monthly_hiring_trend', ['monthlyHiringTrend']),
+    yearlyHiring: readChart(analytics, 'hiring', 'yearly_hiring_trend', ['yearlyHiringTrend']),
+    hiringByDepartment: readChart(analytics, 'hiring', 'hiring_by_department', ['hiringByDepartment']),
+    hiringByLocation: readChart(analytics, 'hiring', 'hiring_by_location', ['hiringByLocation']),
+    voluntaryVsInvoluntary: readChart(analytics, 'attrition', 'voluntary_vs_involuntary'),
+    exitsByDepartment: readChart(analytics, 'attrition', 'exits_by_department', ['exitsByDepartment']),
+    exitsByManager: readChart(analytics, 'attrition', 'exits_by_manager', ['exitsByManager']),
+    topExitReasons: readChart(analytics, 'attrition', 'top_exit_reasons', ['topExitReasons']),
+    attritionByExperience: readChart(analytics, 'attrition', 'attrition_by_experience', ['attritionByExperience']),
+    experienceDistribution: readChart(analytics, 'experience', 'experience_distribution', ['experienceDistribution']),
+    seniorVsJuniorRatio: readChart(analytics, 'experience', 'senior_vs_junior_ratio'),
+    orgTree: readChart(analytics, 'org', 'org_tree', ['hierarchy']),
+    managerTeamSize: readChart(analytics, 'org', 'manager_team_size', ['managerWiseTeamSize']),
+    paymentModeDistribution: readChart(analytics, 'payroll', 'payment_mode_distribution', ['paymentModeDistribution']),
+    bankDistribution: readChart(analytics, 'payroll', 'bank_distribution', ['bankDistribution']),
+    qualificationDistribution: readChart(analytics, 'education', 'qualification_distribution', ['qualificationDistribution']),
+    specializationDistribution: readChart(analytics, 'education', 'specialization_distribution', ['specializationDistribution']),
+    courseTypeDistribution: readChart(analytics, 'education', 'course_type_distribution', ['courseTypeDistribution']),
+    locationDistribution: readChart(analytics, 'location', 'location_distribution', ['locationDistribution']),
+    transferTrends: readChart(analytics, 'location', 'transfer_trends', ['transferTrends']),
+    movementReasons: readChart(analytics, 'location', 'movement_reasons', ['movementReasons']),
+    headcountPerDepartment: readChart(analytics, 'department', 'headcount_per_department', ['headcountPerDepartment']),
+    attritionPerDepartment: readChart(analytics, 'department', 'attrition_per_department', ['attritionPerDepartment']),
+    lifecycleDuration: readChart(analytics, 'lifecycle', 'lifecycle_duration'),
+    nullDistributionPerColumn: readChart(analytics, 'data-quality', 'null_distribution_per_column', ['nullCountsPerColumn']),
+    duplicateEmployees: asArray(analytics?.['data-quality']?.duplicateEmployees),
+    relationshipDistribution: readChart(analytics, 'contact', 'relationship_distribution', ['relationshipDistribution']),
+});
+
+const parseOrgChartClick = (params = {}) => {
+    const pathInfo = Array.isArray(params?.treePathInfo) ? params.treePathInfo : [];
+    const names = pathInfo.map((p) => p?.name).filter(Boolean);
+    const ids = pathInfo
+        .map((p) => p?.data?.id || p?.data?.key || p?.name || '')
+        .map(String)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const clickedId = String(params?.data?.id || params?.data?.key || params?.name || '').trim();
+    return { names, ids, clickedId };
+};
+
+const normalizeGenderByDepartmentRows = (rows = []) => {
+    const normalized = [];
+
+    rows.forEach((row) => {
+        if (Array.isArray(row?.distribution)) {
+            row.distribution.forEach((entry) => {
+                normalized.push({ department: row.department || 'Unknown', gender: entry.name || 'Unknown', value: Number(entry.value || 0) });
+            });
+            return;
+        }
+
+        normalized.push({
+            department: row.department || 'Unknown',
+            gender: row.gender || 'Unknown',
+            value: Number(row.value || 0),
+        });
+    });
+
+    return normalized;
+};
+
+const buildGenderByDepartmentChartData = (rows = []) => {
+    const departments = Array.from(new Set(rows.map((i) => i.department)));
+    const genders = Array.from(new Set(rows.map((i) => i.gender)));
+    const valueByKey = new Map(rows.map((i) => [`${i.department}::${i.gender}`, i.value]));
+
+    return {
+        departments,
+        series: genders.map((gender, idx) => ({
+            name: gender,
+            type: 'bar',
+            data: departments.map((dept) => valueByKey.get(`${dept}::${gender}`) || 0),
+            itemStyle: { color: COLORS[idx % COLORS.length] },
+        })),
+    };
+};
+
+const HRDashboardChartsGrid = ({
+    isDark,
+    registerChartRef,
+    deptItems,
+    genderItems,
+    businessUnitItems,
+    locationItems,
+    workforceCategoryItems,
+    maritalStatusItems,
+    ageItems,
+    monthlyHiring,
+    yearlyHiring,
+    hiringByDepartment,
+    hiringByLocation,
+    genderByDepartmentChart,
+    nationalityItems,
+    demographicLocationItems,
+    voluntaryVsInvoluntary,
+    attritionBarData,
+    exitsByManager,
+    topExitReasons,
+    attritionByExperience,
+    experienceDistribution,
+    seniorVsJuniorRatio,
+    orgChartEvents,
+    orgHeaderExtras,
+    renderExpandedOrgControls,
+    orgChartOption,
+    managerTeamSize,
+    paymentModeDistribution,
+    bankDistribution,
+    qualificationDistribution,
+    specializationDistribution,
+    courseTypeDistribution,
+    locationDistribution,
+    transferTrends,
+    movementReasons,
+    headcountPerDepartment,
+    attritionPerDepartment,
+    lifecycleDuration,
+    nullDistributionPerColumn,
+    relationshipDistribution,
+    missingPan,
+    missingAadhar,
+    missingPf,
+    missingUan,
+    totalNullValues,
+    duplicateEmployeeCount,
+    duplicateEmployees,
+}) => (
+    <div data-tour="templates-dashboard-charts" className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+        <ChartCard
+            title="Department Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Department Distribution')}
+            option={{
+                ...chartBase(isDark),
+                ...barOption(isDark, deptItems, COLORS[0]),
+            }}
+        />
+
+        <ChartCard
+            title="Gender Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Gender Distribution')}
+            option={{
+                ...chartBase(isDark),
+                ...pieOption(isDark, genderItems, true),
+            }}
+        />
+
+        <ChartCard
+            title="Business Unit Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Business Unit Distribution')}
+            option={{
+                ...barOption(isDark, businessUnitItems, COLORS[1]),
+            }}
+        />
+
+        <ChartCard
+            title="Location Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Location Distribution', 'summary-location-distribution')}
+            option={{
+                ...barOption(isDark, locationItems, COLORS[2]),
+            }}
+        />
+
+        <ChartCard
+            title="Workforce Category Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Workforce Category Distribution')}
+            option={{
+                ...pieOption(isDark, workforceCategoryItems, true),
+            }}
+        />
+
+        <ChartCard
+            title="Marital Status Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Marital Status Distribution')}
+            option={{
+                ...pieOption(isDark, maritalStatusItems, true),
+            }}
+        />
+
+        <ChartCard
+            title="Age Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Age Distribution')}
+            option={{
+                ...barOption(isDark, ageItems, COLORS[2]),
+            }}
+        />
+
+        <ChartCard
+            title="Monthly Hiring Trend"
+            isDark={isDark}
+            chartRef={registerChartRef('Monthly Hiring Trend')}
+            option={{
+                ...lineOption(isDark, monthlyHiring, COLORS[3]),
+            }}
+        />
+
+        <ChartCard
+            title="Yearly Hiring Trend"
+            isDark={isDark}
+            chartRef={registerChartRef('Yearly Hiring Trend')}
+            option={{
+                ...barOption(isDark, yearlyHiring, COLORS[4]),
+            }}
+        />
+
+        <ChartCard
+            title="Hiring by Department"
+            isDark={isDark}
+            chartRef={registerChartRef('Hiring by Department')}
+            option={{
+                ...barOption(isDark, hiringByDepartment, COLORS[5]),
+            }}
+        />
+
+        <ChartCard
+            title="Hiring by Location"
+            isDark={isDark}
+            chartRef={registerChartRef('Hiring by Location')}
+            option={{
+                ...barOption(isDark, hiringByLocation, COLORS[6]),
+            }}
+        />
+
+        <ChartCard
+            title="Gender by Department"
+            isDark={isDark}
+            chartRef={registerChartRef('Gender by Department')}
+            option={{
+                ...chartBase(isDark),
+                legend: { top: 8, textStyle: { color: axisTextColor(isDark) } },
+                xAxis: { type: 'category', data: genderByDepartmentChart.departments, axisLabel: { color: axisTextColor(isDark) } },
+                yAxis: { type: 'value', axisLabel: { color: axisTextColor(isDark) } },
+                series: genderByDepartmentChart.series,
+            }}
+        />
+
+        <ChartCard
+            title="Nationality Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Nationality Distribution')}
+            option={{
+                ...pieOption(isDark, nationalityItems),
+            }}
+        />
+
+        <ChartCard
+            title="Demographic Location Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Demographic Location Distribution')}
+            option={{
+                ...barOption(isDark, demographicLocationItems, COLORS[0]),
+            }}
+        />
+
+        <ChartCard
+            title="Voluntary vs Involuntary Exits"
+            isDark={isDark}
+            chartRef={registerChartRef('Voluntary vs Involuntary Exits')}
+            option={{
+                ...pieOption(isDark, voluntaryVsInvoluntary, true),
+            }}
+        />
+
+        <ChartCard
+            title="Attrition by Department"
+            isDark={isDark}
+            chartRef={registerChartRef('Attrition by Department')}
+            option={{
+                ...chartBase(isDark),
+                grid: { left: 40, right: 16, top: 20, bottom: 40, containLabel: true },
+                legend: { top: 0, textStyle: { color: axisTextColor(isDark) } },
+                xAxis: { type: 'category', data: attritionBarData.map((d) => d.name), axisLabel: { color: axisTextColor(isDark) } },
+                yAxis: { type: 'value', axisLabel: { color: axisTextColor(isDark) } },
+                series: [
+                    { name: 'Exits', type: 'bar', data: attritionBarData.map((d) => d.value), itemStyle: { color: '#dc2626' } },
+                    { name: 'Headcount', type: 'line', data: attritionBarData.map((d) => d.total), itemStyle: { color: '#2563eb' } },
+                ],
+            }}
+        />
+
+        <ChartCard
+            title="Exits by Manager"
+            isDark={isDark}
+            chartRef={registerChartRef('Exits by Manager')}
+            option={{
+                ...barOption(isDark, exitsByManager, COLORS[4], true),
+            }}
+        />
+
+        <ChartCard
+            title="Top Exit Reasons"
+            isDark={isDark}
+            chartRef={registerChartRef('Top Exit Reasons')}
+            option={{
+                ...barOption(isDark, topExitReasons, COLORS[3], true),
+            }}
+        />
+
+        <ChartCard
+            title="Attrition by Experience"
+            isDark={isDark}
+            chartRef={registerChartRef('Attrition by Experience')}
+            option={{
+                ...barOption(isDark, attritionByExperience, COLORS[2]),
+            }}
+        />
+
+        <ChartCard
+            title="Experience Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Experience Distribution')}
+            option={{
+                ...barOption(isDark, experienceDistribution, COLORS[1]),
+            }}
+        />
+
+        <ChartCard
+            title="Senior vs Junior Ratio"
+            isDark={isDark}
+            chartRef={registerChartRef('Senior vs Junior Ratio')}
+            option={{
+                ...pieOption(isDark, seniorVsJuniorRatio, true),
+            }}
+        />
+
+        <ChartCard
+            title="Organization Tree"
+            isDark={isDark}
+            height={420}
+            chartRef={registerChartRef('Organization Tree')}
+            onEvents={orgChartEvents}
+            headerExtras={orgHeaderExtras}
+            renderExpandedControls={renderExpandedOrgControls}
+            option={{
+                ...orgChartOption,
+            }}
+        />
+
+        <ChartCard
+            title="Manager Team Size"
+            isDark={isDark}
+            chartRef={registerChartRef('Manager Team Size')}
+            option={{
+                ...barOption(isDark, managerTeamSize, COLORS[0], true),
+            }}
+        />
+
+        <ChartCard
+            title="Payment Mode Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Payment Mode Distribution')}
+            option={{
+                ...pieOption(isDark, paymentModeDistribution, true),
+            }}
+        />
+
+        <ChartCard
+            title="Bank Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Bank Distribution')}
+            option={{
+                ...barOption(isDark, bankDistribution, COLORS[5], true),
+            }}
+        />
+
+        <ChartCard
+            title="Qualification Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Qualification Distribution')}
+            option={{
+                ...barOption(isDark, qualificationDistribution, COLORS[1]),
+            }}
+        />
+
+        <ChartCard
+            title="Specialization Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Specialization Distribution')}
+            option={{
+                ...barOption(isDark, specializationDistribution, COLORS[2], true),
+            }}
+        />
+
+        <ChartCard
+            title="Course Type Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Course Type Distribution')}
+            option={{
+                ...pieOption(isDark, courseTypeDistribution, true),
+            }}
+        />
+
+        <ChartCard
+            title="Location Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Location Distribution', 'detail-location-distribution')}
+            option={{
+                ...barOption(isDark, locationDistribution, COLORS[0]),
+            }}
+        />
+
+        <ChartCard
+            title="Transfer Trends"
+            isDark={isDark}
+            chartRef={registerChartRef('Transfer Trends')}
+            option={{
+                ...barOption(isDark, transferTrends, COLORS[3], true),
+            }}
+        />
+
+        <ChartCard
+            title="Movement Reasons"
+            isDark={isDark}
+            chartRef={registerChartRef('Movement Reasons')}
+            option={{
+                ...barOption(isDark, movementReasons, COLORS[4], true),
+            }}
+        />
+
+        <ChartCard
+            title="Headcount per Department"
+            isDark={isDark}
+            chartRef={registerChartRef('Headcount per Department')}
+            option={{
+                ...barOption(isDark, headcountPerDepartment, COLORS[1]),
+            }}
+        />
+
+        <ChartCard
+            title="Attrition per Department"
+            isDark={isDark}
+            chartRef={registerChartRef('Attrition per Department')}
+            option={{
+                ...barOption(isDark, attritionPerDepartment, COLORS[4]),
+            }}
+        />
+
+        <ChartCard
+            title="Lifecycle Duration (Months)"
+            isDark={isDark}
+            chartRef={registerChartRef('Lifecycle Duration (Months)')}
+            option={{
+                ...barOption(isDark, asArray(lifecycleDuration).slice(0, 50), COLORS[6], true),
+            }}
+        />
+
+        <ChartCard
+            title="Null Distribution per Column"
+            isDark={isDark}
+            chartRef={registerChartRef('Null Distribution per Column')}
+            option={{
+                ...barOption(isDark, asArray(nullDistributionPerColumn).slice(0, 40), COLORS[4], true),
+            }}
+        />
+
+        <ChartCard
+            title="Emergency Relationship Distribution"
+            isDark={isDark}
+            chartRef={registerChartRef('Emergency Relationship Distribution')}
+            option={{
+                ...pieOption(isDark, relationshipDistribution, true),
+            }}
+        />
+
+        <div className={`rounded-2xl border p-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+            <h3 className={`mb-3 text-sm font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Compliance & Data Quality KPIs</h3>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing PAN: <strong>{missingPan}</strong></div>
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing Aadhar: <strong>{missingAadhar}</strong></div>
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing PF: <strong>{missingPf}</strong></div>
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing UAN: <strong>{missingUan}</strong></div>
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Total Null Values: <strong>{totalNullValues}</strong></div>
+                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Duplicate Employees: <strong>{duplicateEmployeeCount}</strong></div>
+            </div>
+            {duplicateEmployees.length > 0 && (
+                <div className="mt-4">
+                    <p className={`text-xs mb-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Duplicate Employee IDs</p>
+                    <div className="max-h-44 overflow-auto text-xs">
+                        {duplicateEmployees.slice(0, 100).map((item) => (
+                            <div key={item.employeeId} className={`py-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                {item.employeeId}: {item.count}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    </div>
+);
+
 const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView = false }) => {
     const { id } = useParams();
     const { theme } = useTheme();
@@ -851,7 +1660,19 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
     const shareDashboard = useCallback(async () => {
         if (isSharedView || isSharingDashboard) return;
         if (!mapping || !Array.isArray(datasetData) || datasetData.length === 0) {
-            window.alert('Dashboard data is not ready to share yet.');
+            globalThis.alert?.('Dashboard data is not ready to share yet.');
+            return;
+        }
+
+        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
+        const recipientEmails = Array.from(new Set(
+            String(rawRecipients || '')
+                .split(',')
+                .map((item) => String(item || '').trim().toLowerCase())
+                .filter(Boolean)
+        ));
+        if (recipientEmails.length === 0) {
+            globalThis.alert?.('Please add at least one recipient email.');
             return;
         }
 
@@ -884,27 +1705,27 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
             const shareResponse = await backendApi.createReportShare(reportId, {
                 role: 'viewer',
                 expires_in_hours: 168,
+                recipient_emails: recipientEmails,
             });
 
             const shareToken = String(shareResponse?.share?.token || '').trim();
             if (!shareToken) throw new Error('Share token was not returned');
 
-            const basePathRaw = String(import.meta.env.BASE_URL || '/').trim() || '/';
-            const basePath = basePathRaw.endsWith('/') ? basePathRaw.slice(0, -1) : basePathRaw;
-            const sharePath = `${basePath}/templates/hr/dashboard/shared/${encodeURIComponent(reportId)}`.replace(/\/\/+/, '/');
-            const url = new URL(window.location.origin + sharePath);
-            url.searchParams.set('shareToken', shareToken);
-            const finalUrl = url.toString();
+            const finalUrl = buildSharedDashboardUrl({
+                reportId,
+                shareToken,
+                pathTemplate: '/templates/hr/dashboard/shared',
+            });
 
-            if (navigator?.clipboard?.writeText) {
-                await navigator.clipboard.writeText(finalUrl);
-                window.alert('HR dashboard share link copied to clipboard.');
+            if (globalThis.navigator?.clipboard?.writeText) {
+                await globalThis.navigator.clipboard.writeText(finalUrl);
+                globalThis.alert?.('HR dashboard share link copied to clipboard.');
                 return;
             }
 
-            window.prompt('Copy your HR dashboard share link:', finalUrl);
+            globalThis.prompt?.('Copy your HR dashboard share link:', finalUrl);
         } catch (error) {
-            window.alert(error?.message || 'Unable to generate HR dashboard share link.');
+            globalThis.alert?.(error?.message || 'Unable to generate HR dashboard share link.');
         } finally {
             setIsSharingDashboard(false);
         }
@@ -921,44 +1742,17 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
         let mounted = true;
 
         const run = async () => {
-            if (id !== 'hr') return;
-            if (!mapping || !Array.isArray(datasetData) || datasetData.length === 0) return;
+            if (!canLoadHrDashboardAnalytics({ id, mapping, datasetData })) return;
 
             setLoading(true);
             setError('');
 
             try {
-                const payload = { data: datasetData, mapping };
-                const responses = await Promise.allSettled(
-                    MODULES.map((moduleName) => backendApi.getHrAnalytics(moduleName, payload))
-                );
+                const responses = await fetchHrModuleResponses({ datasetData, mapping });
 
                 if (!mounted) return;
 
-                const nextAnalytics = {};
-                const validationList = [];
-                let successCount = 0;
-
-                responses.forEach((res, idx) => {
-                    if (res.status === 'fulfilled') {
-                        const value = res.value;
-                        nextAnalytics[value.module] = value.data || {};
-                        if (value.validation) {
-                            validationList.push({ module: value.module, ...value.validation });
-                        }
-                        successCount += 1;
-                    } else {
-                        const moduleName = MODULES[idx];
-                        validationList.push({
-                            module: moduleName,
-                            missingFields: [],
-                            missingColumns: [],
-                            typeWarnings: [],
-                            isValid: false,
-                            error: res.reason?.message || 'Module unavailable',
-                        });
-                    }
-                });
+                const { nextAnalytics, validationList, successCount } = summarizeHrModuleResponses(MODULES, responses);
 
                 setAnalytics(nextAnalytics);
                 setValidation(validationList);
@@ -982,43 +1776,65 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
         () => validation.some((v) => (v?.missingFields?.length || 0) > 0 || (v?.typeWarnings?.length || 0) > 0),
         [validation]
     );
+    const kpiValues = useMemo(() => extractHrKpiValues(analytics), [analytics]);
+    const chartValues = useMemo(() => extractHrChartValues(analytics), [analytics]);
 
-    const summaryTotal = readKpi(analytics, 'summary', 'totalEmployees', ['totalEmployees']);
-    const summaryActive = readKpi(analytics, 'summary', 'activeEmployees', ['activeEmployees']);
-    const summaryInactive = readKpi(analytics, 'summary', 'inactiveEmployees', ['inactiveEmployees']);
-    const attrRatePct = readKpi(analytics, 'attrition', 'attrition_rate_percentage', ['attritionRate']);
-    const avgExp = readKpi(analytics, 'experience', 'avg_experience', ['averageExperience']);
-    const probationSuccess = readKpi(analytics, 'lifecycle', 'probation_success_rate', ['probationSuccessRate']);
-    const completenessPct = readKpi(analytics, 'data-quality', 'completeness_percentage', ['completenessPercentage']);
+    const {
+        summaryTotal,
+        summaryActive,
+        summaryInactive,
+        attrRatePct,
+        avgExp,
+        probationSuccess,
+        completenessPct,
+        missingPan,
+        missingAadhar,
+        missingPf,
+        missingUan,
+        missingEmergencyContact,
+        totalNullValues,
+        duplicateEmployeeCount,
+    } = kpiValues;
 
-    const deptItems = readChart(analytics, 'summary', 'headcount_by_department', ['headcountByDepartment']);
-    const businessUnitItems = readChart(analytics, 'summary', 'headcount_by_business_unit', ['headcountByBusinessUnit']);
-    const locationItems = readChart(analytics, 'summary', 'headcount_by_location', ['headcountByLocation']);
-    const workforceCategoryItems = readChart(analytics, 'summary', 'workforce_category_distribution', ['workforceCategoryDistribution']);
-    const genderItems = readChart(analytics, 'summary', 'gender_ratio', ['genderRatio']);
-    const maritalStatusItems = readChart(analytics, 'summary', 'marital_status_distribution', ['maritalStatusDistribution']);
-
-    const ageItems = readChart(analytics, 'demographics', 'age_distribution', ['ageDistribution']);
-    const genderByDepartmentRaw = readChart(analytics, 'demographics', 'gender_by_department', ['genderDiversityByDepartment']);
-    const nationalityItems = readChart(analytics, 'demographics', 'nationality_distribution', ['nationalityDistribution']);
-    const demographicLocationItems = readChart(analytics, 'demographics', 'location_distribution', ['locationDistribution']);
-
-    const monthlyHiring = readChart(analytics, 'hiring', 'monthly_hiring_trend', ['monthlyHiringTrend']);
-    const yearlyHiring = readChart(analytics, 'hiring', 'yearly_hiring_trend', ['yearlyHiringTrend']);
-    const hiringByDepartment = readChart(analytics, 'hiring', 'hiring_by_department', ['hiringByDepartment']);
-    const hiringByLocation = readChart(analytics, 'hiring', 'hiring_by_location', ['hiringByLocation']);
-
-    const voluntaryVsInvoluntary = readChart(analytics, 'attrition', 'voluntary_vs_involuntary');
-    const exitsByDepartment = readChart(analytics, 'attrition', 'exits_by_department', ['exitsByDepartment']);
-    const exitsByManager = readChart(analytics, 'attrition', 'exits_by_manager', ['exitsByManager']);
-    const topExitReasons = readChart(analytics, 'attrition', 'top_exit_reasons', ['topExitReasons']);
-    const attritionByExperience = readChart(analytics, 'attrition', 'attrition_by_experience', ['attritionByExperience']);
-
-    const experienceDistribution = readChart(analytics, 'experience', 'experience_distribution', ['experienceDistribution']);
-    const seniorVsJuniorRatio = readChart(analytics, 'experience', 'senior_vs_junior_ratio');
-
-    const orgTree = readChart(analytics, 'org', 'org_tree', ['hierarchy']);
-    const managerTeamSize = readChart(analytics, 'org', 'manager_team_size', ['managerWiseTeamSize']);
+    const {
+        deptItems,
+        businessUnitItems,
+        locationItems,
+        workforceCategoryItems,
+        genderItems,
+        maritalStatusItems,
+        ageItems,
+        genderByDepartmentRaw,
+        nationalityItems,
+        demographicLocationItems,
+        monthlyHiring,
+        yearlyHiring,
+        hiringByDepartment,
+        hiringByLocation,
+        voluntaryVsInvoluntary,
+        exitsByDepartment,
+        exitsByManager,
+        topExitReasons,
+        attritionByExperience,
+        experienceDistribution,
+        seniorVsJuniorRatio,
+        orgTree,
+        managerTeamSize,
+        paymentModeDistribution,
+        bankDistribution,
+        qualificationDistribution,
+        specializationDistribution,
+        courseTypeDistribution,
+        locationDistribution,
+        transferTrends,
+        movementReasons,
+        headcountPerDepartment,
+        attritionPerDepartment,
+        lifecycleDuration,
+        nullDistributionPerColumn,
+        duplicateEmployees,
+        relationshipDistribution,
+    } = chartValues;
 
     const orgDepartmentOptions = useMemo(
         () => collectTreeDepartments(orgTree),
@@ -1066,18 +1882,39 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
 
     const orgChartEvents = useMemo(() => ({
         click: (params) => {
-            const pathInfo = Array.isArray(params?.treePathInfo) ? params.treePathInfo : [];
-            const names = pathInfo.map((p) => p?.name).filter(Boolean);
-            const ids = pathInfo
-                .map((p) => String(p?.data?.id || p?.data?.key || p?.name || '').trim())
-                .filter(Boolean);
-            const clickedId = String(params?.data?.id || params?.data?.key || params?.name || '').trim();
-
+            const { names, ids, clickedId } = parseOrgChartClick(params);
             setOrgSelectedPathNames(names);
             setOrgSelectedPathIds(ids);
             setOrgSelectedNodeId(clickedId || ids[ids.length - 1] || '');
         },
     }), []);
+
+    const resetOrgFiltersAndSelection = useCallback(() => {
+        setOrgSearchQuery('');
+        setOrgDepartmentFilter('__all__');
+        setOrgTreeExpandMode('default');
+        setOrgSelectedPathIds([]);
+        setOrgSelectedPathNames([]);
+        setOrgSelectedNodeId('');
+    }, []);
+
+    const onOrgSearchChange = useCallback((event) => {
+        setOrgSearchQuery(event.target.value);
+        setOrgTreeExpandMode('default');
+    }, []);
+
+    const onOrgDepartmentChange = useCallback((event) => {
+        setOrgDepartmentFilter(event.target.value);
+        setOrgTreeExpandMode('default');
+    }, []);
+
+    const onOrgCollapseAll = useCallback(() => {
+        setOrgTreeExpandMode('collapse-all');
+    }, []);
+
+    const onOrgExpandAll = useCallback(() => {
+        setOrgTreeExpandMode('expand-all');
+    }, []);
 
     const getChartImageFromRef = useCallback(async (ref, title) => {
         const instance = ref?.getEchartsInstance?.();
@@ -1109,49 +1946,14 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
 
         try {
             const entries = Array.from(chartRefs.current.values());
-            const images = [];
-            for (const entry of entries) {
-                const { title, ref } = entry || {};
-                // eslint-disable-next-line no-await-in-loop
-                const image = await getChartImageFromRef(ref, title);
-                if (image) images.push(image);
-            }
+            const images = await collectChartExportImages(entries, getChartImageFromRef);
 
             if (images.length === 0) throw new Error('No charts available for export');
 
             let pdf = null;
 
-            images.forEach((image, idx) => {
-                const orientation = image.width >= image.height ? 'landscape' : 'portrait';
-                if (!pdf) {
-                    pdf = new jsPDF({ orientation, unit: 'pt', format: 'a4' });
-                } else {
-                    pdf.addPage('a4', orientation);
-                }
-
-                const pageWidth = pdf.internal.pageSize.getWidth();
-                const pageHeight = pdf.internal.pageSize.getHeight();
-                const margin = 24;
-                const headerY = 24;
-                const axisLine = `X-axis: ${image.axisFields.x} | Y-axis: ${image.axisFields.y}`;
-
-                pdf.setFontSize(14);
-                pdf.setTextColor(30, 41, 59);
-                pdf.text(String(image.title || 'Chart'), margin, headerY);
-                pdf.setFontSize(10);
-                pdf.setTextColor(71, 85, 105);
-                pdf.text(axisLine, margin, headerY + 16);
-                pdf.text(`Exported on: ${new Date().toLocaleString()}`, margin, headerY + 30);
-
-                const maxW = pageWidth - margin * 2;
-                const maxH = pageHeight - margin * 2 - 44;
-                const ratio = Math.min(maxW / image.width, maxH / image.height);
-                const renderWidth = image.width * ratio;
-                const renderHeight = image.height * ratio;
-                const x = (pageWidth - renderWidth) / 2;
-                const y = headerY + 44 + ((maxH - renderHeight) / 2);
-
-                pdf.addImage(image.dataUrl, 'PNG', x, y, renderWidth, renderHeight, undefined, 'FAST');
+            images.forEach((image) => {
+                pdf = appendChartPdfPage(pdf, image);
             });
 
             const fileName = `hr-analytics-charts-${new Date().toISOString().slice(0, 10)}.pdf`;
@@ -1163,140 +1965,51 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
         }
     }, [getChartImageFromRef]);
 
+    const orgFilterControlBaseProps = useMemo(() => ({
+        isDark,
+        orgSearchQuery,
+        orgDepartmentFilter,
+        orgDepartmentOptions,
+        orgSelectedPathNames,
+        onOrgSearchChange,
+        onOrgDepartmentChange,
+        onCollapseAll: onOrgCollapseAll,
+        onExpandAll: onOrgExpandAll,
+    }), [
+        isDark,
+        orgSearchQuery,
+        orgDepartmentFilter,
+        orgDepartmentOptions,
+        orgSelectedPathNames,
+        onOrgSearchChange,
+        onOrgDepartmentChange,
+        onOrgCollapseAll,
+        onOrgExpandAll,
+    ]);
+
     const orgHeaderExtras = (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-                value={orgSearchQuery}
-                onChange={(e) => {
-                    setOrgSearchQuery(e.target.value);
-                    setOrgTreeExpandMode('default');
-                }}
-                placeholder="Search employee..."
-                className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'bg-white border-gray-300 text-gray-700 placeholder:text-gray-400'}`}
+        <div className="mt-2">
+            <OrgFilterControls
+                {...orgFilterControlBaseProps}
+                onReset={resetOrgFiltersAndSelection}
             />
-            <select
-                value={orgDepartmentFilter}
-                onChange={(e) => {
-                    setOrgDepartmentFilter(e.target.value);
-                    setOrgTreeExpandMode('default');
-                }}
-                className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-700'}`}
-            >
-                <option value="__all__">All Departments</option>
-                {orgDepartmentOptions.map((dep) => (
-                    <option key={dep} value={dep}>{dep}</option>
-                ))}
-            </select>
-            <button
-                type="button"
-                onClick={() => setOrgTreeExpandMode('collapse-all')}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-                Collapse All
-            </button>
-            <button
-                type="button"
-                onClick={() => setOrgTreeExpandMode('expand-all')}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-                Expand All
-            </button>
-            <button
-                type="button"
-                onClick={() => {
-                    setOrgSearchQuery('');
-                    setOrgDepartmentFilter('__all__');
-                    setOrgTreeExpandMode('default');
-                    setOrgSelectedPathIds([]);
-                    setOrgSelectedPathNames([]);
-                    setOrgSelectedNodeId('');
-                }}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-            >
-                Reset
-            </button>
-            {orgSelectedPathNames.length > 0 && (
-                <span className={`max-w-full truncate text-[10px] ${isDark ? 'text-gray-300' : 'text-gray-600'}`} title={orgSelectedPathNames.join(' / ')}>
-                    {orgSelectedPathNames.join(' / ')}
-                </span>
-            )}
         </div>
     );
 
     const renderExpandedOrgControls = ({ zoomPct, zoomIn, zoomOut, resetZoom }) => (
         <div className={`rounded-lg border p-2 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
-            <div className="flex flex-wrap items-center gap-2">
-                <input
-                    value={orgSearchQuery}
-                    onChange={(e) => {
-                        setOrgSearchQuery(e.target.value);
-                        setOrgTreeExpandMode('default');
-                    }}
-                    placeholder="Search employee..."
-                    className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder:text-gray-500' : 'bg-white border-gray-300 text-gray-700 placeholder:text-gray-400'}`}
-                />
-                <select
-                    value={orgDepartmentFilter}
-                    onChange={(e) => {
-                        setOrgDepartmentFilter(e.target.value);
-                        setOrgTreeExpandMode('default');
-                    }}
-                    className={`px-2 py-1 rounded border text-[11px] ${isDark ? 'bg-gray-900 border-gray-600 text-gray-100' : 'bg-white border-gray-300 text-gray-700'}`}
-                >
-                    <option value="__all__">All Departments</option>
-                    {orgDepartmentOptions.map((dep) => (
-                        <option key={dep} value={dep}>{dep}</option>
-                    ))}
-                </select>
-
-                <button
-                    type="button"
-                    onClick={() => setOrgTreeExpandMode('collapse-all')}
-                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-                >
-                    Collapse All
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setOrgTreeExpandMode('expand-all')}
-                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-                >
-                    Expand All
-                </button>
-                <button
-                    type="button"
-                    onClick={() => {
-                        setOrgSearchQuery('');
-                        setOrgDepartmentFilter('__all__');
-                        setOrgTreeExpandMode('default');
-                        setOrgSelectedPathIds([]);
-                        setOrgSelectedPathNames([]);
-                        setOrgSelectedNodeId('');
-                        resetZoom();
-                    }}
-                    className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-                >
-                    Reset
-                </button>
-
-                <div className="ml-auto flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={zoomIn}
-                        className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-                    >
-                        Zoom +
-                    </button>
-                    <button
-                        type="button"
-                        onClick={zoomOut}
-                        className={`rounded border px-2 py-1 text-[10px] font-semibold ${isDark ? 'border-gray-600 bg-gray-900 text-gray-200 hover:bg-gray-700' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-                    >
-                        Zoom -
-                    </button>
-                    <span className={`text-[11px] font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{zoomPct}%</span>
-                </div>
-            </div>
+            <OrgFilterControls
+                {...orgFilterControlBaseProps}
+                onReset={() => {
+                    resetOrgFiltersAndSelection();
+                    resetZoom();
+                }}
+                showZoomControls
+                showSelectedPath={false}
+                zoomPct={zoomPct}
+                onZoomIn={zoomIn}
+                onZoomOut={zoomOut}
+            />
             {orgSelectedPathNames.length > 0 && (
                 <div className={`mt-2 text-[11px] ${isDark ? 'text-gray-300' : 'text-gray-600'}`} title={orgSelectedPathNames.join(' / ')}>
                     {orgSelectedPathNames.join(' / ')}
@@ -1304,35 +2017,6 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
             )}
         </div>
     );
-
-    const paymentModeDistribution = readChart(analytics, 'payroll', 'payment_mode_distribution', ['paymentModeDistribution']);
-    const bankDistribution = readChart(analytics, 'payroll', 'bank_distribution', ['bankDistribution']);
-
-    const qualificationDistribution = readChart(analytics, 'education', 'qualification_distribution', ['qualificationDistribution']);
-    const specializationDistribution = readChart(analytics, 'education', 'specialization_distribution', ['specializationDistribution']);
-    const courseTypeDistribution = readChart(analytics, 'education', 'course_type_distribution', ['courseTypeDistribution']);
-
-    const locationDistribution = readChart(analytics, 'location', 'location_distribution', ['locationDistribution']);
-    const transferTrends = readChart(analytics, 'location', 'transfer_trends', ['transferTrends']);
-    const movementReasons = readChart(analytics, 'location', 'movement_reasons', ['movementReasons']);
-
-    const headcountPerDepartment = readChart(analytics, 'department', 'headcount_per_department', ['headcountPerDepartment']);
-    const attritionPerDepartment = readChart(analytics, 'department', 'attrition_per_department', ['attritionPerDepartment']);
-
-    const lifecycleDuration = readChart(analytics, 'lifecycle', 'lifecycle_duration');
-
-    const nullDistributionPerColumn = readChart(analytics, 'data-quality', 'null_distribution_per_column', ['nullCountsPerColumn']);
-    const duplicateEmployees = asArray(analytics?.['data-quality']?.duplicateEmployees);
-
-    const missingPan = readKpi(analytics, 'compliance', 'missingPAN', ['missingPAN']);
-    const missingAadhar = readKpi(analytics, 'compliance', 'missingAadhar', ['missingAadhar']);
-    const missingPf = readKpi(analytics, 'compliance', 'missingPF', ['missingPF']);
-    const missingUan = readKpi(analytics, 'compliance', 'missingUAN', ['missingUAN']);
-    const relationshipDistribution = readChart(analytics, 'contact', 'relationship_distribution', ['relationshipDistribution']);
-    const missingEmergencyContact = readKpi(analytics, 'contact', 'missingEmergencyContact', ['missingEmergencyContact']);
-
-    const totalNullValues = readKpi(analytics, 'data-quality', 'total_null_values');
-    const duplicateEmployeeCount = readKpi(analytics, 'data-quality', 'duplicate_employees', ['duplicateEmployees']);
 
     const mappedFields = useMemo(() => Object.entries(mapping || {}).filter(([, v]) => v), [mapping]);
 
@@ -1343,71 +2027,23 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
         total: headcountMap[item.name] || 0,
     }));
 
-    const genderByDepartmentNormalized = useMemo(() => {
-        const rows = asArray(genderByDepartmentRaw);
-        const normalized = [];
+    const genderByDepartmentNormalized = useMemo(
+        () => normalizeGenderByDepartmentRows(asArray(genderByDepartmentRaw)),
+        [genderByDepartmentRaw]
+    );
 
-        rows.forEach((row) => {
-            if (Array.isArray(row?.distribution)) {
-                row.distribution.forEach((entry) => {
-                    normalized.push({ department: row.department || 'Unknown', gender: entry.name || 'Unknown', value: Number(entry.value || 0) });
-                });
-            } else {
-                normalized.push({
-                    department: row.department || 'Unknown',
-                    gender: row.gender || 'Unknown',
-                    value: Number(row.value || 0),
-                });
-            }
-        });
+    const genderByDepartmentChart = useMemo(
+        () => buildGenderByDepartmentChartData(genderByDepartmentNormalized),
+        [genderByDepartmentNormalized]
+    );
 
-        return normalized;
-    }, [genderByDepartmentRaw]);
-
-    const genderByDepartmentChart = useMemo(() => {
-        const departments = Array.from(new Set(genderByDepartmentNormalized.map((i) => i.department)));
-        const genders = Array.from(new Set(genderByDepartmentNormalized.map((i) => i.gender)));
-        const valueByKey = new Map(genderByDepartmentNormalized.map((i) => [`${i.department}::${i.gender}`, i.value]));
-
-        return {
-            departments,
-            series: genders.map((gender, idx) => ({
-                name: gender,
-                type: 'bar',
-                data: departments.map((dept) => valueByKey.get(`${dept}::${gender}`) || 0),
-                itemStyle: { color: COLORS[idx % COLORS.length] },
-            })),
-        };
-    }, [genderByDepartmentNormalized]);
-
-    if (id !== 'hr') {
-        return (
-            <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-                <div className="cv-state-card">
-                    Dashboard is available only for HR template. <Link to="/templates">Go back</Link>
-                </div>
-            </section>
-        );
-    }
+    if (id !== 'hr') return <TemplateStateCard isDark={isDark}>Dashboard is available only for HR template. <Link to="/templates">Go back</Link></TemplateStateCard>;
 
     if (!session || !mapping) {
-        return (
-            <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-                <div className="cv-state-card">
-                    Mapping not found. Please map your template fields first.{' '}
-                    <Link to="/templates/hr/map">Go to mapping</Link>
-                </div>
-            </section>
-        );
+        return <TemplateStateCard isDark={isDark}>Mapping not found. Please map your template fields first. <Link to="/templates/hr/map">Go to mapping</Link></TemplateStateCard>;
     }
 
-    if (!Array.isArray(datasetData) || datasetData.length === 0) {
-        return (
-            <section className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
-                <div className="cv-state-card">No dataset rows available for analytics.</div>
-            </section>
-        );
-    }
+    if (!Array.isArray(datasetData) || datasetData.length === 0) return <TemplateStateCard isDark={isDark}>No dataset rows available for analytics.</TemplateStateCard>;
 
     return (
         <section data-tour="templates-dashboard-root" className={`cv-template-page ${isDark ? 'cv-template-page--dark' : ''}`}>
@@ -1447,430 +2083,81 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
                 </div>
             </header>
 
-            {exportAllError && (
-                <div className="cv-validation-summary">
-                    <p>{exportAllError}</p>
-                </div>
-            )}
-
-            {loading && <div className="cv-state-card">Generating HR analytics...</div>}
-            {!loading && error && <div className="cv-validation-summary"><p>{error}</p></div>}
-
-            {!loading && !error && mappingMissingFields.length > 0 && (
-                <div className="cv-validation-summary">
-                    <p>
-                        Partial analysis mode: some template fields were not mapped ({mappingMissingFields.join(', ')}).
-                        Related analytics are not available for missing fields.
-                    </p>
-                </div>
-            )}
-
-            {!loading && !error && hasValidationWarnings && (
-                <div className="cv-validation-summary">
-                    {validation.map((v) => (
-                        <div key={v.module}>
-                            {v.missingFields?.length > 0 && <p>{v.module}: missing fields - {v.missingFields.join(', ')}</p>}
-                            {v.typeWarnings?.length > 0 && <p>{v.module}: type warnings - {v.typeWarnings.map((w) => w.field).join(', ')}</p>}
-                        </div>
-                    ))}
-                </div>
-            )}
+            <HRDashboardNotices
+                exportAllError={exportAllError}
+                loading={loading}
+                error={error}
+                mappingMissingFields={mappingMissingFields}
+                hasValidationWarnings={hasValidationWarnings}
+                validation={validation}
+            />
 
             {!loading && !error && (
                 <>
-                    <div data-tour="templates-dashboard-mapped-fields" className={`rounded-2xl border p-4 mb-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-                        <h3 className={`text-sm font-bold mb-2 ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Mapped Fields</h3>
-                        {mappedFields.length === 0 ? (
-                            <p className={isDark ? 'text-gray-400 text-sm' : 'text-gray-600 text-sm'}>No field mappings found.</p>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-xs">
-                                {mappedFields.map(([field, column]) => (
-                                    <div key={field} className={`px-2 py-1 rounded border ${isDark ? 'border-gray-600 bg-gray-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
-                                        <strong>{field}</strong> → {column}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    <MappedFieldsCard isDark={isDark} mappedFields={mappedFields} />
 
-                    <div data-tour="templates-dashboard-kpis" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                        <KpiCard title="Total Employees" value={summaryTotal} hint="Across mapped dataset" isDark={isDark} />
-                        <KpiCard title="Active Employees" value={summaryActive} hint="Current active workforce" isDark={isDark} />
-                        <KpiCard title="Inactive Employees" value={summaryInactive} hint="Derived from workforce status" isDark={isDark} />
-                        <KpiCard title="Attrition Rate" value={`${Number(attrRatePct || 0).toFixed(2)}%`} hint="Based on exits" isDark={isDark} />
-                        <KpiCard title="Avg Experience" value={`${Number(avgExp || 0).toFixed(2)} yrs`} hint="Experience module" isDark={isDark} />
-                        <KpiCard title="Probation Success" value={`${Number(probationSuccess || 0).toFixed(2)}%`} hint="Lifecycle module" isDark={isDark} />
-                        <KpiCard title="Completeness" value={`${Number(completenessPct || 0).toFixed(2)}%`} hint="Data quality module" isDark={isDark} />
-                        <KpiCard title="Missing Emergency Contacts" value={missingEmergencyContact} hint="Contact module" isDark={isDark} />
-                    </div>
+                    <HRSummaryKpis
+                        isDark={isDark}
+                        summaryTotal={summaryTotal}
+                        summaryActive={summaryActive}
+                        summaryInactive={summaryInactive}
+                        attrRatePct={attrRatePct}
+                        avgExp={avgExp}
+                        probationSuccess={probationSuccess}
+                        completenessPct={completenessPct}
+                        missingEmergencyContact={missingEmergencyContact}
+                    />
 
-                    <div data-tour="templates-dashboard-charts" className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
-                        <ChartCard
-                            title="Department Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Department Distribution')}
-                            option={{
-                                ...chartBase(isDark),
-                                ...barOption(isDark, deptItems, COLORS[0]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Gender Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Gender Distribution')}
-                            option={{
-                                ...chartBase(isDark),
-                                ...pieOption(isDark, genderItems, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Business Unit Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Business Unit Distribution')}
-                            option={{
-                                ...barOption(isDark, businessUnitItems, COLORS[1]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Location Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Location Distribution', 'summary-location-distribution')}
-                            option={{
-                                ...barOption(isDark, locationItems, COLORS[2]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Workforce Category Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Workforce Category Distribution')}
-                            option={{
-                                ...pieOption(isDark, workforceCategoryItems, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Marital Status Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Marital Status Distribution')}
-                            option={{
-                                ...pieOption(isDark, maritalStatusItems, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Age Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Age Distribution')}
-                            option={{
-                                ...barOption(isDark, ageItems, COLORS[2]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Monthly Hiring Trend"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Monthly Hiring Trend')}
-                            option={{
-                                ...lineOption(isDark, monthlyHiring, COLORS[3]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Yearly Hiring Trend"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Yearly Hiring Trend')}
-                            option={{
-                                ...barOption(isDark, yearlyHiring, COLORS[4]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Hiring by Department"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Hiring by Department')}
-                            option={{
-                                ...barOption(isDark, hiringByDepartment, COLORS[5]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Hiring by Location"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Hiring by Location')}
-                            option={{
-                                ...barOption(isDark, hiringByLocation, COLORS[6]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Gender by Department"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Gender by Department')}
-                            option={{
-                                ...chartBase(isDark),
-                                legend: { top: 8, textStyle: { color: axisTextColor(isDark) } },
-                                xAxis: { type: 'category', data: genderByDepartmentChart.departments, axisLabel: { color: axisTextColor(isDark) } },
-                                yAxis: { type: 'value', axisLabel: { color: axisTextColor(isDark) } },
-                                series: genderByDepartmentChart.series,
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Nationality Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Nationality Distribution')}
-                            option={{
-                                ...pieOption(isDark, nationalityItems),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Demographic Location Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Demographic Location Distribution')}
-                            option={{
-                                ...barOption(isDark, demographicLocationItems, COLORS[0]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Voluntary vs Involuntary Exits"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Voluntary vs Involuntary Exits')}
-                            option={{
-                                ...pieOption(isDark, voluntaryVsInvoluntary, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Attrition by Department"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Attrition by Department')}
-                            option={{
-                                ...chartBase(isDark),
-                                grid: { left: 40, right: 16, top: 20, bottom: 40, containLabel: true },
-                                legend: { top: 0, textStyle: { color: axisTextColor(isDark) } },
-                                xAxis: { type: 'category', data: attritionBarData.map((d) => d.name), axisLabel: { color: axisTextColor(isDark) } },
-                                yAxis: { type: 'value', axisLabel: { color: axisTextColor(isDark) } },
-                                series: [
-                                    { name: 'Exits', type: 'bar', data: attritionBarData.map((d) => d.value), itemStyle: { color: '#dc2626' } },
-                                    { name: 'Headcount', type: 'line', data: attritionBarData.map((d) => d.total), itemStyle: { color: '#2563eb' } },
-                                ],
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Exits by Manager"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Exits by Manager')}
-                            option={{
-                                ...barOption(isDark, exitsByManager, COLORS[4], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Top Exit Reasons"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Top Exit Reasons')}
-                            option={{
-                                ...barOption(isDark, topExitReasons, COLORS[3], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Attrition by Experience"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Attrition by Experience')}
-                            option={{
-                                ...barOption(isDark, attritionByExperience, COLORS[2]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Experience Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Experience Distribution')}
-                            option={{
-                                ...barOption(isDark, experienceDistribution, COLORS[1]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Senior vs Junior Ratio"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Senior vs Junior Ratio')}
-                            option={{
-                                ...pieOption(isDark, seniorVsJuniorRatio, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Organization Tree"
-                            isDark={isDark}
-                            height={420}
-                            chartRef={registerChartRef('Organization Tree')}
-                            onEvents={orgChartEvents}
-                            headerExtras={orgHeaderExtras}
-                            renderExpandedControls={renderExpandedOrgControls}
-                            option={{
-                                ...orgChartOption,
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Manager Team Size"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Manager Team Size')}
-                            option={{
-                                ...barOption(isDark, managerTeamSize, COLORS[0], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Payment Mode Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Payment Mode Distribution')}
-                            option={{
-                                ...pieOption(isDark, paymentModeDistribution, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Bank Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Bank Distribution')}
-                            option={{
-                                ...barOption(isDark, bankDistribution, COLORS[5], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Qualification Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Qualification Distribution')}
-                            option={{
-                                ...barOption(isDark, qualificationDistribution, COLORS[1]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Specialization Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Specialization Distribution')}
-                            option={{
-                                ...barOption(isDark, specializationDistribution, COLORS[2], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Course Type Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Course Type Distribution')}
-                            option={{
-                                ...pieOption(isDark, courseTypeDistribution, true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Location Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Location Distribution', 'detail-location-distribution')}
-                            option={{
-                                ...barOption(isDark, locationDistribution, COLORS[0]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Transfer Trends"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Transfer Trends')}
-                            option={{
-                                ...barOption(isDark, transferTrends, COLORS[3], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Movement Reasons"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Movement Reasons')}
-                            option={{
-                                ...barOption(isDark, movementReasons, COLORS[4], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Headcount per Department"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Headcount per Department')}
-                            option={{
-                                ...barOption(isDark, headcountPerDepartment, COLORS[1]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Attrition per Department"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Attrition per Department')}
-                            option={{
-                                ...barOption(isDark, attritionPerDepartment, COLORS[4]),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Lifecycle Duration (Months)"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Lifecycle Duration (Months)')}
-                            option={{
-                                ...barOption(isDark, asArray(lifecycleDuration).slice(0, 50), COLORS[6], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Null Distribution per Column"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Null Distribution per Column')}
-                            option={{
-                                ...barOption(isDark, asArray(nullDistributionPerColumn).slice(0, 40), COLORS[4], true),
-                            }}
-                        />
-
-                        <ChartCard
-                            title="Emergency Relationship Distribution"
-                            isDark={isDark}
-                            chartRef={registerChartRef('Emergency Relationship Distribution')}
-                            option={{
-                                ...pieOption(isDark, relationshipDistribution, true),
-                            }}
-                        />
-
-                        <div className={`rounded-2xl border p-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-                            <h3 className={`mb-3 text-sm font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Compliance & Data Quality KPIs</h3>
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing PAN: <strong>{missingPan}</strong></div>
-                                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing Aadhar: <strong>{missingAadhar}</strong></div>
-                                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing PF: <strong>{missingPf}</strong></div>
-                                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Missing UAN: <strong>{missingUan}</strong></div>
-                                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Total Null Values: <strong>{totalNullValues}</strong></div>
-                                <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>Duplicate Employees: <strong>{duplicateEmployeeCount}</strong></div>
-                            </div>
-                            {duplicateEmployees.length > 0 && (
-                                <div className="mt-4">
-                                    <p className={`text-xs mb-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Duplicate Employee IDs</p>
-                                    <div className="max-h-44 overflow-auto text-xs">
-                                        {duplicateEmployees.slice(0, 100).map((item) => (
-                                            <div key={item.employeeId} className={`py-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                                                {item.employeeId}: {item.count}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                    <HRDashboardChartsGrid
+                        isDark={isDark}
+                        registerChartRef={registerChartRef}
+                        deptItems={deptItems}
+                        genderItems={genderItems}
+                        businessUnitItems={businessUnitItems}
+                        locationItems={locationItems}
+                        workforceCategoryItems={workforceCategoryItems}
+                        maritalStatusItems={maritalStatusItems}
+                        ageItems={ageItems}
+                        monthlyHiring={monthlyHiring}
+                        yearlyHiring={yearlyHiring}
+                        hiringByDepartment={hiringByDepartment}
+                        hiringByLocation={hiringByLocation}
+                        genderByDepartmentChart={genderByDepartmentChart}
+                        nationalityItems={nationalityItems}
+                        demographicLocationItems={demographicLocationItems}
+                        voluntaryVsInvoluntary={voluntaryVsInvoluntary}
+                        attritionBarData={attritionBarData}
+                        exitsByManager={exitsByManager}
+                        topExitReasons={topExitReasons}
+                        attritionByExperience={attritionByExperience}
+                        experienceDistribution={experienceDistribution}
+                        seniorVsJuniorRatio={seniorVsJuniorRatio}
+                        orgChartEvents={orgChartEvents}
+                        orgHeaderExtras={orgHeaderExtras}
+                        renderExpandedControls={renderExpandedOrgControls}
+                        orgChartOption={orgChartOption}
+                        managerTeamSize={managerTeamSize}
+                        paymentModeDistribution={paymentModeDistribution}
+                        bankDistribution={bankDistribution}
+                        qualificationDistribution={qualificationDistribution}
+                        specializationDistribution={specializationDistribution}
+                        courseTypeDistribution={courseTypeDistribution}
+                        locationDistribution={locationDistribution}
+                        transferTrends={transferTrends}
+                        movementReasons={movementReasons}
+                        headcountPerDepartment={headcountPerDepartment}
+                        attritionPerDepartment={attritionPerDepartment}
+                        lifecycleDuration={lifecycleDuration}
+                        nullDistributionPerColumn={nullDistributionPerColumn}
+                        relationshipDistribution={relationshipDistribution}
+                        missingPan={missingPan}
+                        missingAadhar={missingAadhar}
+                        missingPf={missingPf}
+                        missingUan={missingUan}
+                        totalNullValues={totalNullValues}
+                        duplicateEmployeeCount={duplicateEmployeeCount}
+                        duplicateEmployees={duplicateEmployees}
+                    />
                 </>
             )}
         </section>

@@ -1,4 +1,5 @@
 import { buildOrgTree } from './chartConfigSystem';
+import { secureRandomFloat } from './random';
 
 const ensureArray = (value, message) => {
     if (!Array.isArray(value)) throw new Error(message);
@@ -142,7 +143,7 @@ const toRowObject = (columns, row) => {
 const jitter = (value, magnitude = 0.02) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return 0;
-    return numeric + (Math.random() - 0.5) * magnitude * numeric;
+    return numeric + (secureRandomFloat() - 0.5) * magnitude * numeric;
 };
 
 const groupClusters = (points = [], thresholdX = 0, thresholdY = 0) => {
@@ -438,8 +439,8 @@ export const adaptQueryResponse = (response, config = {}) => {
         const sizeIdx = sizeName ? getColumnIndex(columns, sizeName) : null;
 
         const bubbleOptions = normalizedConfig.bubbleOptions || {};
-        const enableJitter = bubbleOptions.enableJitter !== false;
-        const enableClusterSpread = bubbleOptions.enableClusterSpread !== false;
+        const enableJitter = bubbleOptions.enableJitter ?? true;
+        const enableClusterSpread = bubbleOptions.enableClusterSpread ?? true;
         const jitterStrength = Number.isFinite(bubbleOptions.jitterStrength) ? bubbleOptions.jitterStrength : 0.02;
         const clusterThreshold = Number.isFinite(bubbleOptions.clusterThreshold) ? bubbleOptions.clusterThreshold : 0.01;
 

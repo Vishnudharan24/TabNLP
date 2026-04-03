@@ -22,7 +22,51 @@ const normalizeChartType = (type) => {
 
 const isBlank = (v) => v === null || v === undefined || String(v).trim() === '';
 
-const idNameRegex = /(^id$|_id$|(^|_)(id|uuid|key|code)$|identifier|employee_id|customer_id|user_id|order_id)/i;
+const normalizeAlphaNumeric = (value = '') => {
+    const text = String(value || '').toLowerCase();
+    let out = '';
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const code = ch.charCodeAt(0);
+        if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57)) out += ch;
+    }
+    return out;
+};
+
+const looksLikeIdFieldName = (name = '') => {
+    const lower = String(name || '').trim().toLowerCase();
+    const compact = normalizeAlphaNumeric(lower);
+    if (!lower) return false;
+    if (lower === 'id') return true;
+    if (lower.endsWith('_id')) return true;
+    if (lower.endsWith('_uuid') || lower.endsWith('_key') || lower.endsWith('_code')) return true;
+    return ['identifier', 'employeeid', 'customerid', 'userid', 'orderid'].some((token) => compact.includes(token));
+};
+
+const stripNumericNoise = (text = '') => {
+    const source = String(text || '');
+    const drop = new Set([',', '$', '£', '€', '¥', '₹', '%', ' ', '\t', '\n', '\r']);
+    let out = '';
+    for (let i = 0; i < source.length; i += 1) {
+        if (!drop.has(source[i])) out += source[i];
+    }
+    return out;
+};
+
+const hasDigit = (text = '') => {
+    for (let i = 0; i < text.length; i += 1) {
+        const code = text.charCodeAt(i);
+        if (code >= 48 && code <= 57) return true;
+    }
+    return false;
+};
+
+const hasDateCue = (text = '') => {
+    const lower = String(text || '').toLowerCase();
+    if (lower.includes('-') || lower.includes('/')) return true;
+    const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'];
+    return months.some((month) => lower.includes(month));
+};
 
 const isNumericLike = (value) => {
     if (value === null || value === undefined) return false;
@@ -31,9 +75,24 @@ const isNumericLike = (value) => {
 
     let text = value.trim();
     if (!text) return false;
-    if (/^\(.*\)$/.test(text)) text = `-${text.slice(1, -1)}`;
-    text = text.replace(/[,$£€¥₹%\s]/g, '');
-    return /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text);
+    if (text.startsWith('(') && text.endsWith(')') && text.length > 2) {
+        text = `-${text.slice(1, -1)}`;
+    }
+    text = stripNumericNoise(text);
+    if (!text || !hasDigit(text)) return false;
+
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const isDigitChar = ch >= '0' && ch <= '9';
+        if (isDigitChar || ch === '+' || ch === '-' || ch === '.' || ch === 'e' || ch === 'E') {
+            continue;
+        }
+        return false;
+    }
+    return true;
 };
 
 const isDateLike = (value) => {
@@ -43,8 +102,7 @@ const isDateLike = (value) => {
     if (!text) return false;
     if (isNumericLike(text)) return false;
 
-    const hasDateCue = /[-/]|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b|\d{4}-\d{1,2}-\d{1,2}/i.test(text);
-    if (!hasDateCue) return false;
+    if (!hasDateCue(text)) return false;
     const parsed = new Date(text).getTime();
     return !Number.isNaN(parsed);
 };
@@ -78,7 +136,7 @@ const classifyFieldType = (column, rows = []) => {
         else if (dateRatio >= 0.9) type = 'date';
     }
 
-    const looksLikeId = idNameRegex.test(name) || (nonNullCount >= 20 && uniquenessRatio >= 0.98);
+    const looksLikeId = looksLikeIdFieldName(name) || (nonNullCount >= 20 && uniquenessRatio >= 0.98);
     if (looksLikeId && (type === 'categorical' || type === 'numeric')) {
         type = 'id';
     }
@@ -122,7 +180,7 @@ const inferFieldTypeFromData = (fieldName, rows = []) => {
     if (numericCount / nonNullCount >= 0.9) type = 'numeric';
     else if (dateCount / nonNullCount >= 0.9) type = 'date';
 
-    const looksLikeId = idNameRegex.test(fieldName) || (nonNullCount >= 20 && uniquenessRatio >= 0.98);
+    const looksLikeId = looksLikeIdFieldName(fieldName) || (nonNullCount >= 20 && uniquenessRatio >= 0.98);
     if (looksLikeId && (type === 'categorical' || type === 'numeric')) {
         type = 'id';
     }
@@ -141,7 +199,9 @@ const makeMessage = (code, message, fix) => ({ code, message, ...(fix ? { fix } 
 const isAggregatedExpression = (assignment = {}) => {
     const expression = String(assignment?.expression || '').trim().toUpperCase();
     if (!expression) return false;
-    return /^(SUM|AVG|COUNT|MIN|MAX)\s*\(/.test(expression) || expression === 'COUNT(*)';
+    if (expression === 'COUNT(*)') return true;
+    const functions = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX'];
+    return functions.some((fn) => expression.startsWith(`${fn}(`) || expression.startsWith(`${fn} (`));
 };
 
 const getDistinctCount = (rows, field) => {

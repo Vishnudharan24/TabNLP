@@ -2,6 +2,7 @@ import { ChartType } from '../types';
 import { FieldRoles, configFromAssignments, convertOldConfig } from './chartConfigSystem';
 
 const SEMANTIC_PREFIX = '__semantic__:';
+const SIMPLE_AGGREGATE_RE = /^\s*(SUM|AVG|COUNT|MIN|MAX|GROUP_BY)\s*\((.*)\)\s*$/i;
 
 const parseSemanticMeasureFromAssignment = (assignment = {}) => {
     if (assignment?.semanticMeasureName) {
@@ -33,7 +34,7 @@ const parseSimpleAggregateExpression = (expression) => {
     const text = String(expression || '').trim();
     if (!text) return null;
 
-    const match = text.match(/^\s*(SUM|AVG|COUNT|MIN|MAX|GROUP_BY)\s*\((.*)\)\s*$/i);
+    const match = SIMPLE_AGGREGATE_RE.exec(text);
     if (!match) return null;
 
     const aggregation = toUpperAgg(match[1]);

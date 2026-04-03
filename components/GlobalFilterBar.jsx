@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Filter, Plus, X, ChevronDown, Search, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { createClientId } from '../services/random';
 
 const GlobalFilterBar = ({ datasets, selectedDatasetId, globalFilters, onAddFilter, onUpdateFilter, onRemoveFilter, onClearAll, onClearInteractions }) => {
     const { theme } = useTheme();
@@ -48,7 +49,7 @@ const GlobalFilterBar = ({ datasets, selectedDatasetId, globalFilters, onAddFilt
 
     const handleAddFilter = (col) => {
         const filter = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: createClientId('global-filter'),
             datasetId: selectedDataset?.id || null,
             column: col.name,
             columnType: col.type,
