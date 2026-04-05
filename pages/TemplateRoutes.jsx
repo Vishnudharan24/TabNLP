@@ -4,6 +4,7 @@ import TemplateList from '../components/templates/TemplateList';
 import TemplateMapping from '../components/templates/TemplateMapping';
 import HRTemplateDashboard from '../components/templates/HRTemplateDashboard';
 import SalesTemplateDashboard from '../components/templates/SalesTemplateDashboard';
+import FinanceTemplateDashboard from '../components/templates/FinanceTemplateDashboard';
 import { ANALYTICS_TEMPLATES } from '../data/templates';
 import { backendApi } from '../services/backendApi';
 import '../components/templates/templateSystem.css';
@@ -15,6 +16,8 @@ const extractTemplateDashboardSnapshot = (report) => {
         || item?.id === 'hr-template-dashboard-snapshot'
         || item?.type === 'sales-template-dashboard'
         || item?.id === 'sales-template-dashboard-snapshot'
+        || item?.type === 'finance-template-dashboard'
+        || item?.id === 'finance-template-dashboard-snapshot'
     ));
     const payload = snapshot?.payload;
     if (!payload || typeof payload !== 'object') return null;
@@ -30,6 +33,16 @@ const extractTemplateDashboardSnapshot = (report) => {
 
 const TemplateDashboardSwitch = ({ sessionByTemplate, datasetData, dataset, isSharedView = false }) => {
     const { id } = useParams();
+
+    if (id === 'finance') {
+        return (
+            <FinanceTemplateDashboard
+                sessionByTemplate={sessionByTemplate}
+                dataset={dataset}
+                isSharedView={isSharedView}
+            />
+        );
+    }
 
     if (id === 'sales') {
         return (

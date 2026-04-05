@@ -1,0 +1,242 @@
+You are a senior BI product architect building a **Finance Analytics Template** for a Power BI–like platform using React + ECharts + query-driven backend.
+
+The dataset includes enterprise finance data with:
+
+* Legal Entities (Tata Motors, TCS, Titan, Tata Power)
+* General Ledger (GL accounts: Revenue, Expense, Asset)
+* Financial metrics (Revenue, COGS, EBITDA, Net Profit)
+* Budget vs Actual (Variance, Variance %)
+* Cost Centers & Profit Centers
+* Cash Flow (Inflow, Outflow, Net Cash)
+* AR/AP (Invoices, Outstanding, Days Past Due)
+* Geography (Region, City)
+* Flags (High Cost, Loss Making, Budget Exceeded)
+
+---
+
+# 🎯 OBJECTIVE
+
+Build a **complete Finance Analytics Dashboard Template** with:
+
+* CFO-level insights
+* Financial statement views
+* Cost & budget tracking
+* Cash flow monitoring
+* Risk detection
+
+---
+
+
+#  — EXECUTIVE FINANCE OVERVIEW
+
+## KPI CARDS
+
+* Total Revenue → SUM(Revenue)
+* Net Profit → SUM(Net_Profit)
+* Profit Margin % → Net_Profit / Revenue
+* EBITDA → SUM(EBITDA)
+* Achievement % → AVG(Variance_%)
+
+---
+
+## CHARTS
+
+1. Revenue vs Profit Trend (Line)
+
+* X: Month
+* Y1: SUM(Revenue)
+* Y2: SUM(Net_Profit)
+
+2. Revenue by Legal Entity (Bar)
+
+* X: Legal_Entity
+* Y: SUM(Revenue)
+
+3. Profit Contribution (Donut)
+
+* Category: Legal_Entity
+* Value: SUM(Net_Profit)
+
+---
+
+---
+
+# P&L ANALYSIS
+
+## CHARTS
+
+1. P&L Waterfall
+
+* Revenue → COGS → Gross Profit → OPEX → Net Profit
+
+2. Expense Breakdown (Stacked Bar)
+
+* X: GL_Account_Name
+* Y: SUM(Debit_Amount)
+
+3. Profit Trend (Line)
+
+* X: Month
+* Y: SUM(Net_Profit)
+
+---
+
+---
+
+#  BUDGET vs ACTUAL
+
+## CHARTS
+
+1. Budget vs Actual (Combo)
+
+* X: Month
+* Bars: SUM(Actual_Amount)
+* Line: SUM(Budget_Amount)
+
+2. Variance Analysis (Bar)
+
+* X: Department
+* Y: SUM(Variance)
+
+3. Achievement % (Heatmap)
+
+* X: Legal_Entity
+* Y: Month
+* Value: AVG(Variance_%)
+
+---
+
+---
+
+#  COST ANALYSIS
+
+## CHARTS
+
+1. Cost by Cost Center (Bar)
+
+* X: Cost_Center_Name
+* Y: SUM(Operating_Expense)
+
+2. Fixed vs Variable Cost (Donut)
+
+* Category: Cost_Type
+* Value: SUM(Allocated_Cost)
+
+3. Cost Trend (Line)
+
+* X: Month
+* Y: SUM(Operating_Expense)
+
+---
+
+---
+
+# CASH FLOW & AR/AP
+
+## CHARTS
+
+1. Cash Flow Trend (Line)
+
+* X: Month
+* Y: SUM(Net_Cash_Flow)
+
+2. Cash Inflow vs Outflow (Bar)
+
+* X: Month
+* Y1: SUM(Cash_Inflow)
+* Y2: SUM(Cash_Outflow)
+
+3. AR Aging (Bar)
+
+* X: Days_Past_Due bucket
+* Y: SUM(Outstanding_Amount)
+
+4. AP Analysis (Table)
+
+* Vendor_ID, Outstanding, Due_Date
+
+---
+
+---
+
+# RISK & ANOMALY DASHBOARD
+
+## CHARTS
+
+1. High Cost Units (Bar)
+
+* X: Cost_Center_Name
+* Y: SUM(Operating_Expense)
+* Filter: High_Cost_Flag = Yes
+
+2. Loss Making Units (Bar)
+
+* X: Profit_Center_Name
+* Y: SUM(Net_Profit)
+* Filter: Loss_Making_Unit = Yes
+
+3. Budget Exceeded (Table)
+
+* Department, Variance, Variance_%
+
+---
+
+---
+
+# 🧠 GLOBAL FILTERS
+
+* Fiscal Year
+* Quarter
+* Legal Entity
+* Region
+* Cost Center
+
+---
+
+# 🔥 INTERACTIONS
+
+* Click → cross-filter across all pages
+* Drill-down:
+
+  * Legal Entity → Business Unit → Department
+  * Month → Week
+* Tooltips:
+
+  * Revenue, Cost, Profit, Variance %
+
+---
+
+# 🧱 TECHNICAL REQUIREMENTS
+
+* Use queryBuilder.js (NO frontend aggregation)
+* Use backend `/query`
+* Use dataAdapter.js only for formatting
+* Maintain columns + rows response
+
+---
+
+# 🧪 VALIDATION
+
+* KPI accuracy verified
+* Drill-down works
+* Filters apply globally
+* No frontend aggregation
+* Performance optimized
+
+---
+
+# 📦 OUTPUT REQUIRED
+
+1. Finance template configuration JSON
+2. Chart definitions per page
+3. Query mappings
+4. KPI definitions
+5. Filter configuration
+
+---
+
+# 🚀 FINAL GOAL
+
+Transform finance data into:
+
+"CFO-ready decision dashboard with full financial visibility"
