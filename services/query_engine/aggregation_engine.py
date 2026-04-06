@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import heapq
 from typing import Any
 
 
@@ -120,9 +121,18 @@ def aggregate_rows(
     reverse = str(sort_order).lower() != "asc"
 
     if sort_key:
-        results.sort(key=lambda r: (r.get(sort_key) is None, r.get(sort_key, 0)), reverse=reverse)
+        key_fn = lambda r: (r.get(sort_key) is None, r.get(sort_key, 0))
 
-    if isinstance(limit, int) and limit > 0:
+        if isinstance(limit, int) and limit > 0 and len(results) > limit:
+            if reverse:
+                results = heapq.nlargest(limit, results, key=key_fn)
+            else:
+                results = heapq.nsmallest(limit, results, key=key_fn)
+        else:
+            results.sort(key=key_fn, reverse=reverse)
+            if isinstance(limit, int) and limit > 0:
+                results = results[:limit]
+    elif isinstance(limit, int) and limit > 0:
         results = results[:limit]
 
     return results

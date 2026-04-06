@@ -17,25 +17,95 @@ from services.query_engine.aggregation_engine import (
 from services.query_engine.filter_engine import apply_filters
 
 
-def _extract_table_rows(document: dict, base_table: str) -> dict[str, list[dict]]:
-    tables: dict[str, list[dict]] = {base_table: [r for r in (document.get("data") or []) if isinstance(r, dict)]}
+def _table_field_name(field: str) -> tuple[str | None, str]:
+    text = str(field or "").strip()
+    if "." not in text:
+        return None, text
+    table, name = text.split(".", 1)
+    return (table or None), name
+
+
+def _project_row(row: dict, allowed_fields: set[str] | None) -> dict:
+    if not isinstance(row, dict):
+        return {}
+    if not allowed_fields:
+        return row
+    return {field: row.get(field) for field in allowed_fields if field in row}
+
+
+def _collect_required_fields_by_table(normalized_query: dict, relationship_plan: dict, base_table: str) -> dict[str, set[str]]:
+    required: dict[str, set[str]] = defaultdict(set)
+
+    for dim in normalized_query.get("dimensions") or []:
+        field = dim.get("field")
+        if not field:
+            continue
+        table = dim.get("table") or base_table
+        required[table].add(field)
+
+    for measure in normalized_query.get("measures") or []:
+        field = measure.get("field")
+        if not field or field == "__count__":
+            continue
+        table = measure.get("table") or base_table
+        if "." in str(field):
+            parsed_table, parsed_field = _table_field_name(field)
+            required[parsed_table or table].add(parsed_field)
+        else:
+            required[table].add(field)
+
+    for flt in normalized_query.get("filters") or []:
+        field = flt.get("field")
+        if not field:
+            continue
+        table = flt.get("table") or base_table
+        required[table].add(field)
+
+    for join in relationship_plan.get("joins") or []:
+        from_table = join.get("from_table") or base_table
+        to_table = join.get("to_table") or base_table
+        from_column = join.get("from_column")
+        to_column = join.get("to_column")
+        if from_column:
+            required[from_table].add(from_column)
+        if to_column:
+            required[to_table].add(to_column)
+
+    return required
+
+
+def _extract_table_rows(document: dict, base_table: str, required_fields_by_table: dict[str, set[str]] | None = None) -> dict[str, list[dict]]:
+    base_required = (required_fields_by_table or {}).get(base_table)
+    tables: dict[str, list[dict]] = {
+        base_table: [
+            _project_row(r, base_required)
+            for r in (document.get("data") or [])
+            if isinstance(r, dict)
+        ]
+    }
 
     metadata = document.get("metadata") or {}
     explicit = metadata.get("table_data") or document.get("table_data") or {}
     if isinstance(explicit, dict):
         for table_name, rows in explicit.items():
             if isinstance(rows, list):
-                tables[table_name] = [r for r in rows if isinstance(r, dict)]
+                allowed_fields = (required_fields_by_table or {}).get(table_name)
+                tables[table_name] = [
+                    _project_row(r, allowed_fields)
+                    for r in rows
+                    if isinstance(r, dict)
+                ]
 
     return tables
 
 
 def _join_rows(rows_by_table: dict[str, list[dict]], base_table: str, joins: list[dict]) -> list[dict]:
-    base_rows = [dict(r) for r in (rows_by_table.get(base_table) or [])]
+    base_rows = rows_by_table.get(base_table) or []
     if not joins:
         return base_rows
 
     result_rows = base_rows
+    index_cache: dict[tuple[str, str], dict[str, list[dict]]] = {}
 
     for join in joins:
         from_table = join.get("from_table")
@@ -52,9 +122,13 @@ def _join_rows(rows_by_table: dict[str, list[dict]], base_table: str, joins: lis
             from_column, to_column = to_column, from_column
 
         target_rows = rows_by_table.get(to_table) or []
-        index = defaultdict(list)
-        for tr in target_rows:
-            index[str(tr.get(to_column))].append(tr)
+        index_key = (str(to_table), str(to_column))
+        index = index_cache.get(index_key)
+        if index is None:
+            index = defaultdict(list)
+            for tr in target_rows:
+                index[str(tr.get(to_column))].append(tr)
+            index_cache[index_key] = index
 
         next_rows = []
         for row in result_rows:
@@ -64,7 +138,7 @@ def _join_rows(rows_by_table: dict[str, list[dict]], base_table: str, joins: lis
 
             matches = index.get(str(left_value)) or []
             if not matches:
-                next_rows.append(dict(row))
+                next_rows.append(row)
                 continue
 
             for match in matches:
@@ -200,7 +274,8 @@ def execute_aggregation(
     semantic_types: dict[str, str],
 ) -> dict:
     base_table = relationship_plan.get("baseTable") or "dataset"
-    rows_by_table = _extract_table_rows(document, base_table)
+    required_fields_by_table = _collect_required_fields_by_table(normalized_query, relationship_plan, base_table)
+    rows_by_table = _extract_table_rows(document, base_table, required_fields_by_table=required_fields_by_table)
 
     joined_rows = _join_rows(rows_by_table, base_table, relationship_plan.get("joins") or [])
 
@@ -311,17 +386,13 @@ def execute_aggregation(
         measures=aggregation_specs,
         sort_by=None,
         sort_order=sort.get("order") or "desc",
-        limit=None,
+        limit=normalized_query.get("limit"),
     )
 
     columns = [*dimension_fields, *[m["alias"] for m in aggregation_specs]]
     types_map = {field: "number" if semantic_types.get(field) == "numeric" else "categorical" for field in dimension_fields}
     for m in aggregation_specs:
         types_map[m["alias"]] = "number"
-
-    limit = normalized_query.get("limit")
-    if isinstance(limit, int) and limit > 0 and not measure_plan:
-        aggregated_rows = aggregated_rows[:limit]
 
     return {
         "columns": columns,

@@ -3,6 +3,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+_OP_ALIASES = {
+    "=": "EQUALS",
+    "==": "EQUALS",
+    "!=": "NOT_EQUALS",
+    "<>": "NOT_EQUALS",
+    ">": "GT",
+    ">=": "GTE",
+    "<": "LT",
+    "<=": "LTE",
+}
+
+
+def _canonical_operator(operator: str | None) -> str:
+    op = (operator or "").upper()
+    return _OP_ALIASES.get(op, op)
+
 
 def _to_number(value: Any):
     if value is None:
@@ -43,17 +59,7 @@ def _to_datetime(value: Any):
 
 
 def _match_operator(value: Any, operator: str, expected: Any) -> bool:
-    op = (operator or "").upper()
-    op = {
-        "=": "EQUALS",
-        "==": "EQUALS",
-        "!=": "NOT_EQUALS",
-        "<>": "NOT_EQUALS",
-        ">": "GT",
-        ">=": "GTE",
-        "<": "LT",
-        "<=": "LTE",
-    }.get(op, op)
+    op = _canonical_operator(operator)
 
     if op == "IS_EMPTY":
         return value is None or str(value).strip() == ""
@@ -143,6 +149,46 @@ def _match_operator(value: Any, operator: str, expected: Any) -> bool:
     return True
 
 
+def _compile_filter(filter_obj: dict) -> dict:
+    op = _canonical_operator(filter_obj.get("operator"))
+    value = filter_obj.get("value")
+
+    compiled = {
+        "field": filter_obj.get("field"),
+        "operator": op,
+        "value": value,
+    }
+
+    if op in {"IN", "NOT_IN"}:
+        expected_values = value if isinstance(value, list) else [value]
+        compiled["expected_set"] = {
+            str(v).strip().lower()
+            for v in expected_values
+            if v is not None
+        }
+
+    return compiled
+
+
+def _match_compiled_filter(row: dict, compiled_filter: dict) -> bool:
+    field = compiled_filter.get("field")
+    value = row.get(field)
+    op = compiled_filter.get("operator")
+
+    if op in {"IN", "NOT_IN"}:
+        expected_set = compiled_filter.get("expected_set") or set()
+        left_text = "" if value is None else str(value).strip().lower()
+        if op == "IN":
+            return left_text in expected_set if expected_set else True
+        return left_text not in expected_set if expected_set else True
+
+    return _match_operator(
+        value=value,
+        operator=op,
+        expected=compiled_filter.get("value"),
+    )
+
+
 def apply_filters(rows: list[dict], filters: list[dict] | None) -> list[dict]:
     if not filters:
         return rows
@@ -151,18 +197,13 @@ def apply_filters(rows: list[dict], filters: list[dict] | None) -> list[dict]:
     if not safe_filters:
         return rows
 
+    compiled_filters = [_compile_filter(flt) for flt in safe_filters]
+
     out = []
     for row in rows:
         keep = True
-        for flt in safe_filters:
-            field = flt.get("field")
-            value = row.get(field)
-
-            if not _match_operator(
-                value=value,
-                operator=flt.get("operator"),
-                expected=flt.get("value"),
-            ):
+        for flt in compiled_filters:
+            if not _match_compiled_filter(row, flt):
                 keep = False
                 break
 

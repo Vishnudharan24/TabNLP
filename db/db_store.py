@@ -1,4 +1,5 @@
 import os
+import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -24,6 +25,47 @@ reports_collection = db["reports"]
 report_shares_collection = db["report_shares"]
 
 _indexes_initialized = False
+
+
+def _extract_dataset_rows(document: dict | None):
+    if not isinstance(document, dict):
+        return []
+
+    primary_rows = document.get("data")
+    if isinstance(primary_rows, list):
+        return primary_rows
+
+    legacy_rows = document.get("rows")
+    if isinstance(legacy_rows, list):
+        return legacy_rows
+
+    legacy_records = document.get("records")
+    if isinstance(legacy_records, list):
+        return legacy_records
+
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    metadata_rows = metadata.get("rows")
+    if isinstance(metadata_rows, list):
+        return metadata_rows
+
+    return []
+
+
+def _normalize_dataset_document(document: dict | None):
+    if not isinstance(document, dict):
+        return document
+
+    normalized = dict(document)
+    rows = _extract_dataset_rows(normalized)
+    normalized["data"] = rows
+
+    metadata = normalized.get("metadata")
+    if isinstance(metadata, dict):
+        normalized_metadata = dict(metadata)
+        normalized_metadata["row_count"] = len(rows)
+        normalized["metadata"] = normalized_metadata
+
+    return normalized
 
 
 async def ensure_indexes():
@@ -198,14 +240,14 @@ async def unset_source_config_fields(source_id: str, owner_user_id: str, fields:
 
 async def list_latest_datasets(owner_user_id: str, limit: int = 100):
     own_cursor = collection.find({"owner_user_id": owner_user_id, "is_latest": True}).sort("ingested_at", -1).limit(limit)
-    own_docs = await own_cursor.to_list(length=limit)
+    own_docs = [_normalize_dataset_document(doc) for doc in await own_cursor.to_list(length=limit)]
     shared_docs = await _list_shared_datasets_for_recipient(owner_user_id, latest_only=True)
     return _merge_and_sort_datasets(own_docs, shared_docs, limit=limit)
 
 
 async def list_datasets(owner_user_id: str, limit: int = 1000):
     own_cursor = collection.find({"owner_user_id": owner_user_id}).sort([("ingested_at", -1)]).limit(limit)
-    own_docs = await own_cursor.to_list(length=limit)
+    own_docs = [_normalize_dataset_document(doc) for doc in await own_cursor.to_list(length=limit)]
     shared_docs = await _list_shared_datasets_for_recipient(owner_user_id, latest_only=False)
     return _merge_and_sort_datasets(own_docs, shared_docs, limit=limit)
 
@@ -216,24 +258,65 @@ async def get_latest_dataset_by_source(source_id: str, owner_user_id: str):
         sort=[("ingested_at", -1)],
     )
     if own_doc:
-        return own_doc
+        return _normalize_dataset_document(own_doc)
 
     shared_docs = await _list_shared_datasets_for_recipient(owner_user_id, latest_only=True)
     matching = [doc for doc in shared_docs if str(doc.get("source_key") or "") == str(source_id or "")]
     if not matching:
         return None
     matching.sort(key=lambda item: item.get("ingested_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    return matching[0]
+    return _normalize_dataset_document(matching[0])
 
 
 async def get_dataset_by_id(document_id: str, owner_user_id: str):
     if ObjectId.is_valid(document_id):
         own_doc = await collection.find_one({"_id": ObjectId(document_id), "owner_user_id": owner_user_id})
         if own_doc:
-            return own_doc
+            return _normalize_dataset_document(own_doc)
 
     shared_doc = await _resolve_shared_dataset_for_recipient(owner_user_id, document_id)
-    return shared_doc
+    return _normalize_dataset_document(shared_doc)
+
+
+async def delete_dataset_by_id(document_id: str, owner_user_id: str):
+    if not ObjectId.is_valid(document_id):
+        return {
+            "deleted_count": 0,
+            "source_key": None,
+            "promoted_latest_document_id": None,
+        }
+
+    target = await collection.find_one({"_id": ObjectId(document_id), "owner_user_id": owner_user_id})
+    if not target:
+        return {
+            "deleted_count": 0,
+            "source_key": None,
+            "promoted_latest_document_id": None,
+        }
+
+    source_key = str(target.get("source_key") or "")
+    was_latest = bool(target.get("is_latest"))
+
+    delete_result = await collection.delete_one({"_id": target.get("_id"), "owner_user_id": owner_user_id})
+
+    promoted_latest_document_id = None
+    if delete_result.deleted_count > 0 and was_latest and source_key:
+        candidate = await collection.find_one(
+            {"owner_user_id": owner_user_id, "source_key": source_key},
+            sort=[("ingested_at", -1)],
+        )
+        if candidate:
+            await collection.update_one(
+                {"_id": candidate.get("_id"), "owner_user_id": owner_user_id},
+                {"$set": {"is_latest": True}},
+            )
+            promoted_latest_document_id = str(candidate.get("_id"))
+
+    return {
+        "deleted_count": int(delete_result.deleted_count),
+        "source_key": source_key or None,
+        "promoted_latest_document_id": promoted_latest_document_id,
+    }
 
 
 async def get_dataset_for_query(dataset_id: str, owner_user_id: str):
@@ -246,25 +329,25 @@ async def get_dataset_for_query(dataset_id: str, owner_user_id: str):
     if ObjectId.is_valid(dataset_id):
         by_id = await collection.find_one({"_id": ObjectId(dataset_id), "owner_user_id": owner_user_id})
         if by_id:
-            return by_id
+            return _normalize_dataset_document(by_id)
 
     by_source_key_latest = await collection.find_one(
         {"owner_user_id": owner_user_id, "source_key": dataset_id, "is_latest": True},
         sort=[("ingested_at", -1)],
     )
     if by_source_key_latest:
-        return by_source_key_latest
+        return _normalize_dataset_document(by_source_key_latest)
 
     by_source_id_latest = await collection.find_one(
         {"owner_user_id": owner_user_id, "source_id": dataset_id, "is_latest": True},
         sort=[("ingested_at", -1)],
     )
     if by_source_id_latest:
-        return by_source_id_latest
+        return _normalize_dataset_document(by_source_id_latest)
 
     shared_doc = await _resolve_shared_dataset_for_recipient(owner_user_id, dataset_id)
     if shared_doc:
-        return shared_doc
+        return _normalize_dataset_document(shared_doc)
 
     return None
 
@@ -339,16 +422,28 @@ async def _list_shared_datasets_for_recipient(recipient_user_id: str, latest_onl
 
     resolved_docs = []
     seen_ids = set()
+
+    semaphore = asyncio.Semaphore(24)
+
+    async def _resolve_single(owner_user_id: str, dataset_id: str):
+        async with semaphore:
+            return await _resolve_dataset_for_owner(dataset_id, owner_user_id, latest_only=latest_only)
+
+    tasks = []
     for owner_user_id, dataset_ids in owner_to_dataset_ids.items():
         for dataset_id in dataset_ids:
-            doc = await _resolve_dataset_for_owner(dataset_id, owner_user_id, latest_only=latest_only)
-            if not doc:
+            tasks.append(_resolve_single(owner_user_id, dataset_id))
+
+    if tasks:
+        resolved_items = await asyncio.gather(*tasks, return_exceptions=True)
+        for doc in resolved_items:
+            if not doc or isinstance(doc, Exception):
                 continue
             key = str(doc.get("_id"))
             if key in seen_ids:
                 continue
             seen_ids.add(key)
-            resolved_docs.append(doc)
+            resolved_docs.append(_normalize_dataset_document(doc))
 
     return resolved_docs
 
@@ -364,7 +459,7 @@ async def _resolve_dataset_for_owner(dataset_id: str, owner_user_id: str, latest
             query["is_latest"] = True
         by_id = await collection.find_one(query)
         if by_id:
-            return by_id
+            return _normalize_dataset_document(by_id)
 
     source_query_base = {"owner_user_id": owner_user_id, "source_key": dataset_key}
     source_id_query_base = {"owner_user_id": owner_user_id, "source_id": dataset_key}
@@ -374,11 +469,11 @@ async def _resolve_dataset_for_owner(dataset_id: str, owner_user_id: str, latest
 
     by_source_key = await collection.find_one(source_query_base, sort=[("ingested_at", -1)])
     if by_source_key:
-        return by_source_key
+        return _normalize_dataset_document(by_source_key)
 
     by_source_id = await collection.find_one(source_id_query_base, sort=[("ingested_at", -1)])
     if by_source_id:
-        return by_source_id
+        return _normalize_dataset_document(by_source_id)
 
     return None
 

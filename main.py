@@ -1,6 +1,7 @@
 import asyncio
 import os
 import math
+import time
 import mimetypes
 import logging
 import base64
@@ -33,6 +34,7 @@ from services.chart.visualization_engine import (
     generate_chart_config,
 )
 from services.query_engine import run_query
+from services.query_engine import get_query_runtime_stats
 from services.query_pipeline import QueryEngineError
 from services.semantic_layer import (
     set_measure,
@@ -51,6 +53,7 @@ from db.db_store import (
     list_latest_datasets,
     get_latest_dataset_by_source,
     get_dataset_by_id,
+    delete_dataset_by_id,
     get_dataset_for_query,
     store_dataset,
     create_user,
@@ -298,11 +301,25 @@ def _serialize_dataset(document: dict):
     if not document:
         return None
 
+    rows = []
+    if isinstance(document.get("data"), list):
+        rows = document.get("data")
+    elif isinstance(document.get("rows"), list):
+        rows = document.get("rows")
+    elif isinstance(document.get("records"), list):
+        rows = document.get("records")
+
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    normalized_metadata = dict(metadata)
+    normalized_metadata["row_count"] = len(rows)
+
     serialized = {
         key: value
         for key, value in document.items()
         if key != "_id"
     }
+    serialized["data"] = rows
+    serialized["metadata"] = normalized_metadata
     serialized["document_id"] = str(document.get("_id"))
     return _to_json_safe(serialized)
 
@@ -1230,6 +1247,36 @@ async def get_dataset_document(document_id: str, current_user: Annotated[dict, D
         _raise_internal_error("Failed to fetch dataset", e)
 
 
+@app.put("/datasets/{document_id}/delete")
+async def delete_dataset_document(document_id: str, current_user: Annotated[dict, Depends(_require_current_user)]):
+    try:
+        owner_user_id = str(current_user.get("_id"))
+        result = await delete_dataset_by_id(document_id, owner_user_id=owner_user_id)
+        if int(result.get("deleted_count") or 0) == 0:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {document_id}")
+
+        clear_dataset_cache(document_id)
+
+        promoted_latest_document_id = result.get("promoted_latest_document_id")
+        if promoted_latest_document_id:
+            clear_dataset_cache(promoted_latest_document_id)
+
+        source_key = result.get("source_key")
+        if source_key:
+            clear_dataset_cache(str(source_key))
+
+        return {
+            "status": "success",
+            "deleted_document_id": document_id,
+            "promoted_latest_document_id": promoted_latest_document_id,
+            "source_key": source_key,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _raise_internal_error("Failed to delete dataset", e)
+
+
 async def _run_hr_analytics_module(module: str, payload: HrAnalyticsRequest):
     try:
         return {
@@ -1277,6 +1324,7 @@ async def query_data(
     reportId: Optional[str] = None,
     shareToken: Optional[str] = None,
 ):
+    started_at = time.perf_counter()
     try:
         owner_user_id = str(current_user.get("_id"))
 
@@ -1300,6 +1348,16 @@ async def query_data(
             owner_user_id = str(report_doc.get("owner_user_id") or "").strip() or owner_user_id
 
         response = await run_query(payload.model_dump(exclude_none=True), owner_user_id=owner_user_id)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "query.completed dataset_id=%s chart_type=%s rows=%s filtered_rows=%s cache_hit=%s elapsed_ms=%s",
+            str(payload.datasetId or ""),
+            str(payload.chartType or ""),
+            len(response.get("rows") or []) if isinstance(response, dict) else 0,
+            (response.get("filteredRowCount") if isinstance(response, dict) else None),
+            (response.get("meta") or {}).get("cacheHit") if isinstance(response, dict) else None,
+            elapsed_ms,
+        )
         return _to_json_safe(response)
     except QueryEngineError as e:
         return JSONResponse(status_code=400, content=e.to_dict())
@@ -1404,6 +1462,19 @@ async def query_export(
                 }
             },
         )
+
+
+@app.get("/health/query-runtime")
+async def get_query_runtime_health(_current_user: Annotated[dict, Depends(_require_current_user)]):
+    try:
+        stats = get_query_runtime_stats()
+        return {
+            "status": "success",
+            "runtime": stats,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        _raise_internal_error("Failed to fetch query runtime health", e)
 
 
 @app.post("/semantic/measures")
