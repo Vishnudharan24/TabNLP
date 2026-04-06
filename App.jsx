@@ -462,7 +462,11 @@ const getDatasetFileNameFromMetadata = (dataset) => (
 );
 
 const mapBackendDatasetToAppDataset = (item) => {
-    const rows = Array.isArray(item?.data) ? item.data : [];
+    const rows = Array.isArray(item?.data)
+        ? item.data
+        : (Array.isArray(item?.rows)
+            ? item.rows
+            : (Array.isArray(item?.records) ? item.records : []));
     const detectedColumns = rows[0] ? Object.keys(rows[0]) : [];
     const metadata = item?.metadata || null;
     const declaredTypes = metadata?.column_types || {};
@@ -1516,6 +1520,39 @@ const App = () => {
         }
     };
 
+    const handleRemoveDataset = async (datasetId) => {
+        const target = datasets.find((d) => d.id === datasetId);
+        if (!target) return;
+
+        const displayName = getDatasetFileNameFromMetadata(target) || target.name || 'dataset';
+        const confirmed = window.confirm(`Delete dataset "${displayName}"? This removes it from Data Hub and backend storage.`);
+        if (!confirmed) return;
+
+        if (target?._meta?.backend && target?._meta?.documentId) {
+            try {
+                await backendApi.deleteDatasetByDocumentId(target._meta.documentId);
+            } catch (error) {
+                window.alert(error?.message || 'Failed to delete dataset from backend.');
+                return;
+            }
+        }
+
+        setCharts((prev) => prev.filter((chart) => chart.datasetId !== datasetId));
+        setGlobalFilters((prev) => prev.filter((f) => f?.datasetId !== datasetId));
+        setDatasets((prev) => {
+            const updated = prev.filter((d) => d.id !== datasetId);
+            if (selectedDatasetId === datasetId) {
+                setSelectedDatasetId(updated[0]?.id || '');
+            }
+            return updated;
+        });
+
+        if (previewDatasetId === datasetId) setPreviewDatasetId(null);
+        if (profilerDatasetId === datasetId) setProfilerDatasetId(null);
+
+        window.alert('Dataset deleted successfully.');
+    };
+
     const sharedTemplateRoute = parseTemplateSharedRouteContext(routePath, window.location.search || '');
     const isSharedTemplateRoute = Boolean(sharedTemplateRoute?.reportId && sharedTemplateRoute?.shareToken);
     const currentTourPageKey = useMemo(() => resolveTourPageKey({
@@ -1605,7 +1642,7 @@ const App = () => {
                         onRenameCompany={handleRenameCompany}
                         onAssignDatasetCompany={handleAssignDatasetCompany}
                         onAddDataset={ds => { setDatasets(p => [...p, ds]); setSelectedDatasetId(ds.id); }}
-                        onRemoveDataset={id => setDatasets(p => p.filter(d => d.id !== id))}
+                        onRemoveDataset={handleRemoveDataset}
                         onPreviewDataset={id => setPreviewDatasetId(id)}
                         onOpenMerge={() => setShowMerger(true)}
                         onProfileDataset={id => setProfilerDatasetId(id)}
