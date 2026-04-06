@@ -7,6 +7,7 @@ import { buildQuery } from '../../services/queryBuilder';
 import { adaptQueryResponse } from '../../services/dataAdapter';
 import { buildChartOption } from '../../services/echartsOptionBuilder';
 import { ChartType } from '../../types';
+import RecipientEmailsModal from '../RecipientEmailsModal';
 
 const FINANCE_CHARTS = [
     { id: 'revenue_profit_trend', page: 'executive', title: 'Revenue vs Profit Trend', type: ChartType.LINE, dimension: 'Month', dimensionRole: 'time', measures: [
@@ -779,6 +780,7 @@ const FinanceTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedV
     const [interactionFilter, setInteractionFilter] = useState(null);
     const [drillState, setDrillState] = useState({ entity: [], time: [] });
     const [isSharingDashboard, setIsSharingDashboard] = useState(false);
+    const [showRecipientEmailsModal, setShowRecipientEmailsModal] = useState(false);
 
     const mappedField = useMemo(() => (logicalField) => {
         const mapped = mapping?.[logicalField];
@@ -827,20 +829,12 @@ const FinanceTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedV
         return filters;
     }, [globalFilters, interactionFilter, mappedField, datasetId]);
 
-    const shareDashboard = async () => {
+    const shareDashboardWithRecipients = async (recipientEmails = []) => {
         if (isSharedView || isSharingDashboard) return;
         if (!mapping || !datasetId) {
             globalThis.alert?.('Dashboard data is not ready to share yet.');
             return;
         }
-
-        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
-        const recipientEmails = Array.from(new Set(
-            String(rawRecipients || '')
-                .split(',')
-                .map((item) => String(item || '').trim().toLowerCase())
-                .filter(Boolean)
-        ));
         if (recipientEmails.length === 0) {
             globalThis.alert?.('Please add at least one recipient email.');
             return;
@@ -904,6 +898,16 @@ const FinanceTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedV
         } finally {
             setIsSharingDashboard(false);
         }
+    };
+
+    const shareDashboard = () => {
+        if (isSharedView || isSharingDashboard) return;
+        if (!mapping || !datasetId) {
+            globalThis.alert?.('Dashboard data is not ready to share yet.');
+            return;
+        }
+
+        setShowRecipientEmailsModal(true);
     };
 
     useEffect(() => {
@@ -1169,6 +1173,19 @@ const FinanceTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedV
                     </div>
                 </>
             ) : null}
+
+            <RecipientEmailsModal
+                isOpen={showRecipientEmailsModal}
+                isSubmitting={isSharingDashboard}
+                title="Share Finance Dashboard"
+                description="Enter recipient emails (comma separated) to generate a share link."
+                confirmLabel="Generate Link"
+                onClose={() => setShowRecipientEmailsModal(false)}
+                onSubmit={async (recipientEmails) => {
+                    setShowRecipientEmailsModal(false);
+                    await shareDashboardWithRecipients(recipientEmails);
+                }}
+            />
         </section>
     );
 };

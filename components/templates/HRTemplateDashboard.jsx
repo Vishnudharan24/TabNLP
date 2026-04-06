@@ -6,6 +6,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { backendApi } from '../../services/backendApi';
 import { ChartType } from '../../types';
 import { buildChartOption } from '../../services/echartsOptionBuilder';
+import RecipientEmailsModal from '../RecipientEmailsModal';
 
 const MODULES = [
     'summary',
@@ -1655,22 +1656,15 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
     const [exportAllLoading, setExportAllLoading] = useState(false);
     const [exportAllError, setExportAllError] = useState('');
     const [isSharingDashboard, setIsSharingDashboard] = useState(false);
+    const [showRecipientEmailsModal, setShowRecipientEmailsModal] = useState(false);
     const chartRefs = useRef(new Map());
 
-    const shareDashboard = useCallback(async () => {
+    const shareDashboardWithRecipients = useCallback(async (recipientEmails = []) => {
         if (isSharedView || isSharingDashboard) return;
         if (!mapping || !Array.isArray(datasetData) || datasetData.length === 0) {
             globalThis.alert?.('Dashboard data is not ready to share yet.');
             return;
         }
-
-        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
-        const recipientEmails = Array.from(new Set(
-            String(rawRecipients || '')
-                .split(',')
-                .map((item) => String(item || '').trim().toLowerCase())
-                .filter(Boolean)
-        ));
         if (recipientEmails.length === 0) {
             globalThis.alert?.('Please add at least one recipient email.');
             return;
@@ -1730,6 +1724,16 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
             setIsSharingDashboard(false);
         }
     }, [isSharedView, isSharingDashboard, mapping, datasetData, id, mappingMissingFields]);
+
+    const shareDashboard = useCallback(() => {
+        if (isSharedView || isSharingDashboard) return;
+        if (!mapping || !Array.isArray(datasetData) || datasetData.length === 0) {
+            globalThis.alert?.('Dashboard data is not ready to share yet.');
+            return;
+        }
+
+        setShowRecipientEmailsModal(true);
+    }, [isSharedView, isSharingDashboard, mapping, datasetData]);
 
     const registerChartRef = useCallback((title, key = title) => (ref) => {
         if (!title) return;
@@ -2160,6 +2164,19 @@ const HRTemplateDashboard = ({ sessionByTemplate, datasetData = [], isSharedView
                     />
                 </>
             )}
+
+            <RecipientEmailsModal
+                isOpen={showRecipientEmailsModal}
+                isSubmitting={isSharingDashboard}
+                title="Share HR Dashboard"
+                description="Enter recipient emails (comma separated) to generate a share link."
+                confirmLabel="Generate Link"
+                onClose={() => setShowRecipientEmailsModal(false)}
+                onSubmit={async (recipientEmails) => {
+                    setShowRecipientEmailsModal(false);
+                    await shareDashboardWithRecipients(recipientEmails);
+                }}
+            />
         </section>
     );
 };

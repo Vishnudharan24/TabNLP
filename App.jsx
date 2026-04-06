@@ -14,6 +14,7 @@ import DataMerger from './components/DataMerger';
 import DataProfiler from './components/DataProfiler';
 import RelationshipDiagram from './components/RelationshipDiagram';
 import SourceConfigIngestionPage from './components/SourceConfigIngestionPage';
+import RecipientEmailsModal from './components/RecipientEmailsModal';
 import AuthScreen from './components/AuthScreen';
 import OrgChartPage from './pages/OrgChartPage.jsx';
 import TemplateRoutes from './pages/TemplateRoutes';
@@ -524,6 +525,7 @@ const App = () => {
     const [isExportingPpt, setIsExportingPpt] = useState(false);
     const [showShareExportPopup, setShowShareExportPopup] = useState(false);
     const [showReportSettingsPopup, setShowReportSettingsPopup] = useState(false);
+    const [showRecipientEmailsModal, setShowRecipientEmailsModal] = useState(false);
     const [exportScope, setExportScope] = useState('active');
     const [chartClarityMode, setChartClarityMode] = useState('standard');
     const [chartPaletteMode, setChartPaletteMode] = useState('vibrant');
@@ -957,21 +959,8 @@ const App = () => {
         setTimeout(() => setIsSaving(false), 800);
     };
 
-    const handleShareDashboard = async () => {
+    const handleShareDashboardWithRecipients = async (recipientEmails = []) => {
         if (isSharing || isSharedView) return;
-
-        if (!Array.isArray(charts) || charts.length === 0) {
-            window.alert('Add at least one visual before creating a share link.');
-            return;
-        }
-
-        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
-        const recipientEmails = Array.from(new Set(
-            String(rawRecipients || '')
-                .split(',')
-                .map((item) => String(item || '').trim().toLowerCase())
-                .filter(Boolean)
-        ));
         if (recipientEmails.length === 0) {
             globalThis.alert?.('Please add at least one recipient email.');
             return;
@@ -1029,6 +1018,17 @@ const App = () => {
         } finally {
             setIsSharing(false);
         }
+    };
+
+    const handleShareDashboard = () => {
+        if (isSharing || isSharedView) return;
+
+        if (!Array.isArray(charts) || charts.length === 0) {
+            window.alert('Add at least one visual before creating a share link.');
+            return;
+        }
+
+        setShowRecipientEmailsModal(true);
     };
 
     const getCurrentVisualElementsForExport = () => {
@@ -1959,6 +1959,19 @@ const App = () => {
                     </div>
                 </div>
             )}
+
+            <RecipientEmailsModal
+                isOpen={showRecipientEmailsModal}
+                isSubmitting={isSharing}
+                title="Share Report"
+                description="Enter recipient emails (comma separated) to generate a share link."
+                confirmLabel="Generate Link"
+                onClose={() => setShowRecipientEmailsModal(false)}
+                onSubmit={async (recipientEmails) => {
+                    setShowRecipientEmailsModal(false);
+                    await handleShareDashboardWithRecipients(recipientEmails);
+                }}
+            />
 
             {drillThroughContext && (
                 <div

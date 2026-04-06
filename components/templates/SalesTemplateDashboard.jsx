@@ -7,6 +7,7 @@ import { buildQuery } from '../../services/queryBuilder';
 import { adaptQueryResponse } from '../../services/dataAdapter';
 import { buildChartOption } from '../../services/echartsOptionBuilder';
 import { ChartType } from '../../types';
+import RecipientEmailsModal from '../RecipientEmailsModal';
 
 const SALES_CHARTS = [
     { id: 'revenue_trend', page: 'executive', title: 'Revenue Trend', type: ChartType.LINE, dimension: 'Month', dimensionRole: 'time', measure: 'Net_Revenue', aggregation: 'SUM' },
@@ -656,6 +657,7 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
     const [interactionFilter, setInteractionFilter] = useState(null);
     const [geoDrillPath, setGeoDrillPath] = useState([]);
     const [isSharingDashboard, setIsSharingDashboard] = useState(false);
+    const [showRecipientEmailsModal, setShowRecipientEmailsModal] = useState(false);
 
     const mappedField = useMemo(() => (logicalField) => {
         const mapped = mapping?.[logicalField];
@@ -704,20 +706,12 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
         return filters;
     }, [globalFilters, interactionFilter, mappedField, datasetId]);
 
-    const shareDashboard = async () => {
+    const shareDashboardWithRecipients = async (recipientEmails = []) => {
         if (isSharedView || isSharingDashboard) return;
         if (!mapping || !datasetId) {
             globalThis.alert?.('Dashboard data is not ready to share yet.');
             return;
         }
-
-        const rawRecipients = globalThis.prompt?.('Enter recipient emails (comma separated):', '') ?? '';
-        const recipientEmails = Array.from(new Set(
-            String(rawRecipients || '')
-                .split(',')
-                .map((item) => String(item || '').trim().toLowerCase())
-                .filter(Boolean)
-        ));
         if (recipientEmails.length === 0) {
             globalThis.alert?.('Please add at least one recipient email.');
             return;
@@ -781,6 +775,16 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
         } finally {
             setIsSharingDashboard(false);
         }
+    };
+
+    const shareDashboard = () => {
+        if (isSharedView || isSharingDashboard) return;
+        if (!mapping || !datasetId) {
+            globalThis.alert?.('Dashboard data is not ready to share yet.');
+            return;
+        }
+
+        setShowRecipientEmailsModal(true);
     };
 
     useEffect(() => {
@@ -968,6 +972,19 @@ const SalesTemplateDashboard = ({ sessionByTemplate, dataset = null, isSharedVie
                     )}
                 </>
             ) : null}
+
+            <RecipientEmailsModal
+                isOpen={showRecipientEmailsModal}
+                isSubmitting={isSharingDashboard}
+                title="Share Sales Dashboard"
+                description="Enter recipient emails (comma separated) to generate a share link."
+                confirmLabel="Generate Link"
+                onClose={() => setShowRecipientEmailsModal(false)}
+                onSubmit={async (recipientEmails) => {
+                    setShowRecipientEmailsModal(false);
+                    await shareDashboardWithRecipients(recipientEmails);
+                }}
+            />
         </section>
     );
 };
