@@ -1,5 +1,7 @@
 import os
 import asyncio
+import time
+from collections import OrderedDict
 from pathlib import Path
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -25,6 +27,94 @@ reports_collection = db["reports"]
 report_shares_collection = db["report_shares"]
 
 _indexes_initialized = False
+
+_DATASET_QUERY_CACHE_TTL_SECONDS = max(1, int(os.getenv("DATASET_QUERY_CACHE_TTL_SECONDS", "60")))
+_DATASET_QUERY_CACHE_MAX_ENTRIES = max(1, int(os.getenv("DATASET_QUERY_CACHE_MAX_ENTRIES", "128")))
+_DATASET_VERSIONED_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_DATASET_ALIAS_TO_VERSIONED_KEY: dict[str, str] = {}
+
+
+def _now_seconds() -> float:
+    return time.time()
+
+
+def _make_dataset_alias_key(owner_user_id: str, dataset_id: str) -> str:
+    return f"{str(owner_user_id)}::{str(dataset_id)}"
+
+
+def _make_dataset_versioned_key(owner_user_id: str, document: dict) -> str:
+    document_id = str(document.get("_id") or document.get("document_id") or "")
+    version = str(document.get("version") or document.get("ingested_at") or "latest")
+    return f"{str(owner_user_id)}::{document_id}::v::{version}"
+
+
+def _dataset_cache_prune_expired(now_seconds: float | None = None):
+    now_ts = _now_seconds() if now_seconds is None else now_seconds
+    expired_keys = []
+    for key, item in _DATASET_VERSIONED_CACHE.items():
+        if (now_ts - float(item.get("created_at") or 0.0)) > _DATASET_QUERY_CACHE_TTL_SECONDS:
+            expired_keys.append(key)
+
+    if not expired_keys:
+        return
+
+    for key in expired_keys:
+        _DATASET_VERSIONED_CACHE.pop(key, None)
+
+    expired_set = set(expired_keys)
+    stale_aliases = [alias for alias, versioned_key in _DATASET_ALIAS_TO_VERSIONED_KEY.items() if versioned_key in expired_set]
+    for alias in stale_aliases:
+        _DATASET_ALIAS_TO_VERSIONED_KEY.pop(alias, None)
+
+
+def _dataset_cache_get_by_alias(owner_user_id: str, dataset_id: str):
+    _dataset_cache_prune_expired()
+    alias_key = _make_dataset_alias_key(owner_user_id, dataset_id)
+    versioned_key = _DATASET_ALIAS_TO_VERSIONED_KEY.get(alias_key)
+    if not versioned_key:
+        return None
+
+    item = _DATASET_VERSIONED_CACHE.get(versioned_key)
+    if not item:
+        _DATASET_ALIAS_TO_VERSIONED_KEY.pop(alias_key, None)
+        return None
+
+    _DATASET_VERSIONED_CACHE.move_to_end(versioned_key)
+    return item.get("document")
+
+
+def _dataset_cache_set(owner_user_id: str, dataset_id: str, document: dict | None):
+    if not document:
+        return
+
+    _dataset_cache_prune_expired()
+    alias_key = _make_dataset_alias_key(owner_user_id, dataset_id)
+    versioned_key = _make_dataset_versioned_key(owner_user_id, document)
+
+    _DATASET_VERSIONED_CACHE[versioned_key] = {
+        "created_at": _now_seconds(),
+        "document": document,
+    }
+    _DATASET_VERSIONED_CACHE.move_to_end(versioned_key)
+    _DATASET_ALIAS_TO_VERSIONED_KEY[alias_key] = versioned_key
+
+    while len(_DATASET_VERSIONED_CACHE) > _DATASET_QUERY_CACHE_MAX_ENTRIES:
+        evicted_key, _ = _DATASET_VERSIONED_CACHE.popitem(last=False)
+        stale_aliases = [alias for alias, mapped_key in _DATASET_ALIAS_TO_VERSIONED_KEY.items() if mapped_key == evicted_key]
+        for alias in stale_aliases:
+            _DATASET_ALIAS_TO_VERSIONED_KEY.pop(alias, None)
+
+
+def _dataset_cache_invalidate_owner(owner_user_id: str):
+    owner_prefix = f"{str(owner_user_id)}::"
+
+    versioned_to_remove = [key for key in _DATASET_VERSIONED_CACHE.keys() if key.startswith(owner_prefix)]
+    for key in versioned_to_remove:
+        _DATASET_VERSIONED_CACHE.pop(key, None)
+
+    alias_to_remove = [key for key in _DATASET_ALIAS_TO_VERSIONED_KEY.keys() if key.startswith(owner_prefix)]
+    for key in alias_to_remove:
+        _DATASET_ALIAS_TO_VERSIONED_KEY.pop(key, None)
 
 
 def _extract_dataset_rows(document: dict | None):
@@ -196,6 +286,7 @@ async def store_dataset(metadata, df, source_id=None, owner_user_id: str | None 
     )
 
     insert_result = await collection.insert_one(document)
+    _dataset_cache_invalidate_owner(owner_user_id)
 
     return {
         "document_id": str(insert_result.inserted_id),
@@ -298,6 +389,8 @@ async def delete_dataset_by_id(document_id: str, owner_user_id: str):
     was_latest = bool(target.get("is_latest"))
 
     delete_result = await collection.delete_one({"_id": target.get("_id"), "owner_user_id": owner_user_id})
+    if delete_result.deleted_count > 0:
+        _dataset_cache_invalidate_owner(owner_user_id)
 
     promoted_latest_document_id = None
     if delete_result.deleted_count > 0 and was_latest and source_key:
@@ -326,28 +419,40 @@ async def get_dataset_for_query(dataset_id: str, owner_user_id: str):
     if not dataset_id:
         return None
 
+    cached = _dataset_cache_get_by_alias(owner_user_id, dataset_id)
+    if cached:
+        return cached
+
     if ObjectId.is_valid(dataset_id):
         by_id = await collection.find_one({"_id": ObjectId(dataset_id), "owner_user_id": owner_user_id})
         if by_id:
-            return _normalize_dataset_document(by_id)
+            normalized = _normalize_dataset_document(by_id)
+            _dataset_cache_set(owner_user_id, dataset_id, normalized)
+            return normalized
 
     by_source_key_latest = await collection.find_one(
         {"owner_user_id": owner_user_id, "source_key": dataset_id, "is_latest": True},
         sort=[("ingested_at", -1)],
     )
     if by_source_key_latest:
-        return _normalize_dataset_document(by_source_key_latest)
+        normalized = _normalize_dataset_document(by_source_key_latest)
+        _dataset_cache_set(owner_user_id, dataset_id, normalized)
+        return normalized
 
     by_source_id_latest = await collection.find_one(
         {"owner_user_id": owner_user_id, "source_id": dataset_id, "is_latest": True},
         sort=[("ingested_at", -1)],
     )
     if by_source_id_latest:
-        return _normalize_dataset_document(by_source_id_latest)
+        normalized = _normalize_dataset_document(by_source_id_latest)
+        _dataset_cache_set(owner_user_id, dataset_id, normalized)
+        return normalized
 
     shared_doc = await _resolve_shared_dataset_for_recipient(owner_user_id, dataset_id)
     if shared_doc:
-        return _normalize_dataset_document(shared_doc)
+        normalized = _normalize_dataset_document(shared_doc)
+        _dataset_cache_set(owner_user_id, dataset_id, normalized)
+        return normalized
 
     return None
 
